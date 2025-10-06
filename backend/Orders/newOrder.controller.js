@@ -447,6 +447,175 @@ const getOrders = async (req, res) => {
   }
 };
 
+const getShippingOrders = async (req, res) => {
+  try {
+    const {
+      id,
+      status,
+      searchQuery,
+      orderId,
+      awbNumber,
+      trackingId,
+      paymentType,
+      startDate,
+      endDate,
+    } = req.query;
+    // console.log("re",req.query)
+    let userId;
+    if (id) {
+      userId = id;
+    } else {
+      userId = req.user?._id || req.employee?._id;
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limitQuery = req.query.limit;
+    const limit =
+      limitQuery === "All" || !limitQuery ? null : parseInt(limitQuery);
+    const skip = limit ? (page - 1) * limit : 0;
+
+    const andConditions = [{ userId }];
+
+    // ✅ Exclude "New" and "Cancelled" orders
+    andConditions.push({
+      status: { $nin: ["new", "Cancelled"] },
+    });
+
+    // If specific statuses are requested, combine with exclusion rule
+    if (status && status !== "All") {
+      const statusArray = Array.isArray(status)
+        ? status
+        : status.split(",").map((s) => s.trim());
+
+      andConditions.push({
+        status: { $in: statusArray, $nin: ["new", "Cancelled"] },
+      });
+    }
+
+    if (searchQuery) {
+      andConditions.push({
+        $or: [
+          {
+            "receiverAddress.contactName": {
+              $regex: searchQuery,
+              $options: "i",
+            },
+          },
+          { "receiverAddress.email": { $regex: searchQuery, $options: "i" } },
+          {
+            "receiverAddress.phoneNumber": {
+              $regex: searchQuery,
+              $options: "i",
+            },
+          },
+        ],
+      });
+    }
+
+    if (orderId) {
+      const orderIdNum = parseInt(orderId);
+      if (!isNaN(orderIdNum)) {
+        andConditions.push({ orderId: orderIdNum });
+      }
+    }
+
+    if (awbNumber) {
+      andConditions.push({ awb_number: { $regex: awbNumber, $options: "i" } });
+    }
+
+    if (trackingId) {
+      andConditions.push({ trackingId: { $regex: trackingId, $options: "i" } });
+    }
+
+    if (req.query.courierServiceName) {
+      andConditions.push({ courierServiceName: req.query.courierServiceName });
+    }
+
+    if (paymentType) {
+      andConditions.push({ "paymentDetails.method": paymentType });
+    }
+
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      andConditions.push({ createdAt: { $gte: start, $lte: end } });
+    }
+
+    if (req.query.pickupContactName) {
+      andConditions.push({
+        "pickupAddress.contactName": req.query.pickupContactName,
+      });
+    }
+
+    const filter = { $and: andConditions };
+
+    const totalCount = await Order.countDocuments(filter);
+
+    let query = Order.find(filter).sort({ createdAt: -1 });
+    if (limit) query = query.skip(skip).limit(limit);
+
+    const orders = await query.lean();
+    const totalPages = limit ? Math.ceil(totalCount / limit) : 1;
+
+    const allCourierServices = await Order.aggregate([
+      { $match: { userId } },
+      {
+        $group: {
+          _id: "$courierServiceName",
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          courierServiceName: "$_id",
+        },
+      },
+    ]);
+
+    const allPickupLocations = await Order.aggregate([
+      { $match: { userId } },
+      {
+        $group: {
+          _id: {
+            contactName: "$pickupAddress.contactName",
+          },
+          address: { $first: "$pickupAddress.address" },
+          phoneNumber: { $first: "$pickupAddress.phoneNumber" },
+          email: { $first: "$pickupAddress.email" },
+          pinCode: { $first: "$pickupAddress.pinCode" },
+          city: { $first: "$pickupAddress.city" },
+          state: { $first: "$pickupAddress.state" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          contactName: "$_id.contactName",
+          address: 1,
+          phoneNumber: 1,
+          email: 1,
+          pinCode: 1,
+          city: 1,
+          state: 1,
+        },
+      },
+    ]);
+
+    res.json({
+      orders,
+      totalPages,
+      totalCount,
+      currentPage: page,
+      pickupLocations: allPickupLocations,
+      courierServices: allCourierServices.map((c) => c.courierServiceName),
+    });
+  } catch (error) {
+    console.error("Error fetching active orders:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 const getOrdersByNdrStatus = async (req, res) => {
   try {
     const { id } = req.query;
@@ -1125,9 +1294,12 @@ const cancelOrdersAtBooked = async (req, res) => {
     // currentOrder.status = "Not-Shipped";
     // currentOrder.cancelledAtStage = "Booked";
     currentOrder.tracking.push({
-      title: "Cancelled",
-      descriptions: `Cancelled Order by user`,
+      status: "Cancelled",
+      StatusLocation: "",
+      StatusDateTime: new Date(),
+      Instructions: "Order cancelled successfully",
     });
+
     let balanceTobeAdded =
       allOrders.totalFreightCharges == "N/A"
         ? 0
@@ -1161,6 +1333,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       );
 
       await session.commitTransaction();
+      await currentOrder.save({ session }); // ✅ Save order with updated tracking
       session.endSession();
     } catch (err) {
       await session.abortTransaction();
@@ -1429,4 +1602,5 @@ module.exports = {
   updatePickupAddress,
   setPrimaryPickupAddress,
   deletePickupAddress,
+  getShippingOrders,
 };

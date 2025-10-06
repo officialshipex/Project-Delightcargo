@@ -14,11 +14,14 @@ const getAllShippingTransactions = async (req, res) => {
       awbNumber,
       orderId,
       status,
-      provider
+      provider,
     } = req.query;
 
     const userMatchStage = {};
     const orderMatchStage = {};
+
+    // ✅ Exclude "new" and "cancelled" orders
+    orderMatchStage["status"] = { $nin: ["new", "cancelled"] };
 
     // Employee filtering logic
     let allocatedUserIds = null;
@@ -35,7 +38,9 @@ const getAllShippingTransactions = async (req, res) => {
           results: [],
         });
       }
-      orderMatchStage["userId"] = { $in: allocatedUserIds.map(id => new mongoose.Types.ObjectId(id)) };
+      orderMatchStage["userId"] = {
+        $in: allocatedUserIds.map((id) => new mongoose.Types.ObjectId(id)),
+      };
     }
 
     // User search filter
@@ -59,8 +64,12 @@ const getAllShippingTransactions = async (req, res) => {
       orderMatchStage["createdAt"] = { $gte: startDate, $lte: endDate };
     }
 
+    // ✅ If specific status is given, apply it (and still exclude "new" + "cancelled")
     if (status) {
-      orderMatchStage["status"] = status;
+      orderMatchStage["status"] = {
+        $eq: status,
+        $nin: ["new", "cancelled"],
+      };
     }
 
     if (provider) {
@@ -93,15 +102,15 @@ const getAllShippingTransactions = async (req, res) => {
       {
         $project: {
           _id: 0,
-          orderId: "$orderId",
-          awb_number: "$awb_number",
+          orderId: 1,
+          awb_number: 1,
           courierServiceName: 1,
           provider: 1,
           totalFreightCharges: 1,
           createdAt: 1,
           shipmentCreatedAt: 1,
-          status: "$status",
-          ndrStatus: "$ndrStatus",
+          status: 1,
+          ndrStatus: 1,
           paymentMethod: "$paymentDetails.method",
           paymentAmount: "$paymentDetails.amount",
           user: {
@@ -113,7 +122,7 @@ const getAllShippingTransactions = async (req, res) => {
           pickupAddress: 1,
           receiverAddress: 1,
           productDetails: 1,
-          packageDetails: 1
+          packageDetails: 1,
         },
       },
       { $sort: { createdAt: -1 } },
@@ -122,8 +131,11 @@ const getAllShippingTransactions = async (req, res) => {
     const [results, totalResult] = await Promise.all([
       parsedLimit === 0
         ? NewOrder.aggregate(basePipeline)
-        : NewOrder.aggregate([...basePipeline, { $skip: skip }, { $limit: parsedLimit }]),
-
+        : NewOrder.aggregate([
+            ...basePipeline,
+            { $skip: skip },
+            { $limit: parsedLimit },
+          ]),
       NewOrder.aggregate([...basePipeline, { $count: "total" }]),
     ]);
 
@@ -136,7 +148,7 @@ const getAllShippingTransactions = async (req, res) => {
       results,
     });
   } catch (error) {
-    console.error("Error in getAllOrderTransactions:", error);
+    console.error("Error in getAllShippingTransactions:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
