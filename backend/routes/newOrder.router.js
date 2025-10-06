@@ -22,7 +22,8 @@ const {
   GetTrackingByAwbs,
   updatePickupAddress,
   setPrimaryPickupAddress,
-  deletePickupAddress
+  deletePickupAddress,
+  getShippingOrders
   // calculateRTOCharges
   
 } = require("../Orders/newOrder.controller"); // Adjust path to your controller
@@ -32,6 +33,7 @@ const router = express.Router();
 router.put("/updateOrder/:orderId", updateOrder);
 router.post("/neworder", newOrder);
 router.get("/orders", getOrders);
+router.get("/shippingOrders",getShippingOrders)
 router.get("/ndr",getOrdersByNdrStatus);
 router.post("/clone",updatedStatusOrders)
 router.get("/getOrderById/:id",getOrdersById)

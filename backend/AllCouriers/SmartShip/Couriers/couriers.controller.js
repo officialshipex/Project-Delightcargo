@@ -462,7 +462,7 @@ const trackOrderSmartShip = async (AWBNo, shipment_id) => {
   }
 };
 
-trackOrderSmartShip("SMPC0000303506")
+// trackOrderSmartShip("SMPC0000303506")
 
 module.exports = {
   orderRegistrationOneStep,

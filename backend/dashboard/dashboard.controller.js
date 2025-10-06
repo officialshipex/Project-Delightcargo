@@ -267,7 +267,6 @@ const getBusinessInsights = async (req, res) => {
     const isAdminView = userData?.isAdmin && userData?.adminTab;
 
     // Dates
-    const now = new Date();
     const startOfToday = moment().startOf("day").toDate();
     const last30Days = moment().subtract(30, "days").toDate();
     const prev30Days = moment().subtract(60, "days").toDate();
@@ -294,40 +293,49 @@ const getBusinessInsights = async (req, res) => {
       baseMatch.userId = new mongoose.Types.ObjectId(searchId);
     }
 
+    // Exclude unwanted statuses
+    const validStatus = { $nin: ["new", "Cancelled"] };
+
     const [result] = await Order.aggregate([
       { $match: baseMatch },
       {
         $facet: {
+          // === TODAY ===
           todaysOrders: [
             { $match: { createdAt: { $gte: startOfToday } } },
             { $count: "count" },
           ],
-          todaysRevenue: [
+          todaysOrderValue: [
             {
               $match: {
                 createdAt: { $gte: startOfToday },
-                status: "Delivered",
+                status: validStatus,
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
+
+          // === 30 DAYS ===
           last30DaysOrders: [
             { $match: { createdAt: { $gte: last30Days } } },
             { $count: "count" },
           ],
-          last30DaysRevenue: [
+          last30DaysOrderValue: [
             {
-              $match: { createdAt: { $gte: last30Days }, status: "Delivered" },
+              $match: {
+                createdAt: { $gte: last30Days },
+                status: validStatus,
+              },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
@@ -335,22 +343,22 @@ const getBusinessInsights = async (req, res) => {
             { $match: { createdAt: { $gte: prev30Days, $lt: last30Days } } },
             { $count: "count" },
           ],
-          prev30DaysRevenue: [
+          prev30DaysOrderValue: [
             {
               $match: {
                 createdAt: { $gte: prev30Days, $lt: last30Days },
-                status: "Delivered",
+                status: validStatus,
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
 
-          // WEEK
+          // === WEEK ===
           weekOrders: [
             { $match: { createdAt: { $gte: startOfWeek } } },
             { $count: "count" },
@@ -363,33 +371,36 @@ const getBusinessInsights = async (req, res) => {
             },
             { $count: "count" },
           ],
-          weekRevenue: [
+          weekOrderValue: [
             {
-              $match: { createdAt: { $gte: startOfWeek }, status: "Delivered" },
+              $match: {
+                createdAt: { $gte: startOfWeek },
+                status: validStatus,
+              },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
-          lastWeekRevenue: [
+          lastWeekOrderValue: [
             {
               $match: {
                 createdAt: { $gte: startOfLastWeek, $lt: startOfWeek },
-                status: "Delivered",
+                status: validStatus,
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
 
-          // MONTH
+          // === MONTH ===
           monthOrders: [
             { $match: { createdAt: { $gte: startOfMonth } } },
             { $count: "count" },
@@ -402,36 +413,36 @@ const getBusinessInsights = async (req, res) => {
             },
             { $count: "count" },
           ],
-          monthRevenue: [
+          monthOrderValue: [
             {
               $match: {
                 createdAt: { $gte: startOfMonth },
-                status: "Delivered",
+                status: validStatus,
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
-          lastMonthRevenue: [
+          lastMonthOrderValue: [
             {
               $match: {
                 createdAt: { $gte: startOfLastMonth, $lt: startOfMonth },
-                status: "Delivered",
+                status: validStatus,
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
 
-          // QUARTER
+          // === QUARTER ===
           quarterOrders: [
             { $match: { createdAt: { $gte: startOfQuarter } } },
             { $count: "count" },
@@ -444,31 +455,31 @@ const getBusinessInsights = async (req, res) => {
             },
             { $count: "count" },
           ],
-          quarterRevenue: [
+          quarterOrderValue: [
             {
               $match: {
                 createdAt: { $gte: startOfQuarter },
-                status: "Delivered",
+                status: validStatus,
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
-          lastQuarterRevenue: [
+          lastQuarterOrderValue: [
             {
               $match: {
                 createdAt: { $gte: startOfLastQuarter, $lt: startOfQuarter },
-                status: "Delivered",
+                status: validStatus,
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
@@ -476,15 +487,15 @@ const getBusinessInsights = async (req, res) => {
       },
     ]);
 
-    // Extract data
+    // Extract results
     const todayOrderCount = result.todaysOrders[0]?.count || 0;
-    const todayRevenue = result.todaysRevenue[0]?.revenue || 0;
+    const todayOrderValue = result.todaysOrderValue[0]?.orderValue || 0;
 
     const last30Count = result.last30DaysOrders[0]?.count || 0;
-    const last30Revenue = result.last30DaysRevenue[0]?.revenue || 0;
+    const last30Value = result.last30DaysOrderValue[0]?.orderValue || 0;
 
     const prev30Count = result.prev30DaysOrders[0]?.count || 0;
-    const prev30Revenue = result.prev30DaysRevenue[0]?.revenue || 0;
+    const prev30Value = result.prev30DaysOrderValue[0]?.orderValue || 0;
 
     const weekCount = result.weekOrders[0]?.count || 0;
     const lastWeekCount = result.lastWeekOrders[0]?.count || 0;
@@ -495,28 +506,28 @@ const getBusinessInsights = async (req, res) => {
     const quarterCount = result.quarterOrders[0]?.count || 0;
     const lastQuarterCount = result.lastQuarterOrders[0]?.count || 0;
 
-    const weekRevenue = result.weekRevenue[0]?.revenue || 0;
-    const lastWeekRevenue = result.lastWeekRevenue[0]?.revenue || 0;
+    const weekValue = result.weekOrderValue[0]?.orderValue || 0;
+    const lastWeekValue = result.lastWeekOrderValue[0]?.orderValue || 0;
 
-    const monthRevenue = result.monthRevenue[0]?.revenue || 0;
-    const lastMonthRevenue = result.lastMonthRevenue[0]?.revenue || 0;
+    const monthValue = result.monthOrderValue[0]?.orderValue || 0;
+    const lastMonthValue = result.lastMonthOrderValue[0]?.orderValue || 0;
 
-    const quarterRevenue = result.quarterRevenue[0]?.revenue || 0;
-    const lastQuarterRevenue = result.lastQuarterRevenue[0]?.revenue || 0;
+    const quarterValue = result.quarterOrderValue[0]?.orderValue || 0;
+    const lastQuarterValue = result.lastQuarterOrderValue[0]?.orderValue || 0;
 
-    // Calculations
+    // === Calculations ===
     const avgDailyOrders = Math.round(last30Count / 30);
     const avgOrderValue =
-      last30Count > 0 ? Math.round(last30Revenue / last30Count) : 0;
+      last30Count > 0 ? Math.round(last30Value / last30Count) : 0;
 
     const growthOrders =
       prev30Count > 0
         ? (((last30Count - prev30Count) / prev30Count) * 100).toFixed(2)
         : "0.00";
 
-    const growthRevenue =
-      prev30Revenue > 0
-        ? (((last30Revenue - prev30Revenue) / prev30Revenue) * 100).toFixed(2)
+    const growthValue =
+      prev30Value > 0
+        ? (((last30Value - prev30Value) / prev30Value) * 100).toFixed(2)
         : "0.00";
 
     const weekGrowth =
@@ -537,37 +548,34 @@ const getBusinessInsights = async (req, res) => {
           ).toFixed(2)
         : "0.00";
 
-    const weekRevenueGrowth =
-      lastWeekRevenue > 0
-        ? (((weekRevenue - lastWeekRevenue) / lastWeekRevenue) * 100).toFixed(2)
+    const weekValueGrowth =
+      lastWeekValue > 0
+        ? (((weekValue - lastWeekValue) / lastWeekValue) * 100).toFixed(2)
         : "0.00";
 
-    const monthRevenueGrowth =
-      lastMonthRevenue > 0
+    const monthValueGrowth =
+      lastMonthValue > 0
+        ? (((monthValue - lastMonthValue) / lastMonthValue) * 100).toFixed(2)
+        : "0.00";
+
+    const quarterValueGrowth =
+      lastQuarterValue > 0
         ? (
-            ((monthRevenue - lastMonthRevenue) / lastMonthRevenue) *
+            ((quarterValue - lastQuarterValue) / lastQuarterValue) *
             100
           ).toFixed(2)
         : "0.00";
 
-    const quarterRevenueGrowth =
-      lastQuarterRevenue > 0
-        ? (
-            ((quarterRevenue - lastQuarterRevenue) / lastQuarterRevenue) *
-            100
-          ).toFixed(2)
-        : "0.00";
-
-    // Final Response
+    // === Response ===
     return res.status(200).json({
       success: true,
       data: {
         todayOrderCount,
-        todayRevenue,
+        todayOrderValue,
         avgDailyOrders,
         avgOrderValue,
         growthOrders,
-        growthRevenue,
+        growthValue,
         statsBreakdown: {
           weekCount,
           weekGrowth,
@@ -578,16 +586,16 @@ const getBusinessInsights = async (req, res) => {
         },
         valueBreakdown: {
           week: {
-            revenue: weekRevenue,
-            revenueGrowth: weekRevenueGrowth,
+            orderValue: weekValue,
+            valueGrowth: weekValueGrowth,
           },
           month: {
-            revenue: monthRevenue,
-            revenueGrowth: monthRevenueGrowth,
+            orderValue: monthValue,
+            valueGrowth: monthValueGrowth,
           },
           quarter: {
-            revenue: quarterRevenue,
-            revenueGrowth: quarterRevenueGrowth,
+            orderValue: quarterValue,
+            valueGrowth: quarterValueGrowth,
           },
         },
       },
@@ -605,20 +613,16 @@ const getBusinessInsights = async (req, res) => {
 const getDashboardOverview = async (req, res) => {
   try {
     const userId = req.user._id;
-
     const searchId = req.query.userId;
-
     const userData = await User.findById(userId);
-    // Check if admin and has adminTab access
+
     const isAdminView = userData?.isAdmin && userData?.adminTab;
 
-    // Determine final user filter
+    // Filter by user type
     let baseMatch = {};
     if (!isAdminView) {
-      // Normal user: restrict to their own orders
       baseMatch.userId = userId;
     } else if (searchId) {
-      // Admin with a selected user
       baseMatch.userId = new mongoose.Types.ObjectId(searchId);
     }
 
@@ -629,7 +633,21 @@ const getDashboardOverview = async (req, res) => {
     const [result] = await Order.aggregate([
       { $match: baseMatch },
       {
+        // ✅ Extract the last tracking date (for delivered orders)
+        $addFields: {
+          lastTrackingDate: {
+            $let: {
+              vars: {
+                lastItem: { $arrayElemAt: ["$tracking", -1] },
+              },
+              in: "$$lastItem.StatusDateTime",
+            },
+          },
+        },
+      },
+      {
         $facet: {
+          // 🔹 Order counts
           todaysOrders: [
             { $match: { createdAt: { $gte: today } } },
             { $count: "count" },
@@ -638,31 +656,40 @@ const getDashboardOverview = async (req, res) => {
             { $match: { createdAt: { $gte: yesterday, $lt: today } } },
             { $count: "count" },
           ],
+
+          // 🔹 Today's revenue based on tracking date (not createdAt)
           todaysRevenue: [
             {
-              $match: { createdAt: { $gte: today }, status: "Delivered" },
+              $match: {
+                status: "Delivered",
+                lastTrackingDate: { $gte: today },
+              },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                revenue: { $sum: "$totalFreightCharges" },
               },
             },
           ],
+
+          // 🔹 Yesterday's revenue based on tracking date
           yesterdaysRevenue: [
             {
               $match: {
-                createdAt: { $gte: yesterday, $lt: today },
                 status: "Delivered",
+                lastTrackingDate: { $gte: yesterday, $lt: today },
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                revenue: { $sum: "$totalFreightCharges" },
               },
             },
           ],
+
+          // 🔹 Average shipping cost (last 30 days)
           avgShipping: [
             {
               $match: {
@@ -678,6 +705,8 @@ const getDashboardOverview = async (req, res) => {
               },
             },
           ],
+
+          // 🔹 Shipment stats
           totalShipments: [
             { $match: { createdAt: { $gte: last30Days } } },
             { $count: "count" },
@@ -724,6 +753,8 @@ const getDashboardOverview = async (req, res) => {
             },
             { $count: "count" },
           ],
+
+          // 🔹 NDR Stats
           totalNdr: [
             {
               $match: {
@@ -764,7 +795,7 @@ const getDashboardOverview = async (req, res) => {
       },
     ]);
 
-    // COD values from Cod model
+    // COD aggregation
     const codSummary = await Cod.aggregate([
       { $match: baseMatch },
       { $unwind: "$remittanceData" },
@@ -797,33 +828,32 @@ const getDashboardOverview = async (req, res) => {
 
     const codData = codSummary[0] || {};
     const avgShippingData = result.avgShipping[0] || {};
+
     const avgShippingCost =
       avgShippingData.count > 0
         ? Math.round(avgShippingData.totalFreight / avgShippingData.count)
         : 0;
+
     const totalNdr =
-      result.actionRequired[0]?.count ||
-      0 + result.actionRequested[0]?.count ||
-      0 + result.ndrDelivered[0]?.count ||
-      0;
+      (result.actionRequired[0]?.count || 0) +
+      (result.actionRequested[0]?.count || 0) +
+      (result.ndrDelivered[0]?.count || 0);
+
     return res.status(200).json({
       success: true,
       data: {
-        // Top Cards
         todaysOrders: result.todaysOrders[0]?.count || 0,
         yesterdaysOrders: result.yesterdaysOrders[0]?.count || 0,
         todaysRevenue: result.todaysRevenue[0]?.revenue || 0,
         yesterdaysRevenue: result.yesterdaysRevenue[0]?.revenue || 0,
         avgShippingCost,
 
-        // COD
         codAvailable: codData.codAvailable || 0,
         codTotal: codData.codTotal || 0,
         codPending: codData.codPending || 0,
         lastCODRemitted: codData.codTotal || 0,
         lastCODRemittedDate: codData.lastCODRemitted || null,
 
-        // Shipment Details
         shipmentStats: {
           total: result.totalShipments[0]?.count || 0,
           readyToShip: result.readyToShip[0]?.count || 0,
@@ -833,9 +863,8 @@ const getDashboardOverview = async (req, res) => {
           rto: result.rto[0]?.count || 0,
         },
 
-        // NDR Details
         ndrStats: {
-          totalNdr: totalNdr,
+          totalNdr,
           actionRequired: result.actionRequired[0]?.count || 0,
           actionRequested: result.actionRequested[0]?.count || 0,
           ndrDelivered: result.ndrDelivered[0]?.count || 0,
@@ -1762,7 +1791,7 @@ const getWeightDisputeData = async (req, res) => {
         else if (status === "Discrepancy Raised") acc["DiscrepancyRaised"]++;
         return acc;
       },
-      { New: 0, Accepted: 0, "DiscrepancyRaised": 0 }
+      { New: 0, Accepted: 0, DiscrepancyRaised: 0 }
     );
 
     return res.status(200).json({
@@ -1781,7 +1810,6 @@ const getWeightDisputeData = async (req, res) => {
     });
   }
 };
-
 
 module.exports = {
   dashboard,
