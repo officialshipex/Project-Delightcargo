@@ -122,13 +122,14 @@ const processCourierCodRemittance = async () => {
 
 // Cron job
 cron.schedule(
-  "0 0,12 * * *",
+  "0 23 * * *", // minute 0, hour 23, every day
   () => {
-    console.log("Running scheduled COD remittance task (every 12 hrs IST)");
+    console.log("Running scheduled COD remittance task at 11 PM IST");
     processCourierCodRemittance();
   },
   { timezone: "Asia/Kolkata" }
 );
+
 // processCourierCodRemittance()
 const processCodRemittanceOrder = async () => {
   console.log("Processing COD Remittance Orders...");
@@ -229,9 +230,9 @@ const processCodRemittanceOrder = async () => {
 
 // Cron job
 cron.schedule(
-  "0 0,12 * * *",
+  "30 23 * * *", // At 23:30 (11:30 PM) every day
   () => {
-    console.log("Running scheduled COD remittance task every 12 hours (IST)");
+    console.log("Running scheduled COD remittance task at 11:30 PM IST");
     processCodRemittanceOrder();
   },
   { timezone: "Asia/Kolkata" }

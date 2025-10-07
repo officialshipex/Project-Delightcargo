@@ -14,185 +14,229 @@ const {
 const {
   checkServiceabilityShreeMaruti,
 } = require("../AllCouriers/ShreeMaruti/Couriers/couriers.controller");
-const {checkServiceabilityEcomExpress}=require("../AllCouriers/EcomExpress/Couriers/couriers.controllers")
-const {checkAmazonServiceability}=require("../AllCouriers/Amazon/Courier/couriers.controller")
-const {checkServiceabilityDTDC}=require("../AllCouriers/DTDC/Courier/couriers.controller")
-const {checkSmartshipHubServiceability}=require("../AllCouriers/SmartShip/Couriers/couriers.controller");
-const {checkEkartServiceability}=require("../AllCouriers/Ekart/Couriers/couriers.controller");
-const {checkVamashipServiceability}=require("../AllCouriers/Vamaship/Couriers/couriers.controller")
-
+const {
+  checkServiceabilityEcomExpress,
+} = require("../AllCouriers/EcomExpress/Couriers/couriers.controllers");
+const {
+  checkAmazonServiceability,
+} = require("../AllCouriers/Amazon/Courier/couriers.controller");
+const {
+  checkServiceabilityDTDC,
+} = require("../AllCouriers/DTDC/Courier/couriers.controller");
+const {
+  checkSmartshipHubServiceability,
+} = require("../AllCouriers/SmartShip/Couriers/couriers.controller");
+const {
+  checkEkartServiceability,
+} = require("../AllCouriers/Ekart/Couriers/couriers.controller");
+const {
+  checkVamashipServiceability,
+} = require("../AllCouriers/Vamaship/Couriers/couriers.controller");
+const {
+  checkPincodeServiceability,
+} = require("../checkPincodeServiceability/checkPincodeServiceability.controller");
 
 const checkServiceabilityAll = async (service, id, pincode) => {
   try {
-// console.log("kkkkkkkkkkk",service, id, pincode)
     const currentOrder = await Order.findById(id);
     if (!currentOrder) throw new Error("Order not found");
 
-    // console.log("ser",service)
+    const pickupPincode = pincode;
+    const deliveryPincode = currentOrder.receiverAddress?.pinCode || "";
+    const paymentMethod = currentOrder.paymentDetails?.method || "prepaid";
+    const weight = (currentOrder.packageDetails?.applicableWeight || 0) * 1000;
+// console.log("service",service)
+    // Function to safely check local serviceability
+    const checkLocalServiceability = async () => {
+      try {
+        const result = await checkPincodeServiceability(
+          pickupPincode,
+          service.provider,
+          deliveryPincode,
+          paymentMethod
+        );
+        console.log(`Local serviceability for ${service.provider}:`, result);
+        return result;
+      } catch (err) {
+        console.error(
+          `Local pincode check failed for ${service.provider}:`,
+          err.message
+        );
+        return false;
+      }
+    };
 
-    
-// console.log(currentOrder)
-    // console.log("pincode",pincode);
-    // if (service.provider === "NimbusPost") {
-    //     const payload = {
-    //         origin: pincode,
-    //         destination: currentOrder.receiverAddress?.pinCode || "",
-    //         payment_type: currentOrder.paymentDetails?.method === "COD" ? "cod" : "prepaid",
-    //         order_amount: currentOrder.paymentDetails?.amount || 0,
-    //         weight: currentOrder.packageDetails?.applicableWeight || 0,
-    //         length: currentOrder.packageDetails.volumetricWeight?.length || 0,
-    //         breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
-    //         height: currentOrder.packageDetails.volumetricWeight?.height || 0
-            
-    //       };
-    // //   console.log("Paylod is");
+    // ----------------------- NimbusPost -----------------------
+    if (service.provider === "NimbusPostt") {
+      const local = await checkLocalServiceability();
+      if (local) return local;
 
-    //   const result = await getServiceablePincodesData(
-    //     service.courier,
-    //     payload
-    //   );
-    // //   console.log("das",result);
-
-    //   return result;
-    // }
-    const weight= (currentOrder.packageDetails?.applicableWeight)*1000
-    if (service.provider === "Xpressbee") {
       const payload = {
-        origin: pincode,
-        destination:currentOrder.receiverAddress?.pinCode || "",
-        payment_type:currentOrder.paymentDetails?.method === "COD" ? "cod" : "prepaid",
+        origin: pickupPincode,
+        destination: deliveryPincode,
+        payment_type: paymentMethod === "COD" ? "cod" : "prepaid",
         order_amount: currentOrder.paymentDetails?.amount || 0,
-        weight: weight || 0,
-        length:currentOrder.packageDetails.volumetricWeight?.length || 0,
-        breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
-        height: currentOrder.packageDetails.volumetricWeight?.height || 0
-      };
-
-      const result = await checkServiceabilityXpressBees(
-        service.courier,
-        payload
-      );
-      // console.log("sddddddddddddd",result)
-      return result;
-      // console.log("4621516dsfds",result)
-    }
-    // // if (service.courierProviderName === "Shiprocket") {
-    //   const payload = {
-    //     origin: pincode,
-    //     destination: currentOrder.shipping_details.pinCode,
-    //     payment_type:
-    //       currentOrder.order_type === "Cash on Delivery" ? true : false,
-    //     weight: `${parseInt(currentOrder.shipping_cost.weight) / 1000}`,
-    //     length: currentOrder.shipping_cost.dimensions.length,
-    //     breadth: currentOrder.shipping_cost.dimensions.width,
-    //     height: currentOrder.shipping_cost.dimensions.height,
-    //   };
-
-    //   const result = await checkServiceability(
-    //     service.courierProviderServiceName,
-    //     payload
-    //   );
-    //   return result;
-    // }
-
-    if (service.provider === "Amazon Shipping") {
-      // console.log("orderer",currentOrder)
-    
-      const payload = {
-        orderId:currentOrder.orderId,
-        origin: currentOrder.pickupAddress,
-        destination:currentOrder.receiverAddress,
-        payment_type:currentOrder.paymentDetails?.method,
-        order_amount: currentOrder.paymentDetails?.amount || 0,
-        weight: weight || 0,
-        length:currentOrder.packageDetails.volumetricWeight?.length || 0,
+        weight: weight,
+        length: currentOrder.packageDetails.volumetricWeight?.length || 0,
         breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
         height: currentOrder.packageDetails.volumetricWeight?.height || 0,
-        productDetails:currentOrder.productDetails,
-        orderId:currentOrder.orderId
       };
-
-
-
-      const result = await checkAmazonServiceability(
-        service.provider,
-        payload
-      );
-      return result;
+      return await getServiceablePincodesData(service.courier, payload);
     }
 
-    if (service.provider === "Delhivery") {
-      
-      const result = await checkPincodeServiceabilityDelhivery(
-        currentOrder.pickupAddress.pinCode,
-        currentOrder.receiverAddress.pinCode,
-        currentOrder.paymentDetails?.method === "COD" ? "cod" : "prepaid"
-      );
-      // console.log("saaaaaaaaaaaaa",result)
-      return result;
-    }
+    // ----------------------- XpressBees -----------------------
+    if (service.provider === "Xpressbeett") {
+      const local = await checkLocalServiceability();
+      if (local) return local;
 
-    if (service.provider === "Shree Maruti") {
       const payload = {
-        fromPincode: parseInt(pincode),
-        toPincode: parseInt(currentOrder.receiverAddress.pinCode),
-        isCodOrder:
-          currentOrder.paymentDetails?.method === "COD" ? true : false,
+        origin: pickupPincode,
+        destination: deliveryPincode,
+        payment_type: paymentMethod === "COD" ? "cod" : "prepaid",
+        order_amount: currentOrder.paymentDetails?.amount || 0,
+        weight: weight,
+        length: currentOrder.packageDetails.volumetricWeight?.length || 0,
+        breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
+        height: currentOrder.packageDetails.volumetricWeight?.height || 0,
+      };
+      return await checkServiceabilityXpressBees(service.courier, payload);
+    }
+
+    // ----------------------- Amazon Shipping -----------------------
+    if (service.provider === "Amazon Shipping") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
+      const payload = {
+        orderId: currentOrder.orderId,
+        origin: currentOrder.pickupAddress,
+        destination: currentOrder.receiverAddress,
+        payment_type: paymentMethod,
+        order_amount: currentOrder.paymentDetails?.amount || 0,
+        weight: weight,
+        length: currentOrder.packageDetails.volumetricWeight?.length || 0,
+        breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
+        height: currentOrder.packageDetails.volumetricWeight?.height || 0,
+        productDetails: currentOrder.productDetails,
+      };
+      if (local.reason === "courier_not_found" || local.reason === "error") {
+        const result = await checkAmazonServiceability(
+          service.provider,
+          payload
+        );
+        return result;
+      }
+    }
+
+    // ----------------------- Delhivery -----------------------
+    if (service.provider === "Delhivery") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+      if (local.reason === "courier_not_found" || local.reason === "error") {
+        const result = await checkPincodeServiceabilityDelhivery(
+          pickupPincode,
+          deliveryPincode,
+          paymentMethod === "COD" ? "cod" : "prepaid"
+        );
+        return result;
+      }
+    }
+
+    // ----------------------- Shree Maruti -----------------------
+    if (service.provider === "Shree Maruti") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
+      const payload = {
+        fromPincode: parseInt(pickupPincode),
+        toPincode: parseInt(deliveryPincode),
+        isCodOrder: paymentMethod === "COD",
         deliveryMode: "SURFACE",
       };
-      const result = await checkServiceabilityShreeMaruti(payload);
-      // console.log("resultttt",result)
-      return result;
+      if (local.reason === "courier_not_found" || local.reason === "error") {
+        const result = await checkServiceabilityShreeMaruti(payload);
+        return result;
+      }
     }
 
-    if (service.provider === "EcomExpres") {
+    // ----------------------- Ecom Express -----------------------
+    if (service.provider === "EcomExpresss") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+      if (local.reason === "courier_not_found" || local.reason === "error") {
+        const result = await checkServiceabilityEcomExpress(
+          pickupPincode,
+          deliveryPincode
+        );
+        return result;
+      }
+    }
+
+    // ----------------------- DTDC -----------------------
+    if (service.provider === "Dtdc") {
+      const local = await checkLocalServiceability();
+      // console.log("Local DTDC Serviceability:", local);
+      if (local.success) return local;
+      if (local.reason === "courier_not_found" || local.reason === "error") {
+        const result = await checkServiceabilityDTDC(
+          pickupPincode,
+          deliveryPincode
+        );
+        return result;
+      }
+    }
+
+    // ----------------------- Smartship -----------------------
+    if (service.provider === "Smartship") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
       const payload = {
-        originPincode: pincode, // Pickup location pincode
-        destinationPincode: currentOrder.receiverAddress.pinCode, // Delivery location pincode
+        source_pincode: pickupPincode,
+        destination_pincode: deliveryPincode,
+        order_weight: weight,
+        order_value: currentOrder.paymentDetails?.amount || 0,
       };
-    
-      const result = await checkServiceabilityEcomExpress(payload.originPincode, payload.destinationPincode);
-      // console.log("Serviceability Result:", result);
-      return result;
-    }
-    if(service.provider==="Dtdc"){
-      const payload={
-        originPincode:pincode,
-        destinationPincode:currentOrder.receiverAddress.pinCode
+      if (local.reason === "courier_not_found" || local.reason === "error") {
+        const result = await checkSmartshipHubServiceability(payload);
+        return result;
       }
-      const result=await checkServiceabilityDTDC(payload.originPincode, payload.destinationPincode)
-      // console.log("rerere",result)
-      return result
     }
-    if(service.provider==="Smartship"){
-      const payload={
-        source_pincode:pincode,
-        destination_pincode:currentOrder.receiverAddress.pinCode,
-        order_weight:weight,
-        order_value:currentOrder.paymentDetails?.amount || 0,
-      }
-      const result=await checkSmartshipHubServiceability(payload)
-      return result
-    }
-    if(service.provider==="Ekart"){
-      const result=await checkEkartServiceability(pincode,currentOrder.receiverAddress.pinCode)
-      return result
-    }
-    if(service.provider==="Vamaship"){
-      const payload={
-        source_pincode:pincode,
-        destination_pincode:currentOrder.receiverAddress.pinCode,        
-        payment_type:currentOrder.paymentDetails?.method,
-      }
-      const result=await checkVamashipServiceability(payload)
-      return result
-    } 
-    
 
-    // return false;
+    // ----------------------- Ekart -----------------------
+    if (service.provider === "Ekart") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+      if (local.reason === "courier_not_found" || local.reason === "error") {
+        const result = await checkEkartServiceability(
+          pickupPincode,
+          deliveryPincode
+        );
+        return result;
+      }
+    }
+
+    // ----------------------- Vamaship -----------------------
+    if (service.provider === "Vamaship") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
+      const payload = {
+        source_pincode: pickupPincode,
+        destination_pincode: deliveryPincode,
+        payment_type: paymentMethod,
+      };
+      if (local.reason === "courier_not_found" || local.reason === "error") {
+        const result = await checkVamashipServiceability(payload);
+        return result;
+      }
+    }
+
+    // Default
+    return false;
   } catch (error) {
     console.error("Error in checking serviceability:", error.message);
-    // throw error;
+    return false;
   }
 };
 
