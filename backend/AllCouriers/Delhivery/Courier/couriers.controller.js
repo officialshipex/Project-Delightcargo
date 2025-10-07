@@ -286,7 +286,7 @@ const checkPincodeServiceabilityDelhivery = async (
       },
       params: { filter_codes: deliveryPincode },
     });
-// console.log("delivery service",deliveryResponse.data.delivery_codes)
+console.log("delivery service",deliveryResponse.data.delivery_codes)
     const deliveryCodes = deliveryResponse.data.delivery_codes || [];
     let deliveryServiceable = false;
 
@@ -305,7 +305,7 @@ const checkPincodeServiceabilityDelhivery = async (
       },
       params: { filter_codes: pickUpPincode },
     });
-// console.log("pickup servi",pickupResponse.data.delivery_codes)
+console.log("pickup servi",pickupResponse.data.delivery_codes)
     const pickupCodes = pickupResponse.data.delivery_codes || [];
     let pickupServiceable = false;
 

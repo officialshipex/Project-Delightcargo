@@ -16,8 +16,10 @@ const nimbuspostRoutes = require("./AllCouriersRoutes/nimbuspost.router");
 const delhiveryRouter = require("./AllCouriersRoutes/delhivery.router");
 const otpRouter = require("./auth/auth.otp");
 const emailOtpRouter = require("./notification/emailOtpVerification");
-const {resetPassword}=require("./notification/resetPassword")
-
+const { resetPassword } = require("./notification/resetPassword");
+const {
+  loadCourierPincodes,
+} = require("./checkPincodeServiceability/checkPincodeServiceability.controller");
 const app = express();
 
 app.use(express.json({ limit: "10mb" }));
@@ -31,6 +33,9 @@ const store = MongoStore.create({
   crypto: { secret: process.env.MONGO_SECRET },
   touchAfter: 24 * 3600,
 });
+(async () => {
+  await loadCourierPincodes();
+})();
 
 app.use(
   session({
@@ -50,7 +55,10 @@ app.use(passport.initialize());
 
 // Routes
 app.use("/v1", router);
-app.use("/v1/channel/webhook-handler", express.raw({ type: "application/json" }));
+app.use(
+  "/v1/channel/webhook-handler",
+  express.raw({ type: "application/json" })
+);
 app.use("/v1/Shiprocket", ShipRocketController);
 app.use("/v1/shreeMaruti", ShreeMarutiController);
 app.use("/v1/delhivery", delhiveryRouter);

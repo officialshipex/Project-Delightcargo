@@ -20,7 +20,7 @@ const {
 const {
   checkServiceabilityShreeMaruti,
 } = require("../AllCouriers/ShreeMaruti/Couriers/couriers.controller.js");
-
+const {checkPincodeServiceability}=require("../checkPincodeServiceability/checkPincodeServiceability.controller.js")
 const calculateRate = async (req, res) => {
   try {
     const id = req.user._id;
@@ -31,6 +31,7 @@ const calculateRate = async (req, res) => {
       paymentType,
       declaredValue,
     } = req.body;
+
     console.log(
       pickUpPincode,
       deliveryPincode,
@@ -39,108 +40,120 @@ const calculateRate = async (req, res) => {
       declaredValue
     );
 
-    let result = await getZone(pickUpPincode, deliveryPincode);
-    let currentZone = result.zone;
+    // Step 1: Get user’s plan
     const plan = await Plan.findOne({ userId: id });
-    let rateCards = plan.rateCard;
-    const order_type = paymentType === "COD" ? "cod" : "prepaid";
+    if (!plan) return res.status(404).json({ message: "Plan not found" });
 
-    let ans = [];
+    const rateCards = plan.rateCard;
+    const orderType = paymentType === "COD" ? "cod" : "prepaid";
+
+    // Step 2: Get zone
+    const { zone: currentZone } = await getZone(pickUpPincode, deliveryPincode);
     const chargedWeight = applicableWeight * 1000;
     const gst = 18;
-    // console.log("rate",rateCards)
+    const ans = [];
 
     for (let rc of rateCards) {
       const provider = rc.courierProviderName;
       const mode = rc.mode;
-      let serviceable;
+      let serviceable = { success: false };
 
+      // Only process supported providers
       if (
         ![
-          // "EcomExpres",
           "Delhivery",
           "Shree Maruti",
           "Dtdc",
           "Smartship",
           "Amazon Shipping",
+          "EcomExpres",
         ].includes(provider)
       ) {
         continue;
       }
 
-      // Check serviceability per provider
-      if (provider === "EcomExpres") {
-        serviceable = await checkServiceabilityEcomExpress(
-          pickUpPincode,
-          deliveryPincode
-        );
+      // Step 3: Check local serviceability first
+      let localServiceability = await checkPincodeServiceability(
+        pickUpPincode,
+        provider,
+        deliveryPincode,
+        paymentType
+      );
 
-        // console.log("ecom", serviceable);
-      } else if (provider === "Shree Maruti") {
-        const payload = {
-          fromPincode: parseInt(pickUpPincode),
-          toPincode: parseInt(deliveryPincode),
-          isCodOrder: paymentType === "COD" ? true : false,
-          deliveryMode: "SURFACE",
-        };
-        serviceable = await checkServiceabilityShreeMaruti(payload);
-        // console.log("shree", serviceable);
-      } else if (provider === "Delhivery") {
-        serviceable = await checkPincodeServiceabilityDelhivery(
-          pickUpPincode,
-          deliveryPincode,
-          order_type
-        );
-        // console.log("dele", serviceable);
-      } else if (provider === "Dtdc") {
-        serviceable = await checkServiceabilityDTDC(
-          pickUpPincode,
-          deliveryPincode
-        );
-        // console.log("check", serviceable);
-      } else if (provider === "Smartship") {
-        const payload = {
-          source_pincode: pickUpPincode,
-          destination_pincode: deliveryPincode,
-          order_weight: applicableWeight,
-          order_value: declaredValue,
-        };
-        serviceable = await checkSmartshipHubServiceability(payload);
-        // console.log("serviceable", serviceable);
-      } else if (provider === "Amazon Shipping") {
-        const payload = {
-          pickUpPincode,
-          deliveryPincode,
-          applicableWeight,
-          declaredValue,
-        };
-        serviceable = await checkAmazonServiceability(payload);
-        // console.log("servicable", serviceable);
-        // serviceable.success = false;
-      }
-      // if (!isServiceable) continue; // Skip if not serviceable
-
-      if (serviceable.success === false) {
+      // Step 4: Determine whether to call API fallback
+      if (localServiceability.success === true) {
+        serviceable = { success: true };
+      } else if (
+        ["courier_not_found", "error", "pincode_not_found"].includes(
+          localServiceability.reason
+        )
+      ) {
+        // Local data missing → use API
+        if (provider === "EcomExpres") {
+          serviceable = await checkServiceabilityEcomExpress(
+            pickUpPincode,
+            deliveryPincode
+          );
+        } else if (provider === "Shree Maruti") {
+          const payload = {
+            fromPincode: parseInt(pickUpPincode),
+            toPincode: parseInt(deliveryPincode),
+            isCodOrder: paymentType === "COD",
+            deliveryMode: "SURFACE",
+          };
+          serviceable = await checkServiceabilityShreeMaruti(payload);
+        } else if (provider === "Delhivery") {
+          serviceable = await checkPincodeServiceabilityDelhivery(
+            pickUpPincode,
+            deliveryPincode,
+            orderType
+          );
+        } else if (provider === "Dtdc") {
+          serviceable = await checkServiceabilityDTDC(
+            pickUpPincode,
+            deliveryPincode
+          );
+        } else if (provider === "Smartship") {
+          const payload = {
+            source_pincode: pickUpPincode,
+            destination_pincode: deliveryPincode,
+            order_weight: applicableWeight,
+            order_value: declaredValue,
+          };
+          serviceable = await checkSmartshipHubServiceability(payload);
+        } else if (provider === "Amazon Shipping") {
+          const payload = {
+            pickUpPincode,
+            deliveryPincode,
+            applicableWeight,
+            declaredValue,
+          };
+          serviceable = await checkAmazonServiceability(payload);
+        }
+      } else {
+        // Local says not serviceable → skip API
         continue;
       }
 
+      if (!serviceable || serviceable.success === false) continue;
+
+      // Step 5: Rate calculation
       let basicCharge = parseFloat(rc.weightPriceBasic[0][currentZone]);
       let additionalCharge = parseFloat(
         rc.weightPriceAdditional[0][currentZone]
       );
 
-      let finalCharge;
       const count = Math.ceil(
         (chargedWeight - rc.weightPriceBasic[0].weight) /
           rc.weightPriceAdditional[0].weight
       );
 
-      if (rc.weightPriceBasic[0].weight >= chargedWeight) {
-        finalCharge = basicCharge;
-      } else {
-        finalCharge = basicCharge + additionalCharge * count;
-      }
+      let finalCharge =
+        rc.weightPriceBasic[0].weight >= chargedWeight
+          ? basicCharge
+          : basicCharge + additionalCharge * count;
 
+      // Step 6: COD charges
       let cod = 0;
       if (paymentType === "COD") {
         const orderValue = Number(declaredValue) || 0;
@@ -152,6 +165,7 @@ const calculateRate = async (req, res) => {
         }
       }
 
+      // Step 7: GST and total
       let gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
       let totalCharges = Math.round(finalCharge + cod + parseFloat(gstAmount));
 
@@ -168,7 +182,7 @@ const calculateRate = async (req, res) => {
       });
     }
 
-    res.status(201).json(ans);
+    return res.status(201).json(ans);
   } catch (error) {
     console.error("Error in Calculation:", error);
     res.status(500).json({ error: "Error in Calculation" });

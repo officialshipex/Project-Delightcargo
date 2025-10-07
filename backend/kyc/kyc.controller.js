@@ -415,6 +415,7 @@ verfication.post("/verify-otp", async (req, res) => {
       address: response.data.address,
       name: response.data.name,
       state: response.data.split_address.state,
+      city:response.data.split_address.dist,
     });
 
     await newAadhaar.save();

@@ -82,6 +82,9 @@ const bulk = require("./routes/newBulkOrders.routes");
 router.use("/bulk", isAuthorized, bulk);
 const Razorpay = require("./recharge/recharge.route");
 
+const serviceablePincodeRoutes = require("./checkPincodeServiceability/checkPincodeServiceability.route");
+router.use("/serviceablePincode", serviceablePincodeRoutes);
+
 router.use("/external", authRouter);
 
 router.use("/merchant", isAuthorized, verficationRouter);
