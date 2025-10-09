@@ -108,7 +108,7 @@ const createOneClickShipment = async (req, res) => {
         }
       );
     } else {
-      return res.status(400).json({ success: false, message: "Low Balance" });
+      return res.status(400).json({ success: false, message: "Insufficient Wallet Balance" });
     }
 
     if (response?.data?.payload) {

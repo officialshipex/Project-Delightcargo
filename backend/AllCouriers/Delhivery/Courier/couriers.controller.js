@@ -128,7 +128,7 @@ const createOrder = async (req, res) => {
         details: warehouseCreationResult,
       });
     }
-    const shipmentType = CourierService.findOne({
+    const shipmentType = await CourierService.findOne({
       name: courierServiceName,
       provider: "Delhivery",
     });
@@ -168,7 +168,7 @@ const createOrder = async (req, res) => {
           order: currentOrder.orderId,
           add: currentOrder.receiverAddress.address || "Default Warehouse",
           payment_mode: payment_type,
-          mode:
+          shipping_mode:
             shipmentType.courierType === "Domestic (Surface)"
               ? "Surface"
               : "Express",
@@ -196,6 +196,7 @@ const createOrder = async (req, res) => {
     const payload = `format=json&data=${encodeURIComponent(
       JSON.stringify(payloadData)
     )}`;
+    // console.log("payload", payload);
 
     let response;
     const walletHoldAmount = currentWallet?.holdAmount || 0;
@@ -214,7 +215,7 @@ const createOrder = async (req, res) => {
         "Content-Type": "application/x-www-form-urlencoded",
       },
     });
-
+    console.log("response", response.data);
     if (response.data.success && response.data.packages.length) {
       const result = response.data.packages[0];
 

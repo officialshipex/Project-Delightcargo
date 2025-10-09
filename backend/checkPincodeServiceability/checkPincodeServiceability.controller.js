@@ -77,6 +77,7 @@ const uploadPincode = async (req, res) => {
         })
         .on("end", async () => {
           pincodes = removeDuplicatePincodes(pincodes);
+          console.log("Parsed pincodes:", pincodes.length);
           await saveCourierData(courier, pincodes, req.file.path, res);
         });
 
@@ -174,7 +175,7 @@ const downloadPincode = async (req, res) => {
         .status(404)
         .json({ message: "No pincodes found for this courier" });
 
-    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename=serviceable_pincodes_${courier}.csv`
@@ -277,7 +278,6 @@ const getCourierServiceabilityStats = async (courier) => {
   }
 };
 
-
 // (async () => {
 //   const stats = await getCourierServiceabilityStats("Dtdc");
 //   if (stats) {
@@ -286,7 +286,6 @@ const getCourierServiceabilityStats = async (courier) => {
 //     console.log("No data found or error occurred");
 //   }
 // })();
-
 
 module.exports = {
   uploadPincode,

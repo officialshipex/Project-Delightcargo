@@ -162,7 +162,7 @@ const createShipmentFunctionDelhivery = async (
         };
       }
     } else {
-      return { status: 400, success: false, message: "Low Balance" };
+      return { status: 400, success: false, message: "Insufficient Wallet Balance" };
     }
   } catch (error) {
     console.error("Error in creating shipment:", error.message);

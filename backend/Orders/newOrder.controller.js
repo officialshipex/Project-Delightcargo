@@ -1216,9 +1216,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       const result = await cancelShipmentXpressBees(currentOrder.awb_number);
       if (result.error) {
         return res.status(400).send({ error: "Failed to cancel order" });
-      } else {
-        currentOrder.status = "new";
-      }
+      } 
     } else if (currentOrder.provider === "Shiprocket") {
       const result = await cancelOrder(currentOrder.awb_number);
       if (!result.success) {
@@ -1243,9 +1241,7 @@ const cancelOrdersAtBooked = async (req, res) => {
           details: result,
           orderId: currentOrder._id,
         });
-      } else {
-        currentOrder.status = "new";
-      }
+      } 
     } else if (currentOrder.provider === "Shree Maruti") {
       const result = await cancelOrderShreeMaruti(currentOrder.orderId);
       // console.log("shreemaruti",result)
@@ -1256,9 +1252,7 @@ const cancelOrdersAtBooked = async (req, res) => {
           details: result,
           orderId: currentOrder._id,
         });
-      } else {
-        currentOrder.status = "new";
-      }
+      } 
     } else if (currentOrder.provider === "Dtdc") {
       const result = await cancelOrderDTDC(currentOrder.awb_number);
       if (result.error) {

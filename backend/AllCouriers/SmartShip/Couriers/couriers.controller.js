@@ -133,7 +133,7 @@ const orderRegistrationOneStep = async (req, res) => {
     if (currentWallet.balance < finalCharges) {
       return res
         .status(400)
-        .json({ success: false, message: "Insufficient wallet balance" });
+        .json({ success: false, message: "Insufficient Wallet Balance" });
     }
 
     const productNames = currentOrder.productDetails

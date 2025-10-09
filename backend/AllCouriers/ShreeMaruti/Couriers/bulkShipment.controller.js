@@ -133,7 +133,7 @@ const createShipmentFunctionShreeMaruti = async (
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
     if (currentWallet.balance < finalCharges) {
-      return { success: false, message: "Insufficient wallet balance" };
+      return { success: false, message: "Insufficient Wallet Balance" };
     }
 
     // API request

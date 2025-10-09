@@ -161,7 +161,7 @@ const createOrder = async (req, res) => {
       );
       console.log("dtdc response", response.data);
     } else {
-      return res.status(400).json({ success: false, message: "Low Balance" });
+      return res.status(400).json({ success: false, message: "Insufficient Wallet Balance" });
     }
     if (response?.data?.data[0]?.success) {
       const result = response.data.data[0];
