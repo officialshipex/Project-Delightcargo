@@ -45,7 +45,7 @@ const createShipmentAmazon = async (
     if (currentWallet.balance < charges) {
       return {
         success: false,
-        message: "Insufficient wallet balance after hold deduction",
+        message: "Insufficient Wallet Balance",
       };
     }
 

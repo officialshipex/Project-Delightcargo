@@ -95,15 +95,18 @@ const uploadDispreancy = async (req, res) => {
     const existing = await WeightDiscrepancy.find({
       awbNumber: { $in: awbNumbers },
     }).select("awbNumber");
+    // console.log("existing", existing);
     const existingSet = new Set(existing.map((e) => e.awbNumber));
 
     const orders = await Order.find({ awb_number: { $in: awbNumbers } });
+    // console.log("orders", orders);
     const orderMap = new Map(orders.map((o) => [o.awb_number, o]));
     // console.log("order",orders)
     const planCache = new Map();
 
     for (const awb of awbNumbers) {
       const chargeData = chargeWeightMap[awb];
+      // console.log("chargeData", chargeData);
       if (!chargeData || existingSet.has(awb)) continue;
 
       const order = orderMap.get(awb);
@@ -116,6 +119,7 @@ const uploadDispreancy = async (req, res) => {
       let userPlan = planCache.get(userId);
 
       if (!userPlan) {
+        console.log("user plan",userPlan)
         userPlan = await Plan.findOne({ userId });
         if (!userPlan) continue;
         planCache.set(userId, userPlan);
