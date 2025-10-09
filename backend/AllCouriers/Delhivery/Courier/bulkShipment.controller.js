@@ -37,7 +37,10 @@ const createShipmentFunctionDelhivery = async (
 
     const payment_type =
       currentOrder.paymentDetails.method === "COD" ? "COD" : "Prepaid";
-
+    const shipmentType =
+      selectedServiceDetails.courierType === "Domestic (Air)"
+        ? "Express"
+        : "Surface";
     console.log("warehouse", selectedServiceDetails);
     const payloadData = {
       pickup_location: {
@@ -53,6 +56,7 @@ const createShipmentFunctionDelhivery = async (
           order: currentOrder.orderId,
           add: currentOrder.receiverAddress.address || "Default Warehouse",
           payment_mode: payment_type,
+          shipping_mode: shipmentType,
           quantity: currentOrder.productDetails
             .reduce((sum, product) => sum + product.quantity, 0)
             .toString(),

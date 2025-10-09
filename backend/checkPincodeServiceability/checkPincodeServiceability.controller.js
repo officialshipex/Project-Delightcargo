@@ -50,8 +50,9 @@ const uploadPincode = async (req, res) => {
     if (!req.file) return res.status(400).json({ message: "File is required" });
 
     const ext = path.extname(req.file.originalname).toLowerCase();
-    const pincodes = [];
+    let pincodes = [];
 
+    // Parse CSV
     if (ext === ".csv") {
       fs.createReadStream(req.file.path)
         .pipe(
@@ -75,8 +76,11 @@ const uploadPincode = async (req, res) => {
           });
         })
         .on("end", async () => {
+          pincodes = removeDuplicatePincodes(pincodes);
           await saveCourierData(courier, pincodes, req.file.path, res);
         });
+
+      // Parse XLSX
     } else if (ext === ".xlsx") {
       const workbook = XLSX.readFile(req.file.path);
       const sheet = XLSX.utils.sheet_to_json(
@@ -93,6 +97,7 @@ const uploadPincode = async (req, res) => {
         });
       });
 
+      pincodes = removeDuplicatePincodes(pincodes);
       await saveCourierData(courier, pincodes, req.file.path, res);
     } else {
       fs.unlinkSync(req.file.path);
@@ -102,6 +107,23 @@ const uploadPincode = async (req, res) => {
     console.error(err);
     res.status(500).json({ message: "Internal server error" });
   }
+};
+
+// -----------------------------
+// Helper: Remove duplicate pincodes
+// -----------------------------
+const removeDuplicatePincodes = (pincodes) => {
+  const seen = new Set();
+  const unique = [];
+
+  for (const p of pincodes) {
+    const pin = p.pincode?.toString().trim();
+    if (pin && !seen.has(pin)) {
+      seen.add(pin);
+      unique.push(p);
+    }
+  }
+  return unique;
 };
 
 // -----------------------------
@@ -121,9 +143,10 @@ const saveCourierData = async (courier, pincodes, filePath, res) => {
     const codSet = new Set();
 
     for (const p of pincodes) {
-      if (p.pickup) pickupSet.add(p.pincode.toString());
-      if (p.delivery) deliverySet.add(p.pincode.toString());
-      if (p.cod) codSet.add(p.pincode.toString());
+      const pin = p.pincode?.toString();
+      if (p.pickup) pickupSet.add(pin);
+      if (p.delivery) deliverySet.add(pin);
+      if (p.cod) codSet.add(pin);
     }
 
     courierPincodesMap.set(courier, { pickupSet, deliverySet, codSet });
@@ -219,6 +242,51 @@ const checkPincodeServiceability = (
   serviceCache.set(cacheKey, result);
   return result;
 };
+
+const getCourierServiceabilityStats = async (courier) => {
+  try {
+    if (!courier) throw new Error("Courier name is required");
+
+    const courierData = await CourierPincode.findOne({ courier });
+    if (!courierData) throw new Error("Courier not found");
+
+    const { pincodes } = courierData;
+    let pickupCount = 0;
+    let deliveryCount = 0;
+    let codCount = 0;
+    let nonServiceableCount = 0;
+
+    for (const p of pincodes) {
+      if (p.pickup) pickupCount++;
+      if (p.delivery) deliveryCount++;
+      if (p.cod) codCount++;
+      if (!p.pickup && !p.delivery && !p.cod) nonServiceableCount++;
+    }
+
+    return {
+      courier,
+      totalPincodes: pincodes.length,
+      pickupServiceable: pickupCount,
+      deliveryServiceable: deliveryCount,
+      codServiceable: codCount,
+      nonServiceable: nonServiceableCount,
+    };
+  } catch (error) {
+    console.error("Error getting courier stats:", error.message);
+    return null; // or throw error if you prefer
+  }
+};
+
+
+// (async () => {
+//   const stats = await getCourierServiceabilityStats("Dtdc");
+//   if (stats) {
+//     console.log(stats);
+//   } else {
+//     console.log("No data found or error occurred");
+//   }
+// })();
+
 
 module.exports = {
   uploadPincode,

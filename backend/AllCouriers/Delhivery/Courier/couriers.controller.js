@@ -10,6 +10,7 @@ const crypto = require("crypto");
 const Wallet = require("../../../models/wallet");
 const user = require("../../../models/User.model");
 const plan = require("../../../models/Plan.model");
+const CourierService = require("../../../models/CourierService.Schema");
 const { getZone } = require("../../../Rate/zoneManagementController");
 // HELPER FUNCTIONS
 const getCurrentDateTime = () => {
@@ -98,7 +99,13 @@ const createClientWarehouse = async (payload) => {
 
 const createOrder = async (req, res) => {
   try {
-    const { id, provider, finalCharges, courierServiceName,estimatedDeliveryDate } = req.body;
+    const {
+      id,
+      provider,
+      finalCharges,
+      courierServiceName,
+      estimatedDeliveryDate,
+    } = req.body;
     const currentOrder = await Order.findById(id);
     const users = await user.findById({ _id: currentOrder.userId });
     const currentWallet = await Wallet.findById({ _id: users.Wallet });
@@ -120,6 +127,15 @@ const createOrder = async (req, res) => {
         message: "Failed to create or fetch pickup warehouse",
         details: warehouseCreationResult,
       });
+    }
+    const shipmentType = CourierService.findOne({
+      name: courierServiceName,
+      provider: "Delhivery",
+    });
+    if (!shipmentType) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid Courier Service Name" });
     }
 
     const zone = await getZone(
@@ -152,6 +168,10 @@ const createOrder = async (req, res) => {
           order: currentOrder.orderId,
           add: currentOrder.receiverAddress.address || "Default Warehouse",
           payment_mode: payment_type,
+          mode:
+            shipmentType.courierType === "Domestic (Surface)"
+              ? "Surface"
+              : "Express",
           quantity: currentOrder.productDetails
             .reduce((sum, product) => sum + product.quantity, 0)
             .toString(),
@@ -172,7 +192,7 @@ const createOrder = async (req, res) => {
         },
       ],
     };
-
+    console.log("payload", payloadData.shipments[0]);
     const payload = `format=json&data=${encodeURIComponent(
       JSON.stringify(payloadData)
     )}`;
@@ -209,7 +229,7 @@ const createOrder = async (req, res) => {
       currentOrder.courierServiceName = courierServiceName;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.zone = zone.zone;
-      currentOrder.estimatedDeliveryDate=estimatedDeliveryDate;
+      currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress?.city || "N/A",
@@ -286,7 +306,7 @@ const checkPincodeServiceabilityDelhivery = async (
       },
       params: { filter_codes: deliveryPincode },
     });
-console.log("delivery service",deliveryResponse.data.delivery_codes)
+    console.log("delivery service", deliveryResponse.data.delivery_codes);
     const deliveryCodes = deliveryResponse.data.delivery_codes || [];
     let deliveryServiceable = false;
 
@@ -305,7 +325,7 @@ console.log("delivery service",deliveryResponse.data.delivery_codes)
       },
       params: { filter_codes: pickUpPincode },
     });
-console.log("pickup servi",pickupResponse.data.delivery_codes)
+    console.log("pickup servi", pickupResponse.data.delivery_codes);
     const pickupCodes = pickupResponse.data.delivery_codes || [];
     let pickupServiceable = false;
 
@@ -360,7 +380,7 @@ const trackShipmentDelhivery = async (waybill) => {
       // status === "Dispatched" ||
       // status === "RTO" ||
       // status === "Not Picked"
-      response.status===200
+      response.status === 200
     ) {
       return {
         success: true,
