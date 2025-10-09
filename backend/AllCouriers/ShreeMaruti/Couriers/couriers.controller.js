@@ -430,7 +430,7 @@ const trackOrderShreeMaruti = async (awbNumber) => {
         Authorization: `Bearer ${token}`,
       },
     });
-    console.log("ressssssss", response.data.statuses);
+    // console.log("ressssssss", response.data.statuses);
 
     return {
       success: true,
