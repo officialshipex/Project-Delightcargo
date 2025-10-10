@@ -133,17 +133,42 @@ const removeDuplicatePincodes = (pincodes) => {
 const saveCourierData = async (courier, pincodes, filePath, res) => {
   try {
     let courierData = await CourierPincode.findOne({ courier });
-    if (courierData) courierData.pincodes = pincodes;
-    else courierData = new CourierPincode({ courier, pincodes });
 
+    // Convert new pincodes to a map for fast lookup
+    const newPincodeMap = new Map();
+    for (const p of pincodes) {
+      const pin = p.pincode?.toString().trim();
+      if (pin) newPincodeMap.set(pin, p);
+    }
+
+    // Merge logic
+    if (courierData) {
+      const existingMap = new Map();
+      courierData.pincodes.forEach((p) => {
+        const pin = p.pincode?.toString().trim();
+        if (pin) existingMap.set(pin, p);
+      });
+
+      // Update or add
+      for (const [pin, newData] of newPincodeMap.entries()) {
+        existingMap.set(pin, newData); // overwrite if exists, add if new
+      }
+
+      // Replace array
+      courierData.pincodes = Array.from(existingMap.values());
+    } else {
+      courierData = new CourierPincode({ courier, pincodes });
+    }
+
+    // Save the merged data
     await courierData.save();
 
-    // Build optimized sets for O(1) lookup
+    // Build optimized sets for O(1) lookups
     const pickupSet = new Set();
     const deliverySet = new Set();
     const codSet = new Set();
 
-    for (const p of pincodes) {
+    for (const p of courierData.pincodes) {
       const pin = p.pincode?.toString();
       if (p.pickup) pickupSet.add(pin);
       if (p.delivery) deliverySet.add(pin);
@@ -151,11 +176,14 @@ const saveCourierData = async (courier, pincodes, filePath, res) => {
     }
 
     courierPincodesMap.set(courier, { pickupSet, deliverySet, codSet });
+
+    // Cleanup
     fs.unlinkSync(filePath);
 
     res.json({
-      message: "Pincodes uploaded successfully",
-      total: pincodes.length,
+      message: "Pincodes uploaded and merged successfully",
+      total: courierData.pincodes.length,
+      newAdded: pincodes.length,
     });
   } catch (error) {
     console.error("Error saving courier data:", error);
@@ -244,52 +272,59 @@ const checkPincodeServiceability = (
   return result;
 };
 
-const getCourierServiceabilityStats = async (courier) => {
+const getCourierServiceabilityStats = async (req, res) => {
   try {
-    if (!courier) throw new Error("Courier name is required");
+    const couriers = await CourierPincode.find();
 
-    const courierData = await CourierPincode.findOne({ courier });
-    if (!courierData) throw new Error("Courier not found");
-
-    const { pincodes } = courierData;
-    let pickupCount = 0;
-    let deliveryCount = 0;
-    let codCount = 0;
-    let nonServiceableCount = 0;
-
-    for (const p of pincodes) {
-      if (p.pickup) pickupCount++;
-      if (p.delivery) deliveryCount++;
-      if (p.cod) codCount++;
-      if (!p.pickup && !p.delivery && !p.cod) nonServiceableCount++;
+    if (!couriers || couriers.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No couriers found" });
     }
 
-    return {
-      courier,
-      totalPincodes: pincodes.length,
-      pickupServiceable: pickupCount,
-      deliveryServiceable: deliveryCount,
-      codServiceable: codCount,
-      nonServiceable: nonServiceableCount,
-    };
+    const stats = couriers.map((courierData) => {
+      const { courier, pincodes } = courierData;
+
+      let pickupCount = 0;
+      let deliveryCount = 0;
+      let codCount = 0;
+      let nonServiceableCount = 0;
+
+      for (const p of pincodes) {
+        if (p.pickup) pickupCount++;
+        if (p.delivery) deliveryCount++;
+        if (p.cod) codCount++;
+        if (!p.pickup && !p.delivery && !p.cod) nonServiceableCount++;
+      }
+
+      return {
+        courier,
+        totalPincodes: pincodes.length,
+        pickupServiceable: pickupCount,
+        deliveryServiceable: deliveryCount,
+        codServiceable: codCount,
+        nonServiceable: nonServiceableCount,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: stats,
+    });
   } catch (error) {
     console.error("Error getting courier stats:", error.message);
-    return null; // or throw error if you prefer
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching courier serviceability stats",
+      error: error.message,
+    });
   }
 };
-
-// (async () => {
-//   const stats = await getCourierServiceabilityStats("Dtdc");
-//   if (stats) {
-//     console.log(stats);
-//   } else {
-//     console.log("No data found or error occurred");
-//   }
-// })();
 
 module.exports = {
   uploadPincode,
   downloadPincode,
   checkPincodeServiceability,
   loadCourierPincodes,
+  getCourierServiceabilityStats,
 };
