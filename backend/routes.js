@@ -53,6 +53,7 @@ const trackSingleOrder = require("./Orders/tracking.controller");
 const LabelSettings = require("./label/label.router");
 const statusMap=require("./statusMap/StatusMap.router")
 const EDDMap=require("./routes/EDDMap.router")
+const ZipyPostRouter=require("./AllCouriersRoutes/zipypost.router")
 
 router.use("/statusMap",statusMap);
 router.use("/EDD",EDDMap)
@@ -124,6 +125,7 @@ router.use("/Delhivery", DelhiveryController);
 router.use("/AmazonShipping", AmazonRouter);
 router.use("/Ekart",Ekart)
 router.use("/Vamaship",Vamaship)
+router.use("/ZipyPost",ZipyPostRouter)
 
 router.use("/label", LabelRouter);
 router.use("/user", userRouter);
@@ -147,6 +149,7 @@ router.use("/support", ticketRoutes);
 
 //API routes
 const api = require("./API/Router/api.router");
+const { saveZipypost } = require("./AllCouriers/Zipypost/Authorize/zipyPost.controller");
 router.use("/api", api);
 
 module.exports = router;

@@ -26,8 +26,8 @@ const saveRate = async (req, res) => {
       shipmentType,
     } = req.body;
 
-    console.log(weightPriceBasic);
-    console.log(weightPriceAdditional);
+    // console.log(weightPriceBasic);
+    // console.log(weightPriceAdditional);
 
     // Fetch users with assigned plans (filtered by planName)
     const usersWithPlans = await Plan.find({ planName: plan });
@@ -39,7 +39,7 @@ const saveRate = async (req, res) => {
     //   });
     // }
 
-    console.log(usersWithPlans);
+    // console.log(usersWithPlans);
 
     // Function to check required fields
     const checkRequiredFields = (weightData) => {
@@ -153,7 +153,7 @@ const getUsersWithPlans = async (req, res) => {
         message: "No users found with assigned plans",
       });
     }
-    console.log(usersWithPlans);
+    // console.log(usersWithPlans);
 
     res.status(200).json({
       success: true,
