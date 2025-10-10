@@ -130,16 +130,16 @@ const checkServiceabilityAll = async (service, id, pincode) => {
 
     // ----------------------- Delhivery -----------------------
     if (service.provider === "Delhivery") {
-      const local = await checkLocalServiceability();
-      if (local.success) return local;
-      if (local.reason === "courier_not_found" || local.reason === "error") {
+      // const local = await checkLocalServiceability();
+      // if (local.success) return local;
+      // if (local.reason === "courier_not_found" || local.reason === "error") {
         const result = await checkPincodeServiceabilityDelhivery(
           pickupPincode,
           deliveryPincode,
           paymentMethod === "COD" ? "cod" : "prepaid"
         );
         return result;
-      }
+      // }
     }
 
     // ----------------------- Shree Maruti -----------------------
