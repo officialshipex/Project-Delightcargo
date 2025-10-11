@@ -5,7 +5,7 @@ const path = require("path");
 const upload = multer({ dest: "uploads/" });
 const saveRateController = require("../Rate/saveRateCardController");
 const {isAuthorized}=require("../middleware/auth.middleware")
-const { uploadRatecard } = require("../Rate/saveRateCardController");
+const { uploadRatecard,deleteRateCard } = require("../Rate/saveRateCardController");
 
 
 
@@ -14,7 +14,7 @@ router.get("/getRateCard",saveRateController.getRateCard)
 
 router.get('/getRateCard/:id', saveRateController.getRateCardById); // Use the ID in the URL
 router.put("/updateRateCard/:id", saveRateController.updateRateCard);
-
+router.delete("/deleteRateCard/:id",deleteRateCard)
 router.post("/saveB2CRate", saveRateController.saveRate);
 
 router.get("/getPlan",isAuthorized,saveRateController.getPlan)

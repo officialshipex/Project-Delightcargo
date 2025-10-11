@@ -214,6 +214,41 @@ const updateRateCard = async (req, res) => {
   }
 };
 
+const deleteRateCard = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Step 1: Delete the RateCard document
+    const deletedRateCard = await RateCard.findByIdAndDelete(id);
+
+    if (!deletedRateCard) {
+      return res.status(404).json({ message: "Rate Card not found" });
+    }
+
+    // Step 2: Find all plans with the same plan name
+    const plans = await Plan.find({ planName: deletedRateCard.plan });
+
+    // Step 3: Remove deleted rate card from each plan's rateCard array
+    for (const plan of plans) {
+      const originalLength = plan.rateCard.length;
+
+      plan.rateCard = plan.rateCard.filter(
+        (rc) => rc._id.toString() !== id
+      );
+
+      if (plan.rateCard.length !== originalLength) {
+        await plan.save();
+      }
+    }
+
+    res.status(200).json({ message: "Rate Card deleted and removed from all matching plans." });
+  } catch (error) {
+    console.error("Error deleting rate card from plans:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
+};
+
+
 const getRateCardById = async (req, res) => {
   try {
     const { id } = req.params; // Get the ID from the URL
@@ -672,6 +707,7 @@ module.exports = {
   getRateCard,
   getPlan,
   updateRateCard,
+  deleteRateCard,
   getRateCardById,
   getUsersWithPlans,
   createPlanName,
