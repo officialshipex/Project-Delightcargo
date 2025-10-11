@@ -108,7 +108,9 @@ const createOneClickShipment = async (req, res) => {
         }
       );
     } else {
-      return res.status(400).json({ success: false, message: "Insufficient Wallet Balance" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Insufficient Wallet Balance" });
     }
 
     if (response?.data?.payload) {
@@ -239,7 +241,7 @@ const cancelShipment = async (shipmentId) => {
     );
 
     if (response.data.payload) {
-      console.log("Shipment Cancelled Successfully",response);
+      console.log("Shipment Cancelled Successfully", response);
       return {
         data: response.data,
         code: 201,
@@ -291,8 +293,8 @@ const getShipmentTracking = async (trackingId) => {
     // console.log(
     //   "Tracking Information:",
     //   response.data.payload.eventHistory[
-    //     response.data.payload.eventHistory.length - 1
-    //   ].eventCode
+    //     response.data.payload.eventHistory.length - 4
+    //   ]
     // );
     return { success: true, data: response.data.payload };
   } catch (error) {
@@ -302,7 +304,7 @@ const getShipmentTracking = async (trackingId) => {
     );
   }
 };
-// getShipmentTracking("362856312141");
+// getShipmentTracking("364157621588");
 
 const checkAmazonServiceability = async (provider, payload) => {
   try {

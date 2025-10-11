@@ -35,6 +35,9 @@ const {
 const {
   checkPincodeServiceability,
 } = require("../checkPincodeServiceability/checkPincodeServiceability.controller");
+const {
+  checkZipypostServiceability,
+} = require("../AllCouriers/Zipypost/Couriers/couriers.controller");
 
 const checkServiceabilityAll = async (service, id, pincode) => {
   try {
@@ -45,7 +48,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
     const deliveryPincode = currentOrder.receiverAddress?.pinCode || "";
     const paymentMethod = currentOrder.paymentDetails?.method || "prepaid";
     const weight = (currentOrder.packageDetails?.applicableWeight || 0) * 1000;
-// console.log("service",service)
+    // console.log("service",service)
     // Function to safely check local serviceability
     const checkLocalServiceability = async () => {
       try {
@@ -228,6 +231,25 @@ const checkServiceabilityAll = async (service, id, pincode) => {
       };
       if (local.reason === "courier_not_found" || local.reason === "error") {
         const result = await checkVamashipServiceability(payload);
+        return result;
+      }
+    }
+    if (service.provider === "ZipyPost") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
+      const payload = {
+        source_pincode: pickupPincode,
+        destination_pincode: deliveryPincode,
+        payment_type:currentOrder.paymentDetails?.method,
+        order_weight: weight,
+        length: currentOrder.packageDetails.volumetricWeight?.length || 0,
+        breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
+        height: currentOrder.packageDetails.volumetricWeight?.height || 0,
+        order_value: currentOrder.paymentDetails?.amount || 0,
+      };
+      if (local.reason === "courier_not_found" || local.reason === "error") {
+        const result = await checkZipypostServiceability(payload);
         return result;
       }
     }

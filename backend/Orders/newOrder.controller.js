@@ -52,6 +52,9 @@ const {
 const {
   cancelVamashipOrder,
 } = require("../AllCouriers/Vamaship/Couriers/couriers.controller");
+const {
+  cancelOrderZipypost,
+} = require("../AllCouriers/Zipypost/Couriers/couriers.controller");
 // Create a shipment
 const newOrder = async (req, res) => {
   try {
@@ -1212,11 +1215,11 @@ const cancelOrdersAtBooked = async (req, res) => {
       return res.status(400).send({ error: "Order is not ready to Cancelled" });
     }
 
-    if (currentOrder.provider === "Xpressbees") {
+    if (currentOrder.provider === "Xpressbeesss") {
       const result = await cancelShipmentXpressBees(currentOrder.awb_number);
       if (result.error) {
         return res.status(400).send({ error: "Failed to cancel order" });
-      } 
+      }
     } else if (currentOrder.provider === "Shiprocket") {
       const result = await cancelOrder(currentOrder.awb_number);
       if (!result.success) {
@@ -1241,7 +1244,7 @@ const cancelOrdersAtBooked = async (req, res) => {
           details: result,
           orderId: currentOrder._id,
         });
-      } 
+      }
     } else if (currentOrder.provider === "Shree Maruti") {
       const result = await cancelOrderShreeMaruti(currentOrder.orderId);
       // console.log("shreemaruti",result)
@@ -1252,7 +1255,7 @@ const cancelOrdersAtBooked = async (req, res) => {
           details: result,
           orderId: currentOrder._id,
         });
-      } 
+      }
     } else if (currentOrder.provider === "Dtdc") {
       const result = await cancelOrderDTDC(currentOrder.awb_number);
       if (result.error) {
@@ -1275,6 +1278,11 @@ const cancelOrdersAtBooked = async (req, res) => {
       }
     } else if (currentOrder.provider === "Vamaship") {
       const result = await cancelVamashipOrder(currentOrder.shipment_id);
+      if (result.error) {
+        return res.status(400).send({ error: result.error });
+      }
+    } else if (currentOrder.partner === "ZipyPost") {
+      const result = await cancelOrderZipypost(currentOrder.awb_number);
       if (result.error) {
         return res.status(400).send({ error: result.error });
       }

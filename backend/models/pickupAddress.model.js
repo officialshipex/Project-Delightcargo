@@ -17,6 +17,10 @@ const pickupAddress = new mongoose.Schema({
     type: String,
     default: "",
   },
+  zipypostHubId:{
+    type:String,
+    default:""
+  },
   createdAt: {
     type: Date,
     default: Date.now,

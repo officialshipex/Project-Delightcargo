@@ -7,7 +7,7 @@ const { s3 } = require("../../../config/s3");
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { checkAmazonServiceability } = require("./couriers.controller");
 const { getZone } = require("../../../Rate/zoneManagementController");
-
+const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 const createShipmentAmazon = async (
   serviceDetails,
   orderId,
@@ -32,6 +32,30 @@ const createShipmentAmazon = async (
     );
     if (!zone) {
       return res.status(400).json({ message: "Pincode not serviceable" });
+    }
+
+    const eddData = await estimatedDeliveryDate.findOne({
+      courier: "Amazon Shipping",
+      serviceName: serviceDetails.name,
+    });
+    let estimateDate = null;
+
+    if (eddData) {
+      let deliveryDays = null;
+
+      if (
+        eddData.zoneRates &&
+        typeof eddData.zoneRates[zone.zone] === "number"
+      ) {
+        deliveryDays = eddData.zoneRates[zone.zone];
+      } else if (typeof eddData[zone.zone] === "number") {
+        deliveryDays = eddData[zone.zone];
+      }
+
+      if (deliveryDays) {
+        estimateDate = new Date();
+        estimateDate.setDate(estimateDate.getDate() + deliveryDays);
+      }
     }
 
     const currentWallet = await Wallet.findById(walletId);
@@ -136,6 +160,7 @@ const createShipmentAmazon = async (
     currentOrder.shipmentCreatedAt = new Date();
     currentOrder.label = labelUrl;
     currentOrder.zone = zone.zone;
+    currentOrder.estimatedDeliveryDate = estimateDate;
     currentOrder.tracking.push({
       status: "Booked",
       StatusLocation: currentOrder.pickupAddress?.city || "N/A",
