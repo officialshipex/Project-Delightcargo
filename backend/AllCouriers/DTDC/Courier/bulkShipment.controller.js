@@ -7,7 +7,7 @@ const Wallet = require("../../../models/wallet");
 const { getDTDCAuthToken } = require("../Authorize/saveCourierContoller");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const commodityOptions = require("../../../config/commodityOptions");
-
+const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 // const router = express.Router();
 
 // DTDC API Configuration from environment variables
@@ -40,6 +40,30 @@ const createOrderDTDC = async (
     );
     if (!zone) {
       return { success: false, message: "Pincode not serviceable" };
+    }
+   
+    const eddData = await estimatedDeliveryDate.findOne({
+      courier: "Dtdc",
+      serviceName: serviceDetails.name,
+    });
+    let estimateDate = null;
+
+    if (eddData) {
+      let deliveryDays = null;
+
+      if (
+        eddData.zoneRates &&
+        typeof eddData.zoneRates[zone.zone] === "number"
+      ) {
+        deliveryDays = eddData.zoneRates[zone.zone];
+      } else if (typeof eddData[zone.zone] === "number") {
+        deliveryDays = eddData[zone.zone];
+      }
+
+      if (deliveryDays) {
+        estimateDate = new Date();
+        estimateDate.setDate(estimateDate.getDate() + deliveryDays);
+      }
     }
 
     const currentWallet = await Wallet.findById(walletId);
@@ -147,6 +171,7 @@ const createOrderDTDC = async (
       currentOrder.totalFreightCharges = charges;
       currentOrder.courierServiceName = serviceDetails.name;
       currentOrder.shipmentCreatedAt = new Date();
+      currentOrder.estimatedDeliveryDate = estimateDate;
       currentOrder.zone = zone.zone;
       currentOrder.tracking.push({
         status: "Booked",

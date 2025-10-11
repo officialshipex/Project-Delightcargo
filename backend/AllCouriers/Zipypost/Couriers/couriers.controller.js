@@ -6,7 +6,7 @@ const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
 const CourierService = require("../../../models/CourierService.Schema");
 const PickupAddress = require("../../../models/pickupAddress.model");
-
+const { getZone } = require("../../../Rate/zoneManagementController");
 const createWarehouse = async (
   userId,
   warehouseData,
@@ -253,6 +253,7 @@ const createZipypostOrder = async (req, res) => {
       currentOrder.awb_number = result.awb;
       currentOrder.shipment_id = currentOrder.orderId;
       currentOrder.provider = result.courier;
+      currentOrder.partner="ZipyPost";
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.totalFreightCharges = finalCharges || 0;
       currentOrder.courierServiceName = courierServiceName;
@@ -338,7 +339,7 @@ const checkZipypostServiceability = async (payload) => {
         },
       }
     );
-    console.log("Zipypost Serviceability Response:", response.data);
+    // console.log("Zipypost Serviceability Response:", response.data);
     const serviceabilityData = response.data?.result || [];
     const serviceable =
       response.data?.success === true && serviceabilityData.length > 0;
@@ -426,8 +427,48 @@ const cancelOrderZipypost = async (AWBNo) => {
 };
 // cancelOrderZipypost('152489850354007')
 
+const trackOrderZipypost = async (AWBNo) => {
+  const token = await getAuthToken();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const sellerId = process.env.ZIPYPOST_SELLER_ID;
+  // console.log(access_key);
+
+  try {
+    const response = await axios.get(
+      `https://api.zipypost.com/track/${AWBNo}`,
+      {
+        headers: {
+          authorization: token.authToken,
+          timestamp: timestamp,
+          sellerid: sellerId,
+        },
+      }
+    );
+
+    console.log("response data", response.data);
+    console.log("respose status",response.data.result.events)
+    // console.log("response status", response.data.data.scans["20726635"][0].call_logs);
+    if (response.data.success === true) {
+      return { success: true, data: response.data.result.events };
+    }
+  } catch (error) {
+    console.error(
+      "Error tracking shipment:",
+      error.response?.data || error.message
+    );
+    return {
+      success: false,
+      error: error.response?.data || error.message,
+      status: 500,
+    };
+  }
+};
+// trackOrderZipypost("152489850354010")
+
 module.exports = {
+  createWarehouse,
   createZipypostOrder,
   checkZipypostServiceability,
   cancelOrderZipypost,
+  trackOrderZipypost,
 };

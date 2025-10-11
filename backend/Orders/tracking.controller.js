@@ -29,6 +29,9 @@ const {
 const {
   trackOrderSmartShip,
 } = require("../AllCouriers/SmartShip/Couriers/couriers.controller");
+const {
+  trackOrderZipypost,
+} = require("../AllCouriers/Zipypost/Couriers/couriers.controller");
 const Bottleneck = require("bottleneck");
 const orderSchemaModel = require("../models/orderSchema.model");
 const statusMap = require("../statusMap/StatusMap.model");
@@ -44,7 +47,7 @@ const limiter = new Bottleneck({
 const trackSingleOrder = async (order) => {
   try {
     // console.log("Tracking order:", order.orderId);
-    const { provider, awb_number, shipment_id } = order;
+    const { provider, awb_number, shipment_id, partner } = order;
     if (!provider || !awb_number) return;
 
     const currentWallet = await Wallet.findById(
@@ -64,18 +67,27 @@ const trackSingleOrder = async (order) => {
       "Amazon Shipping": getShipmentTracking,
       Amazon: getShipmentTracking, // optional: keep both keys if needed
       Smartship: trackOrderSmartShip,
+      ZipyPost: trackOrderZipypost,
     };
 
     if (!trackingFunctions[provider]) {
       console.warn(`Unknown provider: ${provider} for Order ID: ${order._id}`);
       return;
     }
-
-    const result = await trackingFunctions[provider](awb_number, shipment_id);
-    //  console.log("result",result)
+    let result;
+    let normalizedData;
+    if (partner === "ZipyPost") {
+      result = await trackingFunctions[partner](awb_number, shipment_id);
+    } else {
+      result = await trackingFunctions[provider](awb_number, shipment_id);
+    }
     if (!result || !result.success || !result.data) return;
+    if (partner === "ZipyPost") {
+      normalizedData = mapTrackingResponse(result.data, partner);
+    } else {
+      normalizedData = mapTrackingResponse(result.data, provider);
+    }
 
-    const normalizedData = mapTrackingResponse(result.data, provider);
     if (!normalizedData) {
       console.warn(`Failed to map tracking data for AWB: ${awb_number}`);
       return;
@@ -291,6 +303,7 @@ const trackSingleOrder = async (order) => {
       }
     }
     if (provider === "Amazon Shipping" || provider === "Amazon") {
+      console.log("normaliz",normalizedData)
       if (normalizedData.ShipmentType === "FORWARD") {
         if (normalizedData.Instructions === "ReadyForReceive") {
           order.status = "Ready To Ship";
@@ -850,6 +863,109 @@ const trackSingleOrder = async (order) => {
         }
       }
     }
+    if (provider === "ZipyPost") {
+      const scanCode = normalizedData.ScanCode;
+      const instruction = normalizedData.Instructions?.toLowerCase();
+      const statusText = normalizedData.Status?.toLowerCase();
+
+      // Map status using ZipyPostScanCodeMapping
+      order.status = ZipyPostScanCodeMapping[scanCode];
+
+      // --- Handle RTO logic ---
+      if (order.status === "RTO" || order.status === "RTO In-transit") {
+        order.ndrStatus = "RTO";
+      }
+
+      if (
+        normalizedData.scanCode === 9 ||
+        normalizedData.Status === "RTO Delivered"
+      ) {
+        order.status = "RTO Delivered";
+        order.ndrStatus = "RTO Delivered";
+      }
+
+      // --- Mark Delivered ---
+      if (
+        normalizedData.scanCode === 5 ||
+        normalizedData.Status === "Delivered"
+      ) {
+        order.status = "Delivered";
+        order.ndrStatus = "Delivered";
+      }
+
+      // --- Handle Out for Delivery ---
+      if (normalizedData.scanCode === 4) {
+        order.ndrStatus = "Out for Delivery";
+      }
+
+      // --- Handle Undelivered / NDR Cases ---
+      if (normalizedData.scanCode === 11) {
+        updateNdrHistoryByAwb(order.awb_number);
+
+        order.ndrReason = {
+          date: normalizedData.StatusDateTime,
+          reason: normalizedData.StrRemarks,
+        };
+
+        const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+        const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+        const lastEntryDate = lastAction?.date
+          ? new Date(lastAction.date).toDateString()
+          : null;
+
+        const currentStatusDate = new Date(
+          normalizedData.StatusDateTime
+        ).toDateString();
+
+        // Avoid duplicate same-day entries & limit history entries
+        if (
+          (order.ndrHistory.length === 0 ||
+            lastEntryDate !== currentStatusDate) &&
+          order.ndrHistory.length <= 2
+        ) {
+          order.ndrStatus = "Undelivered";
+          const attemptCount = order.ndrHistory?.length + 1 || 0;
+
+          const newHistoryEntry = {
+            actions: [
+              {
+                action: `NDR ${attemptCount} Raised`,
+                actionBy: order.courierServiceName,
+                remark: normalizedData.Instructions,
+                source: order.provider,
+                date: normalizedData.StatusDateTime,
+              },
+            ],
+          };
+
+          order.ndrHistory.push(newHistoryEntry);
+        }
+      }
+
+      // --- Cancelled Case ---
+      if (normalizedData.scanCode === 6) {
+        await Wallet.updateOne(
+          { _id: currentWallet._id },
+          {
+            $push: {
+              transactions: {
+                channelOrderId: order.orderId || null,
+                category: "credit",
+                amount: balanceTobeAdded,
+                balanceAfterTransaction: updatedWallet.balance,
+                date: new Date().toISOString().slice(0, 16).replace("T", " "),
+                awb_number: order.awb_number || "",
+                description: "Freight Charges Received",
+              },
+            },
+          }
+        );
+        order.ndrStatus = "Cancelled";
+        order.status = "Cancelled";
+      }
+
+      console.log("ZipyPost normalizedData:", normalizedData);
+    }
 
     const lastTrackingEntry = order.tracking[order.tracking.length - 1];
 
@@ -945,8 +1061,8 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      // provider: "Smartship",
-      // awb_number: "35973710033224",
+      // provider: "Amazon Shipping",
+      // awb_number: "364157621588",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -979,7 +1095,10 @@ const startTrackingLoop = async () => {
       console.log("✅ Tracking completed. Next run after 1 hour...");
       setTimeout(startTrackingLoop, 1 * 60 * 60 * 1000); // wait 1 hour after finish
     } else {
-      console.log("🌙 Outside tracking window, will retry in 1 hour:", now.toLocaleTimeString());
+      console.log(
+        "🌙 Outside tracking window, will retry in 1 hour:",
+        now.toLocaleTimeString()
+      );
       setTimeout(startTrackingLoop, 1 * 60 * 60 * 1000); // check again in 1 hour
     }
   } catch (error) {
@@ -989,8 +1108,7 @@ const startTrackingLoop = async () => {
 };
 
 // Start the loop once
-// startTrackingLoop();
-
+// startTrackingLoop(); 
 
 const mapTrackingResponse = (data, provider) => {
   // console.log("Mapping data for provider:", data);
@@ -1021,6 +1139,21 @@ const mapTrackingResponse = (data, provider) => {
         : null,
       Instructions: last?.subcategory || null,
       ShipmentType: last?.movement_type || null,
+    };
+  }
+
+  if (provider === "ZipyPost") {
+    // console.log("ZipyPost data", data);
+    const scanArray = data || []; // array of scans
+    const latestScan = scanArray?.[0]; // take the most recent scan
+    console.log("last", scanArray[0]);
+    return {
+      Status: latestScan?.scan || "N/A",
+      scanCode: latestScan?.scan_code ?? null,
+      // StrRemarks: latestScan?.remark || "N/A",
+      StatusLocation: latestScan?.location || "Unknown",
+      StatusDateTime: latestScan?.scan_time || null,
+      Instructions: latestScan?.remark || "N/A",
     };
   }
   const providerMappings = {

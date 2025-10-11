@@ -29,6 +29,9 @@ const {
 const {
   createShipmentFunctionShreeMaruti,
 } = require("../AllCouriers/ShreeMaruti/Couriers/bulkShipment.controller");
+const {
+  createOrderZipypost,
+} = require("../AllCouriers/Zipypost/Couriers/bulkShipment.controller");
 const updatePickup = async (req, res) => {
   try {
     // console.log(req.body)
@@ -132,6 +135,15 @@ const createShipment = async (serviceDetails, order, wh, walletId, charges) => {
         break;
       case "Shree Maruti":
         result = await createShipmentFunctionShreeMaruti(
+          serviceDetails,
+          order._id,
+          wh,
+          walletId,
+          charges
+        );
+        break;
+      case "ZipyPost":
+        result = await createOrderZipypost(
           serviceDetails,
           order._id,
           wh,

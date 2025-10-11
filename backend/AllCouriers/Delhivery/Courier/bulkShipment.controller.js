@@ -10,7 +10,7 @@ const crypto = require("crypto");
 const Wallet = require("../../../models/wallet");
 const { createClientWarehouse } = require("./couriers.controller");
 const { getZone } = require("../../../Rate/zoneManagementController");
-
+const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 const createShipmentFunctionDelhivery = async (
   selectedServiceDetails,
   id,
@@ -33,6 +33,31 @@ const createShipmentFunctionDelhivery = async (
     if (!zone) {
       return res.status(400).json({ message: "Pincode not serviceable" });
     }
+
+    const eddData = await estimatedDeliveryDate.findOne({
+      courier: "Delhivery",
+      serviceName: serviceDetails.name,
+    });
+    let estimateDate = null;
+
+    if (eddData) {
+      let deliveryDays = null;
+
+      if (
+        eddData.zoneRates &&
+        typeof eddData.zoneRates[zone.zone] === "number"
+      ) {
+        deliveryDays = eddData.zoneRates[zone.zone];
+      } else if (typeof eddData[zone.zone] === "number") {
+        deliveryDays = eddData[zone.zone];
+      }
+
+      if (deliveryDays) {
+        estimateDate = new Date();
+        estimateDate.setDate(estimateDate.getDate() + deliveryDays);
+      }
+    }
+
     const waybills = await fetchBulkWaybills(1);
 
     const payment_type =
@@ -107,6 +132,7 @@ const createShipmentFunctionDelhivery = async (
           finalCharges === "N/A" ? 0 : parseInt(finalCharges);
         currentOrder.courierServiceName = selectedServiceDetails.name;
         currentOrder.shipmentCreatedAt = new Date();
+        currentOrder.estimatedDeliveryDate = estimateDate;
         currentOrder.zone = zone.zone;
         currentOrder.tracking.push({
           status: "Booked",
@@ -162,7 +188,11 @@ const createShipmentFunctionDelhivery = async (
         };
       }
     } else {
-      return { status: 400, success: false, message: "Insufficient Wallet Balance" };
+      return {
+        status: 400,
+        success: false,
+        message: "Insufficient Wallet Balance",
+      };
     }
   } catch (error) {
     console.error("Error in creating shipment:", error.message);

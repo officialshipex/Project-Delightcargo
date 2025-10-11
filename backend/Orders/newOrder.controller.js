@@ -1281,7 +1281,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       if (result.error) {
         return res.status(400).send({ error: result.error });
       }
-    } else if (currentOrder.provider === "Xpressbees") {
+    } else if (currentOrder.partner === "ZipyPost") {
       const result = await cancelOrderZipypost(currentOrder.awb_number);
       if (result.error) {
         return res.status(400).send({ error: result.error });

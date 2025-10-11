@@ -9,9 +9,8 @@ const Order = require("../../../models/newOrder.model");
 const { getUniqueId } = require("../../getUniqueId");
 const Wallet = require("../../../models/wallet");
 const { getZone } = require("../../../Rate/zoneManagementController");
-
-const BASE_URL =process.env.SHREEMA_PRODUCTION_URL
-  
+const estimatedDeliveryDate = require("../../../models/EDDMap.model");
+const BASE_URL = process.env.SHREEMA_PRODUCTION_URL;
 
 const createShipmentFunctionShreeMaruti = async (
   selectedServiceDetails,
@@ -38,6 +37,31 @@ const createShipmentFunctionShreeMaruti = async (
     if (!zone) {
       return { success: false, message: "Pincode not serviceable" };
     }
+
+    const eddData = await estimatedDeliveryDate.findOne({
+      courier: "Shree Maruti",
+      serviceName: serviceDetails.name,
+    });
+    let estimateDate = null;
+
+    if (eddData) {
+      let deliveryDays = null;
+
+      if (
+        eddData.zoneRates &&
+        typeof eddData.zoneRates[zone.zone] === "number"
+      ) {
+        deliveryDays = eddData.zoneRates[zone.zone];
+      } else if (typeof eddData[zone.zone] === "number") {
+        deliveryDays = eddData[zone.zone];
+      }
+
+      if (deliveryDays) {
+        estimateDate = new Date();
+        estimateDate.setDate(estimateDate.getDate() + deliveryDays);
+      }
+    }
+
     // Prepare order items
     const lineItems = Array.from(
       { length: currentOrder.productDetails.length },
@@ -156,6 +180,7 @@ const createShipmentFunctionShreeMaruti = async (
       currentOrder.courierServiceName = selectedServiceDetails.name;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.zone = zone.zone;
+      currentOrder.estimatedDeliveryDate = estimateDate;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress?.city || "N/A",
@@ -222,8 +247,8 @@ const createShipmentFunctionShreeMaruti = async (
       };
     }
   } catch (error) {
-    console.log("data",error.response.data)
-    console.log("message",error.response.data.message)
+    console.log("data", error.response.data);
+    console.log("message", error.response.data.message);
     console.log(error.response.data.trace);
     console.error("Error in creating shipment:", error.message);
     return {

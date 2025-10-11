@@ -6,6 +6,7 @@ const { getZone } = require("../../../Rate/zoneManagementController");
 const Wallet = require("../../../models/wallet");
 const User = require("../../../models/User.model");
 const { registerSmartshipHub } = require("./couriers.controller");
+const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 const orderRegistrationOneStep = async (
   serviceDetails,
   orderId,
@@ -29,6 +30,32 @@ const orderRegistrationOneStep = async (
     if (!zone) {
       return { success: false, message: "Pincode not serviceable" };
     }
+
+    const eddData = await estimatedDeliveryDate.findOne({
+      courier: "Smartship",
+      serviceName: serviceDetails.name,
+    });
+    let estimateDate = null;
+
+    if (eddData) {
+      let deliveryDays = null;
+
+      if (
+        eddData.zoneRates &&
+        typeof eddData.zoneRates[zone.zone] === "number"
+      ) {
+        deliveryDays = eddData.zoneRates[zone.zone];
+      } else if (typeof eddData[zone.zone] === "number") {
+        deliveryDays = eddData[zone.zone];
+      }
+
+      if (deliveryDays) {
+        estimateDate = new Date();
+        estimateDate.setDate(estimateDate.getDate() + deliveryDays);
+      }
+    }
+
+
     const user = await User.findById(currentOrder.userId);
     if (!user) {
       return { success: false, message: "User not found" };
@@ -153,6 +180,7 @@ const orderRegistrationOneStep = async (
       currentOrder.courierServiceName = serviceDetails.name;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.zone = zone.zone;
+      currentOrder.estimatedDeliveryDate = estimateDate;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress?.city || "N/A",
