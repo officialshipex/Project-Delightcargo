@@ -51,7 +51,7 @@ const createOrderZipypost = async (
 
     const eddData = await estimatedDeliveryDate.findOne({
       courier: "ZipyPost",
-      serviceName: serviceDetails.name,
+      serviceName: serviceDetails.name.trim(),
     });
     let estimateDate = null;
 

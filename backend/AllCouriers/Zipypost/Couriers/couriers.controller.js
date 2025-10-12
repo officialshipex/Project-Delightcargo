@@ -7,6 +7,7 @@ const Wallet = require("../../../models/wallet");
 const CourierService = require("../../../models/CourierService.Schema");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
+
 const createWarehouse = async (
   userId,
   warehouseData,
@@ -93,6 +94,16 @@ const createZipypostOrder = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
+    const payload = {
+      source_pincode: currentOrder.pickupAddress.pinCode,
+      destination_pincode: currentOrder.receiverAddress.pinCode,
+      payment_type: currentOrder.paymentDetails?.method,
+      order_weight: currentOrder.packageDetails.applicableWeight,
+      length: currentOrder.packageDetails.volumetricWeight?.length || 0,
+      breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
+      height: currentOrder.packageDetails.volumetricWeight?.height || 0,
+      order_value: currentOrder.paymentDetails?.amount || 0,
+    };
 
     const user = await User.findById(currentOrder.userId);
     if (!user)
@@ -126,15 +137,74 @@ const createZipypostOrder = async (req, res) => {
     const sellerId = process.env.ZIPYPOST_SELLER_ID;
     const token = await getAuthToken();
     const shipmentType = await CourierService.findOne({
-      name: courierServiceName,
+      name: courierServiceName.trim(),
       provider: "ZipyPost",
     });
-    // Determine courier_id based on courierServiceName
+    // Step 1: Call serviceability function
+    const serviceability = await checkZipypostServiceability(payload);
+    // console.log("ser", serviceability.data);
+    // Step 2: Validate serviceability response
+    if (
+      !serviceability.data ||
+      !Array.isArray(serviceability.data) ||
+      serviceability.data.length === 0
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No serviceability data found" });
+    }
+
+    // Step 3: Filter only Xpressbees (courier_id: 9) and Bluedart (courier_id: 10)
+    const validCouriers = serviceability.data.filter(
+      (svc) => svc.courier_id === 9 || svc.courier_id === 10
+    );
+
+    // Step 4: Determine courier_id based on courierServiceName
     let courier_id;
     if (courierServiceName.toLowerCase().includes("xpressbees")) courier_id = 9;
-    else if (courierServiceName.toLowerCase().includes("bluedart+"))
+    else if (courierServiceName.toLowerCase().includes("bluedart"))
       courier_id = 10;
-    else courier_id = 0; // default / unknown
+    else courier_id = 0;
+
+    if (courier_id === 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid courier name. Only Xpressbees and Bluedart supported.",
+      });
+    }
+
+    // Step 5: Find the courier entry for selected courier
+    const courierOptions = validCouriers.filter(
+      (svc) => svc.courier_id === courier_id
+    );
+
+    // Step 6: Match mode_id based on applicable weight
+    const applicableWeight = currentOrder.packageDetails.applicableWeight;
+    let selectedMode = null;
+
+    for (const option of courierOptions) {
+      const slabWeight = parseFloat(option.slab);
+      if (applicableWeight <= slabWeight) {
+        selectedMode = option;
+        break;
+      }
+    }
+
+    // If no slab matched, take the last (highest slab)
+    if (!selectedMode && courierOptions.length > 0) {
+      selectedMode = courierOptions[courierOptions.length - 1];
+    }
+
+    if (!selectedMode) {
+      return res.status(400).json({
+        success: false,
+        message: "Unable to determine mode_id for the courier",
+      });
+    }
+
+    const mode_id = selectedMode.mode_id;
+    console.log("Selected mode_id:", mode_id, "for courier:", courier_id);
 
     let baseName = currentOrder.pickupAddress.contactName || "Warehouse";
     baseName = baseName.substring(0, 10); // first 10 chars
@@ -215,21 +285,14 @@ const createZipypostOrder = async (req, res) => {
       package_width: currentOrder.packageDetails.width || 10,
       package_height: currentOrder.packageDetails.height || 10,
       package_weight: currentOrder.packageDetails.applicableWeight || 0.5,
-      //   shipping_charge: shipping_charge || 0,
-      //   cod_charge: cod_charge || 0,
-      //   purchase_tax: currentOrder.taxAmount || 0,
-      //   purchase_discount: currentOrder.discountAmount || 0,
-      //   collectable_cod: cod_charge
-      //     ? cod_charge + currentOrder.paymentDetails.amount
-      //     : 0,
       warehouse_id: warehouseId.warehouseId,
       payment_type: currentOrder.paymentDetails.method === "COD" ? 2 : 1,
       courier_id,
-      mode_id: shipmentType.courierType === "Domestic (Surface)" ? 3 : 16,
+      mode_id: mode_id
       //   mode_id,
     };
 
-    // console.log("request data", requestBody);
+    console.log("request data", requestBody);
 
     // Call Zipypost API
     const response = await axios.post(
@@ -253,7 +316,7 @@ const createZipypostOrder = async (req, res) => {
       currentOrder.awb_number = result.awb;
       currentOrder.shipment_id = currentOrder.orderId;
       currentOrder.provider = result.courier;
-      currentOrder.partner="ZipyPost";
+      currentOrder.partner = "ZipyPost";
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.totalFreightCharges = finalCharges || 0;
       currentOrder.courierServiceName = courierServiceName;
@@ -446,7 +509,7 @@ const trackOrderZipypost = async (AWBNo) => {
     );
 
     console.log("response data", response.data);
-    console.log("respose status",response.data.result.events)
+    console.log("respose status", response.data.result.events);
     // console.log("response status", response.data.data.scans["20726635"][0].call_logs);
     if (response.data.success === true) {
       return { success: true, data: response.data.result.events };
