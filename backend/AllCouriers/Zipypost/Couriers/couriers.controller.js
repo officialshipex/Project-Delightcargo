@@ -136,13 +136,14 @@ const createZipypostOrder = async (req, res) => {
     const timestamp = Math.floor(Date.now() / 1000);
     const sellerId = process.env.ZIPYPOST_SELLER_ID;
     const token = await getAuthToken();
+    
     const shipmentType = await CourierService.findOne({
       name: courierServiceName.trim(),
       provider: "ZipyPost",
     });
     // Step 1: Call serviceability function
     const serviceability = await checkZipypostServiceability(payload);
-    // console.log("ser", serviceability.data);
+    console.log("ser", serviceability.data);
     // Step 2: Validate serviceability response
     if (
       !serviceability.data ||
@@ -218,8 +219,13 @@ const createZipypostOrder = async (req, res) => {
       warehouseName: finalWarehouseName,
       contactName: currentOrder.pickupAddress.contactName,
       contactNumber: currentOrder.pickupAddress.phoneNumber,
-      AddressLineOne: currentOrder.pickupAddress.address,
-      AddressLineTwo: currentOrder.pickupAddress.address,
+      AddressLineOne: currentOrder.pickupAddress.address
+        ? currentOrder.pickupAddress.address.substring(0, 45)
+        : "",
+      AddressLineTwo:
+        currentOrder.pickupAddress.address.length > 45
+          ? currentOrder.pickupAddress.address.substring(45, 90)
+          : "",
       pincode: currentOrder.pickupAddress.pinCode,
       city: currentOrder.pickupAddress.city,
       //   gst: "",
@@ -264,8 +270,13 @@ const createZipypostOrder = async (req, res) => {
         full_name: currentOrder.pickupAddress.contactName,
         contact_number: currentOrder.pickupAddress.phoneNumber,
         // gstin: currentOrder.pickupAddress.gstin || "",
-        address_line_one: currentOrder.pickupAddress.address,
-        address_line_two: "",
+        address_line_one: currentOrder.pickupAddress.address
+          ? currentOrder.pickupAddress.address.substring(0, 45)
+          : "",
+        address_line_two:
+          currentOrder.pickupAddress.address.length > 45
+            ? currentOrder.pickupAddress.address.substring(45, 90)
+            : "",
         // company_name: currentOrder.pickupAddress.companyName || "",
         pincode: currentOrder.pickupAddress.pinCode,
         city: currentOrder.pickupAddress.city,
@@ -288,7 +299,7 @@ const createZipypostOrder = async (req, res) => {
       warehouse_id: warehouseId.warehouseId,
       payment_type: currentOrder.paymentDetails.method === "COD" ? 2 : 1,
       courier_id,
-      mode_id: mode_id
+      mode_id: mode_id,
       //   mode_id,
     };
 
