@@ -75,18 +75,20 @@ const trackSingleOrder = async (order) => {
       return;
     }
     let result;
-    let normalizedData;
-    if (partner === "ZipyPost") {
-      result = await trackingFunctions[partner](awb_number, shipment_id);
-    } else {
+    // let normalizedData;
+    if (partner && partner === "ZipyPost") {
+      result = await trackingFunctions["ZipyPost"](awb_number, shipment_id);
+    } else if (provider && trackingFunctions[provider]) {
       result = await trackingFunctions[provider](awb_number, shipment_id);
+    } else {
+      console.warn(`No tracking function found for provider: ${provider}`);
+      return;
     }
     if (!result || !result.success || !result.data) return;
-    if (partner === "ZipyPost") {
-      normalizedData = mapTrackingResponse(result.data, partner);
-    } else {
-      normalizedData = mapTrackingResponse(result.data, provider);
-    }
+    const normalizedData = mapTrackingResponse(
+      result.data,
+      partner === "ZipyPost" ? partner : provider
+    );
 
     if (!normalizedData) {
       console.warn(`Failed to map tracking data for AWB: ${awb_number}`);
@@ -303,7 +305,7 @@ const trackSingleOrder = async (order) => {
       }
     }
     if (provider === "Amazon Shipping" || provider === "Amazon") {
-      console.log("normaliz",normalizedData)
+      console.log("normaliz", normalizedData);
       if (normalizedData.ShipmentType === "FORWARD") {
         if (normalizedData.Instructions === "ReadyForReceive") {
           order.status = "Ready To Ship";
@@ -762,34 +764,6 @@ const trackSingleOrder = async (order) => {
           }
         }
       }
-      // const statusMap = {
-      //   "UD:Manifested": { status: "Ready To Ship" },
-      //   "UD:In Transit": { status: "In-transit" },
-      //   "UD:Dispatched": {
-      //     status: "Out for Delivery",
-      //     ndrStatus: "Out for Delivery",
-      //   },
-      //   "RT:In Transit": {
-      //     status: "RTO In-transit",
-      //     ndrStatus: "RTO In-transit",
-      //   },
-      //   "DL:RTO": { status: "RTO Delivered", ndrStatus: "RTO Delivered" },
-      //   "DL:Delivered": { status: "Delivered" },
-      // };
-
-      // const key = `${normalizedData.StatusType}:${normalizedData.Status}`;
-      // const mapped = statusMap[key];
-
-      // if (mapped) {
-      //   order.status = mapped.status;
-      //   if (mapped.ndrStatus) order.ndrStatus = mapped.ndrStatus;
-      // } else if (
-      //   normalizedData.StatusType === "UD" &&
-      //   normalizedData.Status === "Pending" &&
-      //   normalizedData.StatusCode === "ST-108"
-      // ) {
-      //   order.status = "RTO";
-      // }
 
       if (
         (order.ndrStatus === "Undelivered" ||
@@ -967,32 +941,29 @@ const trackSingleOrder = async (order) => {
       console.log("ZipyPost normalizedData:", normalizedData);
     }
 
-    const lastTrackingEntry = order.tracking[order.tracking.length - 1];
+    if (Array.isArray(result.data) && result.data.length > 0) {
+      // If API returned a full list of tracking events
+      const newTrackingArray = result.data.map((item) => {
+        const mapped =
+          partner === "ZipyPost"
+            ? mapTrackingResponse([item], partner)
+            : mapTrackingResponse([item], provider,result?.remark);
 
-    const isSameCheckpoint =
-      lastTrackingEntry &&
-      lastTrackingEntry.StatusLocation === normalizedData.StatusLocation &&
-      new Date(lastTrackingEntry.StatusDateTime).getTime() ===
-        new Date(normalizedData.StatusDateTime).getTime();
-
-    if (isSameCheckpoint) {
-      // Just update the last entry if the checkpoint is the same
-      lastTrackingEntry.status = normalizedData.Status;
-      lastTrackingEntry.Instructions = normalizedData.Instructions;
-      await order.save();
-    } else if (
-      !lastTrackingEntry ||
-      lastTrackingEntry?.Instructions !== normalizedData.Instructions
-    ) {
-      // It's a new checkpoint, so push it
-      order.tracking.push({
-        status: normalizedData.Status,
-        StatusLocation: normalizedData.StatusLocation,
-        StatusDateTime: normalizedData.StatusDateTime,
-        Instructions: normalizedData.Instructions,
+        return {
+          status: mapped?.Status || "N/A",
+          StatusLocation: mapped?.StatusLocation || "Unknown",
+          StatusDateTime: mapped?.StatusDateTime || null,
+          Instructions: mapped?.Instructions || "N/A",
+        };
       });
+
+      // Replace entire tracking array
+      order.tracking = newTrackingArray;
       await order.save();
+      console.log(`Tracking history replaced for ${order.awb_number}`);
       console.log("saved");
+
+      // Wallet update logic (unchanged)
       if (shouldUpdateWallet && balanceTobeAdded > 0) {
         // Step 0: Check if same awb_number already exists twice
         const awbCount = await Wallet.aggregate([
@@ -1108,16 +1079,16 @@ const startTrackingLoop = async () => {
 };
 
 // Start the loop once
-// startTrackingLoop(); 
+// startTrackingLoop();
 
-const mapTrackingResponse = (data, provider) => {
+const mapTrackingResponse = (data, provider,remark) => {
   // console.log("Mapping data for provider:", data);
   if (provider === "Smartship") {
     // console.log("Smartship data", data);
     const scans = data?.scans;
     const orderId = Object.keys(scans || {})[0]; // only one AWB per call
     const scanArray = scans?.[orderId];
-    const latestScan = scanArray?.[0];
+    const latestScan = data;
     // console.log("latestScan", latestScan);
     return {
       Status: latestScan?.status_description || "N/A",
@@ -1129,7 +1100,7 @@ const mapTrackingResponse = (data, provider) => {
   }
   if (provider === "Shree Maruti" || provider === "ShreeMaruti") {
     // console.log("ShreeMaruti data", data);
-    const last = data[0];
+    const last = data;
     // console.log("ShreeMaruti last", last);
     return {
       Status: last?.category || null,
@@ -1166,88 +1137,60 @@ const mapTrackingResponse = (data, provider) => {
     },
 
     Dtdc: {
-      Status: data.trackDetails?.length
-        ? data.trackDetails[data.trackDetails.length - 1].strCode
-        : "N/A",
-      StrRemarks: data.trackHeader?.strRemarks || "N/A",
-      StatusLocation: data.trackDetails?.length
-        ? data.trackDetails[data.trackDetails.length - 1].strOrigin
-        : "N/A",
-      StatusDateTime: data.trackDetails?.length
-        ? formatDTDCDateTime(
-            data.trackDetails[data.trackDetails.length - 1].strActionDate,
-            data.trackDetails[data.trackDetails.length - 1].strActionTime
-          )
+      Status: data ? data.strCode : "N/A",
+      StrRemarks: data ? data.sTrRemarks : "N/A",
+      StatusLocation: data ? data.strOrigin : "N/A",
+      StatusDateTime: data
+        ? formatDTDCDateTime(data?.strActionDate, data?.strActionTime)
         : null,
-      Instructions: data.trackDetails?.length
-        ? data.trackDetails[data.trackDetails.length - 1].strAction
-        : "N/A",
+      Instructions: data ? data.strAction : "N/A",
     },
 
     DTDC: {
-      Status: data.trackDetails?.length
-        ? data.trackDetails[data.trackDetails.length - 1].strCode
-        : "N/A",
-      StrRemarks: data.trackHeader?.strRemarks || "N/A",
-      StatusLocation: data.trackDetails?.length
-        ? data.trackDetails[data.trackDetails.length - 1].strOrigin
-        : "N/A",
-      StatusDateTime: data.trackDetails?.length
-        ? formatDTDCDateTime(
-            data.trackDetails[data.trackDetails.length - 1].strActionDate,
-            data.trackDetails[data.trackDetails.length - 1].strActionTime
-          )
+      Status: data ? data.strCode : "N/A",
+      StrRemarks: data ? data.sTrRemarks : "N/A",
+      StatusLocation: data ? data.strOrigin : "N/A",
+      StatusDateTime: data
+        ? formatDTDCDateTime(data?.strActionDate, data?.strActionTime)
         : null,
-      Instructions: data.trackDetails?.length
-        ? data.trackDetails[data.trackDetails.length - 1].strAction
-        : "N/A",
+      Instructions: data ? data.strAction : "N/A",
     },
 
     "Amazon Shipping": {
       Status: data.summary?.status || "N/A",
-      StrRemarks:
-        data.eventHistory?.length &&
-        data.eventHistory[data.eventHistory.length - 1]?.shipmentType ===
-          "FORWARD"
-          ? data.summary?.trackingDetailCodes?.forward?.[0]
-          : data.summary?.trackingDetailCodes?.reverse?.[1],
+      StrRemarks:remark,
       StatusLocation: data.eventHistory?.length
         ? data.eventHistory[data.eventHistory.length - 1]?.location?.city
         : "N/A",
-      StatusDateTime: data.eventHistory?.length
+      StatusDateTime: data
         ? formatAmazonDate(
-            data.eventHistory[data.eventHistory.length - 1]?.eventTime
+            data?.eventTime
           )
         : "N/A",
-      Instructions: data.eventHistory?.length
-        ? data.eventHistory[data.eventHistory.length - 1]?.eventCode
+      Instructions: data
+        ? data?.eventCode
         : "N/A",
-      ShipmentType: data.eventHistory?.length
-        ? data.eventHistory[data.eventHistory.length - 1]?.shipmentType
+      ShipmentType: data
+        ? data?.shipmentType
         : "N/A",
     },
 
     Amazon: {
       Status: data.summary?.status || "N/A",
-      StrRemarks:
-        data.eventHistory?.length &&
-        data.eventHistory[data.eventHistory.length - 1]?.shipmentType ===
-          "FORWARD"
-          ? data.summary?.trackingDetailCodes?.forward?.[0]
-          : data.summary?.trackingDetailCodes?.reverse?.[1],
+      StrRemarks:remark,
       StatusLocation: data.eventHistory?.length
         ? data.eventHistory[data.eventHistory.length - 1]?.location?.city
         : "N/A",
-      StatusDateTime: data.eventHistory?.length
+      StatusDateTime: data
         ? formatAmazonDate(
-            data.eventHistory[data.eventHistory.length - 1]?.eventTime
+            data?.eventTime
           )
         : "N/A",
-      Instructions: data.eventHistory?.length
-        ? data.eventHistory[data.eventHistory.length - 1]?.eventCode
+      Instructions: data
+        ? data?.eventCode
         : "N/A",
-      ShipmentType: data.eventHistory?.length
-        ? data.eventHistory[data.eventHistory.length - 1]?.shipmentType
+      ShipmentType: data
+        ? data?.shipmentType
         : "N/A",
     },
 
@@ -1265,11 +1208,11 @@ const mapTrackingResponse = (data, provider) => {
       Instructions: data.remarks || null,
     },
     Delhivery: {
-      Status: data.Status || "N/A",
-      StatusType: data.StatusType || "N/A",
+      Status: data.Scan || "N/A",
+      StatusType: data.ScanType || "N/A",
       StatusCode: data.StatusCode || null,
-      StatusLocation: data.StatusLocation || "Unknown",
-      StatusDateTime: data.StatusDateTime || null,
+      StatusLocation: data.ScannedLocation || "Unknown",
+      StatusDateTime: data.ScanDateTime || null,
       Instructions: data.Instructions || null,
     },
     Xpressbees: {

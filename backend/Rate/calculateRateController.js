@@ -20,7 +20,12 @@ const {
 const {
   checkServiceabilityShreeMaruti,
 } = require("../AllCouriers/ShreeMaruti/Couriers/couriers.controller.js");
-const {checkPincodeServiceability}=require("../checkPincodeServiceability/checkPincodeServiceability.controller.js")
+const {
+  checkPincodeServiceability,
+} = require("../checkPincodeServiceability/checkPincodeServiceability.controller.js");
+const {
+  checkZipypostServiceability,
+} = require("../AllCouriers/Zipypost/Couriers/couriers.controller.js");
 const calculateRate = async (req, res) => {
   try {
     const id = req.user._id;
@@ -30,6 +35,7 @@ const calculateRate = async (req, res) => {
       applicableWeight,
       paymentType,
       declaredValue,
+      dimensions,
     } = req.body;
 
     console.log(
@@ -37,7 +43,8 @@ const calculateRate = async (req, res) => {
       deliveryPincode,
       applicableWeight,
       paymentType,
-      declaredValue
+      declaredValue,
+      dimensions
     );
 
     // Step 1: Get user’s plan
@@ -67,6 +74,7 @@ const calculateRate = async (req, res) => {
           "Smartship",
           "Amazon Shipping",
           "EcomExpres",
+          "ZipyPost",
         ].includes(provider)
       ) {
         continue;
@@ -129,6 +137,18 @@ const calculateRate = async (req, res) => {
             declaredValue,
           };
           serviceable = await checkAmazonServiceability(payload);
+        } else if (provider === "ZipyPost") {
+          const payload = {
+            source_pincode: pickUpPincode,
+            destination_pincode: deliveryPincode,
+            payment_type: paymentType,
+            order_value: declaredValue,
+            length: dimensions.length,
+            width: dimensions.width,
+            height: dimensions.height,
+            order_weight: applicableWeight,
+          };
+          serviceable = await checkZipypostServiceability(payload);
         }
       } else {
         // Local says not serviceable → skip API

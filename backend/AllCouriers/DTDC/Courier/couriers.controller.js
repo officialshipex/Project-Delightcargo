@@ -328,7 +328,7 @@ const trackOrderDTDC = async (AWBNo) => {
       },
     });
     // console.log(response.data)
-    return { success: true, data: response.data };
+    return { success: true, data: response.data.trackDetails };
   } catch (error) {
     // console.error(
     //   "Error tracking shipment:",
@@ -341,6 +341,7 @@ const trackOrderDTDC = async (AWBNo) => {
     };
   }
 };
+// trackOrderDTDC('7X105009553');
 
 const checkServiceabilityDTDC = async (originPincode, destinationPincode) => {
   try {

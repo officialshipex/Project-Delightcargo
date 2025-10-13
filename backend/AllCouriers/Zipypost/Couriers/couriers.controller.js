@@ -537,7 +537,7 @@ const trackOrderZipypost = async (AWBNo) => {
     };
   }
 };
-// trackOrderZipypost("152489850354010")
+// trackOrderZipypost("76640506445")
 
 module.exports = {
   createWarehouse,

@@ -1074,9 +1074,10 @@ const ShipeNowOrder = async (req, res) => {
         }
       })
     );
+    // console.log("availa", availableServices);
 
     const filteredServices = availableServices.filter(Boolean);
-
+// console.log("filteredServicess",filteredServices)
     // ✅ calculate zone based on pincodes
     const zone = await getZone(
       order.pickupAddress.pinCode,
