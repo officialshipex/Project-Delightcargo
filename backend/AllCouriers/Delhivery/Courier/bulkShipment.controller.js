@@ -36,7 +36,7 @@ const createShipmentFunctionDelhivery = async (
 
     const eddData = await estimatedDeliveryDate.findOne({
       courier: "Delhivery",
-      serviceName: serviceDetails.name,
+      serviceName: selectedServiceDetails.name,
     });
     let estimateDate = null;
 
