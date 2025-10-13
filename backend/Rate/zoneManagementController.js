@@ -75,7 +75,7 @@ const getPinCodeDetails = async (pincode) => {
       `https://api.postalpincode.in/pincode/${pincode}`
     );
 
-    // console.log("This is the response of India post api", response.data);
+    console.log("This is the response of India post api", response.data);
 
     if (
       response.data &&
