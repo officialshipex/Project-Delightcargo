@@ -197,7 +197,7 @@ const trackSingleOrder = async (order) => {
         const dbMapping = statusDoc.data.find(
           (d) => d.code?.toLowerCase() === normalizedData.Status?.toLowerCase()
         );
-        // console.log("db mapping dtdc",dbMapping)
+        console.log("db mapping dtdc",dbMapping)
         if (dbMapping) {
           // console.log("maped dtdc status",dbMapping.sy_status)
           order.status = dbMapping.sy_status;
@@ -1127,7 +1127,7 @@ const mapTrackingResponse = (data, provider,remark) => {
       Instructions: latestScan?.remark || "N/A",
     };
   }
-  console.log(data,provider)
+  // console.log(data,provider)
   const providerMappings = {
     EcomExpress: {
       Status: data.rts_system_delivery_status || "N/A",
