@@ -328,6 +328,7 @@ const cancelOrderShreeMaruti = async (order_Id) => {
         error: "Error in shipment cancellation",
         details: response.data,
         code: response.status,
+        success:false
       };
     }
   } catch (error) {
@@ -336,6 +337,7 @@ const cancelOrderShreeMaruti = async (order_Id) => {
       error: "Internal Server Error",
       message: error.response?.data || error.message,
       code: error.response?.status || 500,
+      success:false
     };
   }
 };

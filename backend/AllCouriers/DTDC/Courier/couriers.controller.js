@@ -259,6 +259,7 @@ const cancelOrderDTDC = async (AWBNo) => {
       return {
         error: "Order is already cancelled",
         code: 400,
+        success:false
       };
     }
 
@@ -291,6 +292,7 @@ const cancelOrderDTDC = async (AWBNo) => {
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
+        success:false
       };
     }
   } catch (error) {

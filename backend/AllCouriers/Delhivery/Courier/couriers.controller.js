@@ -554,6 +554,7 @@ const cancelOrderDelhivery = async (awb_number) => {
   if (isCancelled) {
     console.log("Order is already cancelled");
     return {
+      success:false,
       error: "Order is already cancelled",
       code: 400,
     };
@@ -580,6 +581,7 @@ const cancelOrderDelhivery = async (awb_number) => {
       return { data: response.data, code: 201 };
     } else {
       return {
+        success:false,
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
@@ -588,6 +590,7 @@ const cancelOrderDelhivery = async (awb_number) => {
   } catch (error) {
     console.error("Error in cancelOrderDelhivery:", error);
     return {
+      success:false,
       error: "Internal Server Error",
       message: error.message,
       code: 500,

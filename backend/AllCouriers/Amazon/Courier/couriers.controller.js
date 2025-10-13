@@ -216,6 +216,7 @@ const cancelShipment = async (shipmentId) => {
   if (isCancelled) {
     console.log("order is allready cancelled");
     return {
+      success:false,
       error: "Order is allready cancelled",
       code: 400,
     };
@@ -251,6 +252,7 @@ const cancelShipment = async (shipmentId) => {
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
+        success:false
       };
     }
 

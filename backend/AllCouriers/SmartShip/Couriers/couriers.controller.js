@@ -408,6 +408,7 @@ const cancelSmartshipOrder = async (client_order_reference_id) => {
       return {
         code: 400,
         error: true,
+        success:false,
         message: "Failed to cancel order",
         details: cancellationDetails?.failure || {},
       };

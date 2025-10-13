@@ -1031,9 +1031,9 @@ const trackOrders = async () => {
     const limit = pLimit(10); // Max 10 concurrent executions
 
     const allOrders = await Order.find({
-      status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      // provider: "Amazon Shipping",
-      // awb_number: "364157621588",
+      status: { $nin: ["new", "Cancelled", "Deliveredd", "RTO Delivered"] },
+      provider: "Dtdc",
+      awb_number: "7D113288324",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1127,6 +1127,7 @@ const mapTrackingResponse = (data, provider,remark) => {
       Instructions: latestScan?.remark || "N/A",
     };
   }
+  console.log(data,provider)
   const providerMappings = {
     EcomExpress: {
       Status: data.rts_system_delivery_status || "N/A",
@@ -1137,23 +1138,23 @@ const mapTrackingResponse = (data, provider,remark) => {
     },
 
     Dtdc: {
-      Status: data ? data.strCode : "N/A",
-      StrRemarks: data ? data.sTrRemarks : "N/A",
-      StatusLocation: data ? data.strOrigin : "N/A",
+      Status: data ? data[0].strCode : "N/A",
+      StrRemarks: data ? data[0].sTrRemarks : "N/A",
+      StatusLocation: data ? data[0].strOrigin : "N/A",
       StatusDateTime: data
-        ? formatDTDCDateTime(data?.strActionDate, data?.strActionTime)
+        ? formatDTDCDateTime(data[0]?.strActionDate, data[0]?.strActionTime)
         : null,
-      Instructions: data ? data.strAction : "N/A",
+      Instructions: data ? data[0].strAction : "N/A",
     },
 
     DTDC: {
-      Status: data ? data.strCode : "N/A",
-      StrRemarks: data ? data.sTrRemarks : "N/A",
-      StatusLocation: data ? data.strOrigin : "N/A",
+      Status: data ? data[0].strCode : "N/A",
+      StrRemarks: data ? data[0].sTrRemarks : "N/A",
+      StatusLocation: data ? data[0].strOrigin : "N/A",
       StatusDateTime: data
-        ? formatDTDCDateTime(data?.strActionDate, data?.strActionTime)
+        ? formatDTDCDateTime(data[0]?.strActionDate, data[0]?.strActionTime)
         : null,
-      Instructions: data ? data.strAction : "N/A",
+      Instructions: data ? data[0].strAction : "N/A",
     },
 
     "Amazon Shipping": {
