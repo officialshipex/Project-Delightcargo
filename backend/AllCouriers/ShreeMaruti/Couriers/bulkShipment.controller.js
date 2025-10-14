@@ -40,7 +40,7 @@ const createShipmentFunctionShreeMaruti = async (
 
     const eddData = await estimatedDeliveryDate.findOne({
       courier: "Shree Maruti",
-      serviceName: serviceDetails.name,
+      serviceName: selectedServiceDetails.name,
     });
     let estimateDate = null;
 
