@@ -307,7 +307,7 @@ const cancelOrderDTDC = async (AWBNo) => {
     };
   }
 };
-// cancelOrderDTDC("I75009163")
+// cancelOrderDTDC("7G1187224")
 
 // DTDC Tracking API Config
 const DTDC_TRACKING_API_URL = `https://blktracksvc.dtdc.com/dtdc-api/rest/JSONCnTrk/getTrackDetails`;
@@ -329,7 +329,7 @@ const trackOrderDTDC = async (AWBNo) => {
         "x-access-token": access_key,
       },
     });
-    // console.log(response.data)
+    console.log(response.data)
     return { success: true, data: response.data.trackDetails };
   } catch (error) {
     // console.error(
@@ -343,7 +343,7 @@ const trackOrderDTDC = async (AWBNo) => {
     };
   }
 };
-// trackOrderDTDC('7X105009553');
+// trackOrderDTDC('7G1187224');
 
 const checkServiceabilityDTDC = async (originPincode, destinationPincode) => {
   try {

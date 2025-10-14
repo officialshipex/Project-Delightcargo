@@ -33,9 +33,9 @@ const store = MongoStore.create({
   crypto: { secret: process.env.MONGO_SECRET },
   touchAfter: 24 * 3600,
 });
-(async () => {
-  await loadCourierPincodes();
-})();
+// (async () => {
+//   await loadCourierPincodes();
+// })();
 
 app.use(
   session({

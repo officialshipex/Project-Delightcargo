@@ -85,7 +85,13 @@ const createOrder = async (req, res) => {
 
   // console.log("bodyyyyy", req.body);
   try {
-    const { courierServiceName, id, provider, finalCharges,estimatedDeliveryDate } = req.body;
+    const {
+      courierServiceName,
+      id,
+      provider,
+      finalCharges,
+      estimatedDeliveryDate,
+    } = req.body;
     const services = await Services.findOne({ name: courierServiceName });
     const currentOrder = await Order.findById(id);
     const users = await user.findById({ _id: currentOrder.userId });
@@ -214,7 +220,7 @@ const createOrder = async (req, res) => {
       currentOrder.totalFreightCharges = finalCharges;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.courierServiceName = courierServiceName;
-      currentOrder.estimatedDeliveryDate=estimatedDeliveryDate;
+      currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress?.city || "N/A",
@@ -328,7 +334,7 @@ const cancelOrderShreeMaruti = async (order_Id) => {
         error: "Error in shipment cancellation",
         details: response.data,
         code: response.status,
-        success:false
+        success: false,
       };
     }
   } catch (error) {
@@ -337,7 +343,7 @@ const cancelOrderShreeMaruti = async (order_Id) => {
       error: "Internal Server Error",
       message: error.response?.data || error.message,
       code: error.response?.status || 500,
-      success:false
+      success: false,
     };
   }
 };
@@ -432,11 +438,11 @@ const trackOrderShreeMaruti = async (awbNumber) => {
         Authorization: `Bearer ${token}`,
       },
     });
-    // console.log("ressssssss", response.data.statuses);
+    // console.log("ressssssss", response.data);
 
     return {
       success: true,
-      data: response.data.statuses,
+      data: (response.data.statuses || []).reverse(),
     };
   } catch (error) {
     console.error(
@@ -451,7 +457,7 @@ const trackOrderShreeMaruti = async (awbNumber) => {
     };
   }
 };
-// trackOrderShreeMaruti("SHIP40000000002");
+// trackOrderShreeMaruti("SHIP40000000003");
 
 // Serviceability
 const checkServiceabilityShreeMaruti = async (payload) => {

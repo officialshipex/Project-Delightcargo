@@ -85,10 +85,16 @@ const trackSingleOrder = async (order) => {
       return;
     }
     if (!result || !result.success || !result.data) return;
+    const latestTrackingEvent = Array.isArray(result.data)
+      ? result.data[result.data.length - 1] // last (most recent)
+      : result.data;
+
+    // Normalize only the latest one
     const normalizedData = mapTrackingResponse(
-      result.data,
+      [latestTrackingEvent],
       partner === "ZipyPost" ? partner : provider
     );
+    console.log("normalized",normalizedData)
 
     if (!normalizedData) {
       console.warn(`Failed to map tracking data for AWB: ${awb_number}`);
@@ -197,7 +203,7 @@ const trackSingleOrder = async (order) => {
         const dbMapping = statusDoc.data.find(
           (d) => d.code?.toLowerCase() === normalizedData.Status?.toLowerCase()
         );
-        console.log("db mapping dtdc",dbMapping)
+        console.log("db mapping dtdc", dbMapping);
         if (dbMapping) {
           // console.log("maped dtdc status",dbMapping.sy_status)
           order.status = dbMapping.sy_status;
@@ -947,7 +953,7 @@ const trackSingleOrder = async (order) => {
         const mapped =
           partner === "ZipyPost"
             ? mapTrackingResponse([item], partner)
-            : mapTrackingResponse([item], provider,result?.remark);
+            : mapTrackingResponse([item], provider, result?.remark);
 
         return {
           status: mapped?.Status || "N/A",
@@ -1031,9 +1037,9 @@ const trackOrders = async () => {
     const limit = pLimit(10); // Max 10 concurrent executions
 
     const allOrders = await Order.find({
-      status: { $nin: ["new", "Cancelled", "Deliveredd", "RTO Delivered"] },
-      provider: "Dtdc",
-      awb_number: "7D113288324",
+      status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
+      // provider: "ShreeMaruti",
+      // awb_number: "SHIP40000000003",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1081,7 +1087,7 @@ const startTrackingLoop = async () => {
 // Start the loop once
 // startTrackingLoop();
 
-const mapTrackingResponse = (data, provider,remark) => {
+const mapTrackingResponse = (data, provider, remark) => {
   // console.log("Mapping data for provider:", data);
   if (provider === "Smartship") {
     // console.log("Smartship data", data);
@@ -1100,7 +1106,7 @@ const mapTrackingResponse = (data, provider,remark) => {
   }
   if (provider === "Shree Maruti" || provider === "ShreeMaruti") {
     // console.log("ShreeMaruti data", data);
-    const last = data;
+    const last = data[0];
     // console.log("ShreeMaruti last", last);
     return {
       Status: last?.category || null,
@@ -1119,12 +1125,12 @@ const mapTrackingResponse = (data, provider,remark) => {
     const latestScan = scanArray?.[0]; // take the most recent scan
     console.log("last", scanArray[0]);
     return {
-      Status: latestScan?.scan || "N/A",
-      scanCode: latestScan?.scan_code ?? null,
+      Status: latestScan[0]?.scan || "N/A",
+      scanCode: latestScan[0]?.scan_code ?? null,
       // StrRemarks: latestScan?.remark || "N/A",
-      StatusLocation: latestScan?.location || "Unknown",
-      StatusDateTime: latestScan?.scan_time || null,
-      Instructions: latestScan?.remark || "N/A",
+      StatusLocation: latestScan[0]?.location || "Unknown",
+      StatusDateTime: latestScan[0]?.scan_time || null,
+      Instructions: latestScan[0]?.remark || "N/A",
     };
   }
   // console.log(data,provider)
@@ -1158,41 +1164,21 @@ const mapTrackingResponse = (data, provider,remark) => {
     },
 
     "Amazon Shipping": {
-      Status: data.summary?.status || "N/A",
-      StrRemarks:remark,
-      StatusLocation: data.eventHistory?.length
-        ? data.eventHistory[data.eventHistory.length - 1]?.location?.city
-        : "N/A",
-      StatusDateTime: data
-        ? formatAmazonDate(
-            data?.eventTime
-          )
-        : "N/A",
-      Instructions: data
-        ? data?.eventCode
-        : "N/A",
-      ShipmentType: data
-        ? data?.shipmentType
-        : "N/A",
+      Status: data[0].eventCode || "N/A",
+      StrRemarks: remark,
+      StatusLocation: data[0]?.location?.city,
+      StatusDateTime: data ? formatAmazonDate(data[0]?.eventTime) : "N/A",
+      Instructions: data ? data[0]?.eventCode : "N/A",
+      ShipmentType: data ? data[0]?.shipmentType : "N/A",
     },
 
     Amazon: {
-      Status: data.summary?.status || "N/A",
-      StrRemarks:remark,
-      StatusLocation: data.eventHistory?.length
-        ? data.eventHistory[data.eventHistory.length - 1]?.location?.city
-        : "N/A",
-      StatusDateTime: data
-        ? formatAmazonDate(
-            data?.eventTime
-          )
-        : "N/A",
-      Instructions: data
-        ? data?.eventCode
-        : "N/A",
-      ShipmentType: data
-        ? data?.shipmentType
-        : "N/A",
+      Status: data[0].eventCode || "N/A",
+      StrRemarks: remark,
+      StatusLocation: data[0]?.location?.city,
+      StatusDateTime: data ? formatAmazonDate(data[0]?.eventTime) : "N/A",
+      Instructions: data ? data[0]?.eventCode : "N/A",
+      ShipmentType: data ? data[0]?.shipmentType : "N/A",
     },
 
     Shiprocket: {
@@ -1209,12 +1195,12 @@ const mapTrackingResponse = (data, provider,remark) => {
       Instructions: data.remarks || null,
     },
     Delhivery: {
-      Status: data.Scan || "N/A",
-      StatusType: data.ScanType || "N/A",
-      StatusCode: data.StatusCode || null,
-      StatusLocation: data.ScannedLocation || "Unknown",
-      StatusDateTime: data.ScanDateTime || null,
-      Instructions: data.Instructions || null,
+      Status: data[0].Scan || "N/A",
+      StatusType: data[0].ScanType || "N/A",
+      StatusCode: data[0].StatusCode || null,
+      StatusLocation: data[0].ScannedLocation || "Unknown",
+      StatusDateTime: data[0].ScanDateTime || null,
+      Instructions: data[0].Instructions || null,
     },
     Xpressbees: {
       Status: data.tracking_status || null,
