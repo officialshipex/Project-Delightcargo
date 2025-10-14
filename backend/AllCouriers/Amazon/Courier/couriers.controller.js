@@ -216,6 +216,7 @@ const cancelShipment = async (shipmentId) => {
   if (isCancelled) {
     console.log("order is allready cancelled");
     return {
+      success:false,
       error: "Order is allready cancelled",
       code: 400,
     };
@@ -251,6 +252,7 @@ const cancelShipment = async (shipmentId) => {
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
+        success:false
       };
     }
 
@@ -289,14 +291,25 @@ const getShipmentTracking = async (trackingId) => {
         },
       }
     );
-    // console.log("response", response.data.payload);
+    console.log("response", response.data.payload);
     // console.log(
     //   "Tracking Information:",
     //   response.data.payload.eventHistory[
     //     response.data.payload.eventHistory.length - 4
     //   ]
     // );
-    return { success: true, data: response.data.payload };
+    const remarkData = response.data.payload.summary?.trackingDetailCodes;
+    let remark;
+    if (
+      response.data.payload.eventHistory[
+        response.data.payload.eventHistory.length - 1
+      ].shipmentType === "FORWARD"
+    ) {
+      remark = remarkData?.forward?.[0];
+    } else{
+      remark=remarkData?.reverse[1]
+    }
+    return { success: true, data: response.data.payload.eventHistory,remark };
   } catch (error) {
     console.error(
       "Error fetching tracking information:",

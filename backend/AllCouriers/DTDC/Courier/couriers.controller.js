@@ -259,6 +259,7 @@ const cancelOrderDTDC = async (AWBNo) => {
       return {
         error: "Order is already cancelled",
         code: 400,
+        success:false
       };
     }
 
@@ -291,6 +292,7 @@ const cancelOrderDTDC = async (AWBNo) => {
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
+        success:false
       };
     }
   } catch (error) {
@@ -305,7 +307,7 @@ const cancelOrderDTDC = async (AWBNo) => {
     };
   }
 };
-// cancelOrderDTDC("I75009163")
+// cancelOrderDTDC("7G1187224")
 
 // DTDC Tracking API Config
 const DTDC_TRACKING_API_URL = `https://blktracksvc.dtdc.com/dtdc-api/rest/JSONCnTrk/getTrackDetails`;
@@ -327,8 +329,8 @@ const trackOrderDTDC = async (AWBNo) => {
         "x-access-token": access_key,
       },
     });
-    // console.log(response.data)
-    return { success: true, data: response.data };
+    console.log(response.data)
+    return { success: true, data: response.data.trackDetails };
   } catch (error) {
     // console.error(
     //   "Error tracking shipment:",
@@ -341,6 +343,7 @@ const trackOrderDTDC = async (AWBNo) => {
     };
   }
 };
+// trackOrderDTDC('7G1187224');
 
 const checkServiceabilityDTDC = async (originPincode, destinationPincode) => {
   try {

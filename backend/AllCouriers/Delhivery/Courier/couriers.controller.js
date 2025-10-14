@@ -307,7 +307,7 @@ const checkPincodeServiceabilityDelhivery = async (
       },
       params: { filter_codes: deliveryPincode },
     });
-    console.log("delivery service", deliveryResponse.data.delivery_codes);
+    // console.log("delivery service", deliveryResponse.data.delivery_codes);
     const deliveryCodes = deliveryResponse.data.delivery_codes || [];
     let deliveryServiceable = false;
 
@@ -326,7 +326,7 @@ const checkPincodeServiceabilityDelhivery = async (
       },
       params: { filter_codes: pickUpPincode },
     });
-    console.log("pickup servi", pickupResponse.data.delivery_codes);
+    // console.log("pickup servi", pickupResponse.data.delivery_codes);
     const pickupCodes = pickupResponse.data.delivery_codes || [];
     let pickupServiceable = false;
 
@@ -349,7 +349,6 @@ const checkPincodeServiceabilityDelhivery = async (
 
 const trackShipmentDelhivery = async (waybill) => {
   if (!waybill) {
-    // return res.status(400).json({ error: "Waybill number is required" });
     return {
       success: false,
       data: "Waybill number is required",
@@ -357,7 +356,6 @@ const trackShipmentDelhivery = async (waybill) => {
   }
 
   try {
-    // console.log(API_TOKEN)
     const response = await axios.get(
       `${url}/api/v1/packages/json/?waybill=${waybill}`,
       {
@@ -366,42 +364,33 @@ const trackShipmentDelhivery = async (waybill) => {
         },
       }
     );
-    // console.log(response)
-    // console.log("lllllllllll", response?.data?.ShipmentData[0])
-    // console.log("cxxxxxxxx",response.data.ShipmentData[0].Shipment.Status.Status);
-    // console.log("rrrrrrrrrr", response.data.ShipmentData[0].Shipment.ReferenceNo)
-    // console.log()
-    const status = response?.data?.ShipmentData[0]?.Shipment?.Status?.Status;
-    // console.log(status)
-    if (
-      // status === "Manifested" ||
-      // status === "In Transit" ||
-      // status === "Delivered" ||
-      // status === "Pending" ||
-      // status === "Dispatched" ||
-      // status === "RTO" ||
-      // status === "Not Picked"
-      response.status === 200
-    ) {
-      return {
-        success: true,
-        id: response.data.ShipmentData[0].Shipment.ReferenceNo,
-        data: response.data.ShipmentData[0].Shipment.Status,
-      };
-    } else {
+
+    const shipmentData = response?.data?.ShipmentData?.[0]?.Shipment;
+    // console.log("shi",shipmentData)
+    if (!shipmentData) {
       return {
         success: false,
-        data: "Error in tracking",
+        data: "No shipment data found",
       };
     }
+
+    // Extract scans and remove the ScanDetail key
+    const scans = shipmentData.Scans?.map((item) => item.ScanDetail) || [];
+// console.log("ship",scans)
+    return {
+      success: true,
+      id: shipmentData.ReferenceNo,
+      data: scans, // clean array without ScanDetail
+    };
   } catch (error) {
-    // console.error("Error tracking shipment:");
+    console.error("Error tracking shipment:", error.message);
     return {
       success: false,
       data: "Error in tracking",
     };
   }
 };
+
 // trackShipmentDelhivery("35973710033224")
 
 const generateShippingLabel = async (req, res) => {
@@ -565,6 +554,7 @@ const cancelOrderDelhivery = async (awb_number) => {
   if (isCancelled) {
     console.log("Order is already cancelled");
     return {
+      success:false,
       error: "Order is already cancelled",
       code: 400,
     };
@@ -591,6 +581,7 @@ const cancelOrderDelhivery = async (awb_number) => {
       return { data: response.data, code: 201 };
     } else {
       return {
+        success:false,
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
@@ -599,6 +590,7 @@ const cancelOrderDelhivery = async (awb_number) => {
   } catch (error) {
     console.error("Error in cancelOrderDelhivery:", error);
     return {
+      success:false,
       error: "Internal Server Error",
       message: error.message,
       code: 500,

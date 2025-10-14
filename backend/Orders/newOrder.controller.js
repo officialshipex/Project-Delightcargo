@@ -1074,9 +1074,10 @@ const ShipeNowOrder = async (req, res) => {
         }
       })
     );
+    // console.log("availa", availableServices);
 
     const filteredServices = availableServices.filter(Boolean);
-
+    // console.log("filteredServicess",filteredServices)
     // ✅ calculate zone based on pincodes
     const zone = await getZone(
       order.pickupAddress.pinCode,
@@ -1580,6 +1581,212 @@ const GetTrackingByAwbs = async (req, res) => {
   }
 };
 
+const bulkCancelOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  try {
+    const { selectedOrders } = req.body;
+    const userId = req.user._id;
+
+    if (!Array.isArray(selectedOrders) || selectedOrders.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No orders selected for cancellation.",
+      });
+    }
+
+    // Fetch all orders
+    const orders = await Order.find({ _id: { $in: selectedOrders } });
+    if (!orders.length)
+      return res
+        .status(404)
+        .json({ success: false, message: "No matching orders found." });
+
+    // Fetch user and wallet
+    const userDoc = await user.findById(userId);
+    if (!userDoc)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found." });
+
+    const walletId = userDoc.Wallet;
+    if (!walletId)
+      return res
+        .status(404)
+        .json({ success: false, message: "User wallet not found." });
+
+    const walletDoc = await Wallet.findById(walletId);
+    if (!walletDoc)
+      return res
+        .status(404)
+        .json({ success: false, message: "Wallet not found." });
+
+    let successCount = 0;
+    let failedCount = 0;
+    const results = [];
+
+    // Loop through each order separately to ensure isolated transactions
+    for (const currentOrder of orders) {
+      const orderSession = await mongoose.startSession();
+      orderSession.startTransaction();
+
+      try {
+        if (
+          !["Booked", "Not Picked", "Ready To Ship"].includes(
+            currentOrder.status
+          )
+        ) {
+          failedCount++;
+          results.push({
+            orderId: currentOrder._id,
+            status: "skipped",
+            reason: `Order status is '${currentOrder.status}', not cancellable.`,
+          });
+          await orderSession.abortTransaction();
+          orderSession.endSession();
+          continue;
+        }
+
+        // ✅ Determine provider (special case for ZipyPost)
+        const provider =
+          currentOrder.provider === "ZipyPost" ||
+          currentOrder.partner === "ZipyPost"
+            ? "ZipyPost"
+            : currentOrder.provider;
+
+        // --- Cancel order by provider ---
+        let cancelResponse;
+        switch (currentOrder.provider) {
+          case "Delhivery":
+            cancelResponse = await cancelOrderDelhivery(
+              currentOrder.awb_number
+            );
+            break;
+          case "Amazon Shipping":
+            cancelResponse = await cancelShipment(currentOrder.shipment_id);
+            break;
+          case "ZipyPost":
+            cancelResponse = await cancelOrderZipypost(currentOrder.awb_number);
+            break;
+          case "Shree Maruti":
+            cancelResponse = await cancelOrderShreeMaruti(currentOrder.orderId);
+            break;
+          case "Dtdc":
+            cancelResponse = await cancelOrderDTDC(currentOrder.awb_number);
+            break;
+          default:
+            failedCount++;
+            results.push({
+              orderId: currentOrder._id,
+              status: "failed",
+              reason: `Unknown provider: ${currentOrder.provider}`,
+            });
+            await orderSession.abortTransaction();
+            orderSession.endSession();
+            continue;
+        }
+
+        // --- Handle API failure ---
+        if (cancelResponse?.success === false) {
+          failedCount++;
+          results.push({
+            orderId: currentOrder._id,
+            status: "failed",
+            reason:
+              cancelResponse?.message ||
+              cancelResponse?.error ||
+              "Provider API returned failure",
+          });
+          await orderSession.abortTransaction();
+          orderSession.endSession();
+          continue;
+        }
+
+        // --- Refund wallet balance safely ---
+        const balanceToAdd =
+          currentOrder.totalFreightCharges === "N/A"
+            ? 0
+            : parseFloat(currentOrder.totalFreightCharges) || 0;
+
+        if (balanceToAdd > 0) {
+          const updatedWallet = await Wallet.findOneAndUpdate(
+            { _id: walletId },
+            { $inc: { balance: balanceToAdd } },
+            { new: true, session: orderSession }
+          );
+
+          await Wallet.updateOne(
+            { _id: walletId },
+            {
+              $push: {
+                transactions: {
+                  channelOrderId: currentOrder.orderId || null,
+                  category: "credit",
+                  amount: balanceToAdd,
+                  balanceAfterTransaction: updatedWallet.balance,
+                  date: new Date(),
+                  awb_number: currentOrder.awb_number || "",
+                  description: "Freight Charges Received",
+                },
+              },
+            },
+            { session: orderSession }
+          );
+        }
+
+        // --- Update order details ---
+        currentOrder.status = "Cancelled";
+
+        currentOrder.tracking.push({
+          status: "Cancelled",
+          StatusLocation: "",
+          StatusDateTime: new Date(),
+          Instructions: "Order cancelled successfully",
+        });
+
+        await currentOrder.save({ session: orderSession });
+        await orderSession.commitTransaction();
+        orderSession.endSession();
+
+        successCount++;
+        results.push({
+          orderId: currentOrder._id,
+          status: "success",
+          provider: currentOrder.provider,
+        });
+      } catch (err) {
+        await orderSession.abortTransaction();
+        orderSession.endSession();
+        failedCount++;
+        results.push({
+          orderId: currentOrder._id,
+          status: "failed",
+          reason: err.message,
+        });
+      }
+    }
+
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      totalOrders: orders.length,
+      successCount,
+      failedCount,
+      message: `✅ ${successCount} order(s) cancelled successfully, ❌ ${failedCount} order(s) failed.`,
+      details: results,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Bulk Cancel Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error during bulk cancellation.",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   newOrder,
   getOrders,
@@ -1605,4 +1812,5 @@ module.exports = {
   setPrimaryPickupAddress,
   deletePickupAddress,
   getShippingOrders,
+  bulkCancelOrder,
 };

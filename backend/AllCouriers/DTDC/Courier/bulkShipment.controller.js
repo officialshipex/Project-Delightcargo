@@ -158,6 +158,7 @@ const createOrderDTDC = async (
         },
       }
     );
+    console.log("response dtdc",response.data)
     // } else {
     // return res.status(400).json({ success: false, message: "Low Balance" });
     // }

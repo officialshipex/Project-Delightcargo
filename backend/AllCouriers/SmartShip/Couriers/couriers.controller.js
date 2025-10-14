@@ -408,6 +408,7 @@ const cancelSmartshipOrder = async (client_order_reference_id) => {
       return {
         code: 400,
         error: true,
+        success:false,
         message: "Failed to cancel order",
         details: cancellationDetails?.failure || {},
       };
@@ -444,10 +445,13 @@ const trackOrderSmartShip = async (AWBNo, shipment_id) => {
     );
 
     // console.log("response data", response.data);
-    // console.log("respose status",response.data.data.scans)
+    console.log("respose status",response.data.data.scans)
     // console.log("response status", response.data.data.scans["20726635"][0].call_logs);
     if (response.data.message === "success") {
-      return { success: true, data: response.data.data };
+      const trackingData=response.data.data.scans
+      const request_order_id=Object.keys(trackingData || {})[0];
+      const trackingArray=trackingData?.[request_order_id];
+      return { success: true, data: trackingArray };
     }
   } catch (error) {
     console.error(
