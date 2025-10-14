@@ -94,7 +94,7 @@ const trackSingleOrder = async (order) => {
       [latestTrackingEvent],
       partner === "ZipyPost" ? partner : provider
     );
-    console.log("normalized",normalizedData)
+    console.log("normalized", normalizedData);
 
     if (!normalizedData) {
       console.warn(`Failed to map tracking data for AWB: ${awb_number}`);
@@ -1060,23 +1060,26 @@ const trackOrders = async () => {
 
 const startTrackingLoop = async () => {
   try {
-    const now = new Date();
-    const currentHour = now.getHours(); // 0 - 23
+    // Get current time in IST
+    const istDate = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+    );
+    const currentHour = istDate.getHours();
 
     if (currentHour >= 7 && currentHour <= 23) {
-      console.log("🕒 Starting Order Tracking at", now.toLocaleTimeString());
-
-      // Run tracking (may take ~20 min)
+      console.log(
+        "🕒 Starting Order Tracking at",
+        istDate.toLocaleTimeString("en-IN")
+      );
       await trackOrders();
-
       console.log("✅ Tracking completed. Next run after 1 hour...");
-      setTimeout(startTrackingLoop, 1 * 60 * 60 * 1000); // wait 1 hour after finish
+      setTimeout(startTrackingLoop, 60 * 60 * 1000); // 1 hour
     } else {
       console.log(
         "🌙 Outside tracking window, will retry in 1 hour:",
-        now.toLocaleTimeString()
+        istDate.toLocaleTimeString("en-IN")
       );
-      setTimeout(startTrackingLoop, 1 * 60 * 60 * 1000); // check again in 1 hour
+      setTimeout(startTrackingLoop, 60 * 60 * 1000);
     }
   } catch (error) {
     console.error("❌ Error in tracking loop:", error);
@@ -1133,7 +1136,7 @@ const mapTrackingResponse = (data, provider, remark) => {
       Instructions: latestScan[0]?.remark || "N/A",
     };
   }
-  console.log(data,provider)
+  console.log(data, provider);
   const providerMappings = {
     EcomExpress: {
       Status: data.rts_system_delivery_status || "N/A",
