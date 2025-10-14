@@ -46,7 +46,7 @@ const limiter = new Bottleneck({
 
 const trackSingleOrder = async (order) => {
   try {
-    // console.log("Tracking order:", order.orderId);
+    console.log("Tracking order:", order.awb_number);
     const { provider, awb_number, shipment_id, partner } = order;
     if (!provider || !awb_number) return;
 
@@ -1038,8 +1038,8 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      // provider: "ShreeMaruti",
-      // awb_number: "SHIP40000000003",
+      // provider: "Dtdc",
+      // awb_number: "7X105009552",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1133,7 +1133,7 @@ const mapTrackingResponse = (data, provider, remark) => {
       Instructions: latestScan[0]?.remark || "N/A",
     };
   }
-  // console.log(data,provider)
+  console.log(data,provider)
   const providerMappings = {
     EcomExpress: {
       Status: data.rts_system_delivery_status || "N/A",
