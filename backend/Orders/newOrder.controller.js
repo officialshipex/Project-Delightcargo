@@ -1787,6 +1787,57 @@ const bulkCancelOrder = async (req, res) => {
   }
 };
 
+const checkBulkPickup = async (req, res) => {
+  try {
+    const { orderIds } = req.query; // array of order IDs
+
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No order IDs provided" });
+    }
+
+    // Fetch orders with their pickupAddress
+    const orders = await Order.find({ _id: { $in: orderIds } }).select(
+      "pickupAddress"
+    );
+
+    if (orders.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Orders not found" });
+    }
+
+    // Only 1 order selected → popup required
+    if (orders.length === 1) {
+      return res.json({
+        success: true,
+        showPopup: true,
+        orders,
+      });
+    }
+
+    // Check if all pickup addresses are the same
+    const pickupAddresses = orders.map((o) =>
+      JSON.stringify(o.pickupAddress || {})
+    );
+    const allSame =
+      pickupAddresses.every((addr) => addr === pickupAddresses[0]) &&
+      pickupAddresses[0] !== "{}";
+
+    res.json({
+      success: true,
+      showPopup: !allSame, // true if addresses differ → show popup
+      allSame,
+      orders,
+      defaultPickup: allSame ? orders[0].pickupAddress : null,
+    });
+  } catch (error) {
+    console.error("Error in checkBulkPickup:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 module.exports = {
   newOrder,
   getOrders,
@@ -1813,4 +1864,5 @@ module.exports = {
   deletePickupAddress,
   getShippingOrders,
   bulkCancelOrder,
+  checkBulkPickup
 };
