@@ -1087,7 +1087,7 @@ const startTrackingLoop = async () => {
   }
 };
 
-startTrackingLoop(); 
+// startTrackingLoop(); 
 
 
 if (process.env.NODE_ENV === "production") {
