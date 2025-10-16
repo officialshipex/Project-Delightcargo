@@ -1090,6 +1090,11 @@ const startTrackingLoop = async () => {
 // Start the loop once
 // startTrackingLoop();
 
+if (process.env.NODE_ENV === "production") {
+  startTrackingLoop();
+}
+
+
 const mapTrackingResponse = (data, provider, remark) => {
   // console.log("Mapping data for provider:", data);
   if (provider === "Smartship") {

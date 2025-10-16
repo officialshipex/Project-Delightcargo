@@ -21,6 +21,15 @@ const orderRegistrationOneStep = async (
     if (!currentOrder) {
       return { success: false, message: "Order not found" };
     }
+
+    // if (currentOrder.status !== "new") {
+    //   return {
+    //     status: 400,
+    //     success: false,
+    //     message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+    //   };
+    // }
+
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
@@ -54,7 +63,6 @@ const orderRegistrationOneStep = async (
         estimateDate.setDate(estimateDate.getDate() + deliveryDays);
       }
     }
-
 
     const user = await User.findById(currentOrder.userId);
     if (!user) {

@@ -440,7 +440,7 @@ async function calculateRateForServiceBulk(payload) {
       filteredServices,
       // rateCardType,
     } = payload;
-    console.log("9999999999", filteredServices);
+    // console.log("9999999999", payload);
     const result = await getZone(pickupPincode, deliveryPincode);
 
     const currentZone = result.zone;
@@ -528,7 +528,7 @@ async function calculateRateForServiceBulk(payload) {
           finalCharges: totalChargesForward,
         },
       };
-      if (allRates.courierServiceName === filteredServices.name) {
+      if (allRates.courierServiceName.trim() === filteredServices.name.trim()) {
         ans.push(allRates);
       }
       // ans.push(allRates);

@@ -24,6 +24,15 @@ const createShipmentFunctionShreeMaruti = async (
   try {
     const token = await getToken();
     const currentOrder = await Order.findById(orderId);
+
+    // if (currentOrder.status !== "new") {
+    //   return {
+    //     status: 400,
+    //     success: false,
+    //     message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+    //   };
+    // }
+
     const currentWallet = await Wallet.findById(walletId);
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,

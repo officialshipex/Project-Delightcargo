@@ -7,6 +7,7 @@ const Wallet = require("../../../models/wallet");
 const CourierService = require("../../../models/CourierService.Schema");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
+const mongoose = require("mongoose");
 
 const createWarehouse = async (
   userId,
@@ -69,6 +70,9 @@ const createWarehouse = async (
 };
 
 const createZipypostOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const {
       id,
@@ -79,21 +83,46 @@ const createZipypostOrder = async (req, res) => {
       estimatedDeliveryDate,
     } = req.body;
 
-    console.log(
-      "zipypost",
-      id,
-      provider,
-      finalCharges,
-      courierServiceName,
-      courier,
-      estimatedDeliveryDate
+    const currentOrder = await Order.findById(id).session(session);
+    if (!currentOrder) {
+      throw new Error("Order not found");
+    }
+
+    if (currentOrder.status !== "new") {
+      throw new Error(
+        `Shipment cannot be created because order status is '${currentOrder.status}'.`
+      );
+    }
+
+    const user = await User.findById(currentOrder.userId).session(session);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    const currentWallet = await Wallet.findById(user.Wallet).session(session);
+    if (!currentWallet) {
+      throw new Error("Wallet not found");
+    }
+
+    const walletHoldAmount = currentWallet?.holdAmount || 0;
+    const effectiveBalance = currentWallet.balance - walletHoldAmount;
+    if (effectiveBalance < finalCharges) {
+      throw new Error("Insufficient Wallet Balance");
+    }
+
+    const zone = await getZone(
+      currentOrder.pickupAddress.pinCode,
+      currentOrder.receiverAddress.pinCode
     );
-    // Fetch order, user, wallet details
-    const currentOrder = await Order.findById(id);
-    if (!currentOrder)
-      return res
-        .status(404)
-        .json({ success: false, message: "Order not found" });
+    if (!zone) {
+      throw new Error("Pincode not serviceable");
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sellerId = process.env.ZIPYPOST_SELLER_ID;
+    const token = await getAuthToken();
+
+    // Call serviceability
     const payload = {
       source_pincode: currentOrder.pickupAddress.pinCode,
       destination_pincode: currentOrder.receiverAddress.pinCode,
@@ -105,134 +134,71 @@ const createZipypostOrder = async (req, res) => {
       order_value: currentOrder.paymentDetails?.amount || 0,
     };
 
-    const user = await User.findById(currentOrder.userId);
-    if (!user)
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
-
-    const currentWallet = await Wallet.findById(user.Wallet);
-    if (!currentWallet)
-      return res
-        .status(404)
-        .json({ success: false, message: "Wallet not found" });
-
-    // Wallet balance check
-    const walletHoldAmount = currentWallet?.holdAmount || 0;
-    const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    if (effectiveBalance < finalCharges)
-      return res
-        .status(400)
-        .json({ success: false, message: "Insufficient Wallet Balance" });
-    const zone = await getZone(
-      currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode
-      // res
-    );
-    // console.log("zone", zone);
-    if (!zone) {
-      return res.status(400).json({ message: "Pincode not serviceable" });
-    }
-    const timestamp = Math.floor(Date.now() / 1000);
-    const sellerId = process.env.ZIPYPOST_SELLER_ID;
-    const token = await getAuthToken();
-    
-    const shipmentType = await CourierService.findOne({
-      name: courierServiceName.trim(),
-      provider: "ZipyPost",
-    });
-    // Step 1: Call serviceability function
     const serviceability = await checkZipypostServiceability(payload);
-    console.log("ser", serviceability.data);
-    // Step 2: Validate serviceability response
+
     if (
       !serviceability.data ||
       !Array.isArray(serviceability.data) ||
       serviceability.data.length === 0
     ) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No serviceability data found" });
+      throw new Error("No serviceability data found");
     }
 
-    // Step 3: Filter only Xpressbees (courier_id: 9) and Bluedart (courier_id: 10)
+    // Filter supported couriers
     const validCouriers = serviceability.data.filter(
       (svc) => svc.courier_id === 9 || svc.courier_id === 10
     );
 
-    // Step 4: Determine courier_id based on courierServiceName
-    let courier_id;
+    let courier_id = 0;
     if (courierServiceName.toLowerCase().includes("xpressbees")) courier_id = 9;
     else if (courierServiceName.toLowerCase().includes("bluedart"))
       courier_id = 10;
-    else courier_id = 0;
 
     if (courier_id === 0) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid courier name. Only Xpressbees and Bluedart supported.",
-      });
+      throw new Error(
+        "Invalid courier name. Only Xpressbees and Bluedart supported."
+      );
     }
 
-    // Step 5: Find the courier entry for selected courier
     const courierOptions = validCouriers.filter(
       (svc) => svc.courier_id === courier_id
     );
 
-    // Step 6: Match mode_id based on applicable weight
     const applicableWeight = currentOrder.packageDetails.applicableWeight;
-    let selectedMode = null;
-
-    for (const option of courierOptions) {
-      const slabWeight = parseFloat(option.slab);
-      if (applicableWeight <= slabWeight) {
-        selectedMode = option;
-        break;
-      }
-    }
-
-    // If no slab matched, take the last (highest slab)
-    if (!selectedMode && courierOptions.length > 0) {
-      selectedMode = courierOptions[courierOptions.length - 1];
-    }
+    let selectedMode =
+      courierOptions.find(
+        (option) => applicableWeight <= parseFloat(option.slab)
+      ) || courierOptions[courierOptions.length - 1];
 
     if (!selectedMode) {
-      return res.status(400).json({
-        success: false,
-        message: "Unable to determine mode_id for the courier",
-      });
+      throw new Error("Unable to determine mode_id for the courier");
     }
 
     const mode_id = selectedMode.mode_id;
-    console.log("Selected mode_id:", mode_id, "for courier:", courier_id);
 
+    // Prepare warehouse
     let baseName = currentOrder.pickupAddress.contactName || "Warehouse";
-    baseName = baseName.substring(0, 10); // first 10 chars
-    // take first 6 chars of userId
+    baseName = baseName.substring(0, 10);
     const shortUserId = currentOrder.userId.toString().substring(0, 6);
-    const warehouseName = `${baseName}-${shortUserId}-${currentOrder.pickupAddress.pinCode}`;
-    // Ensure max 30 chars
-    const finalWarehouseName = warehouseName.substring(0, 30);
+    const finalWarehouseName =
+      `${baseName}-${shortUserId}-${currentOrder.pickupAddress.pinCode}`.substring(
+        0,
+        30
+      );
 
     const warehouseData = {
       warehouseName: finalWarehouseName,
       contactName: currentOrder.pickupAddress.contactName,
       contactNumber: currentOrder.pickupAddress.phoneNumber,
-      AddressLineOne: currentOrder.pickupAddress.address
-        ? currentOrder.pickupAddress.address.substring(0, 45)
-        : "",
+      AddressLineOne:
+        currentOrder.pickupAddress.address?.substring(0, 45) || "",
       AddressLineTwo:
-        currentOrder.pickupAddress.address.length > 45
-          ? currentOrder.pickupAddress.address.substring(45, 90)
-          : "",
+        currentOrder.pickupAddress.address?.substring(45, 90) || "",
       pincode: currentOrder.pickupAddress.pinCode,
       city: currentOrder.pickupAddress.city,
-      //   gst: "",
       primary: true,
     };
 
-    // Call warehouse creation
     const warehouseId = await createWarehouse(
       currentOrder.userId,
       warehouseData,
@@ -240,16 +206,15 @@ const createZipypostOrder = async (req, res) => {
       timestamp,
       sellerId
     );
-    console.log("warehouseId", warehouseId);
+
     if (!warehouseId.success) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Pickup pincode is not registered. Please add a pickup address first.",
-      });
+      throw new Error(
+        "Pickup pincode is not registered. Please add a pickup address first."
+      );
     }
-    const totalProducts = currentOrder.productDetails.length; // number of product
-    // Construct Zipypost request body
+
+    const totalProducts = currentOrder.productDetails.length;
+    console.log("mode courier", mode_id, courier_id);
     const requestBody = {
       order_number: currentOrder.orderId,
       purchase_amount: currentOrder.paymentDetails.amount,
@@ -262,30 +227,22 @@ const createZipypostOrder = async (req, res) => {
           currentOrder.receiverAddress.email || "example@email.com",
         address_line_one: currentOrder.receiverAddress.address,
         address_line_two: currentOrder.receiverAddress.address,
-        // landmark: currentOrder.receiverAddress.landmark || "",
         pincode: currentOrder.receiverAddress.pinCode,
         city: currentOrder.receiverAddress.city,
       },
       billing_details: {
         full_name: currentOrder.pickupAddress.contactName,
         contact_number: currentOrder.pickupAddress.phoneNumber,
-        // gstin: currentOrder.pickupAddress.gstin || "",
-        address_line_one: currentOrder.pickupAddress.address
-          ? currentOrder.pickupAddress.address.substring(0, 45)
-          : "",
+        address_line_one:
+          currentOrder.pickupAddress.address?.substring(0, 45) || "",
         address_line_two:
-          currentOrder.pickupAddress.address.length > 45
-            ? currentOrder.pickupAddress.address.substring(45, 90)
-            : "",
-        // company_name: currentOrder.pickupAddress.companyName || "",
+          currentOrder.pickupAddress.address?.substring(45, 90) || "",
         pincode: currentOrder.pickupAddress.pinCode,
         city: currentOrder.pickupAddress.city,
       },
       items: currentOrder.productDetails.map((product) => ({
         sku:
-          product.sku && product.sku.length >= 3
-            ? product.sku
-            : `SKU${currentOrder.orderId}`, // fallback SKU
+          product.sku?.length >= 3 ? product.sku : `SKU${currentOrder.orderId}`,
         item_name: product.name,
         quantity: product.quantity || 1,
         item_weight:
@@ -299,13 +256,10 @@ const createZipypostOrder = async (req, res) => {
       warehouse_id: warehouseId.warehouseId,
       payment_type: currentOrder.paymentDetails.method === "COD" ? 2 : 1,
       courier_id,
-      mode_id: mode_id,
-      //   mode_id,
+      mode_id,
     };
 
-    console.log("request data", requestBody);
-
-    // Call Zipypost API
+    // 🔹 Call Zipypost API BEFORE committing
     const response = await axios.post(
       "https://api.zipypost.com/create/shipment",
       requestBody,
@@ -318,69 +272,64 @@ const createZipypostOrder = async (req, res) => {
         },
       }
     );
-    console.log("zipypost response", response.data);
-    // Handle response
-    if (response.data.success === true && response.data.booking === true) {
-      const result = response.data.RESULT;
 
-      currentOrder.status = "Booked";
-      currentOrder.awb_number = result.awb;
-      currentOrder.shipment_id = currentOrder.orderId;
-      currentOrder.provider = result.courier;
-      currentOrder.partner = "ZipyPost";
-      currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.totalFreightCharges = finalCharges || 0;
-      currentOrder.courierServiceName = courierServiceName;
-      currentOrder.zone = zone.zone;
-      currentOrder.estimatedDeliveryDate = estimatedDeliveryDate || "";
-      currentOrder.tracking.push({
-        status: "Booked",
-        StatusLocation: currentOrder.pickupAddress.city,
-        StatusDateTime: new Date(),
-        Instructions: "Order booked successfully",
-      });
-
-      await currentOrder.save();
-
-      // Deduct wallet balance
-      await Wallet.findOneAndUpdate(
-        { _id: user.Wallet, balance: { $gte: finalCharges } },
-        {
-          $inc: { balance: -finalCharges },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId,
-              category: "debit",
-              amount: finalCharges,
-              balanceAfterTransaction: currentWallet.balance - finalCharges,
-              date: new Date(),
-              awb_number: result.awb,
-              description: "Freight Charges Applied",
-            },
-          },
-        }
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: "Shipment Created Successfully",
-        data: result,
-      });
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: response.data.message || "Failed to create shipment",
-      });
+    if (!response.data.success || !response.data.booking) {
+      throw new Error(response.data.message || "Failed to create shipment");
     }
+
+    const result = response.data.RESULT;
+
+    // ✅ Update order inside transaction
+    currentOrder.status = "Booked";
+    currentOrder.awb_number = result.awb;
+    currentOrder.shipment_id = currentOrder.orderId;
+    currentOrder.provider = result.courier;
+    currentOrder.partner = "ZipyPost";
+    currentOrder.shipmentCreatedAt = new Date();
+    currentOrder.totalFreightCharges = finalCharges || 0;
+    currentOrder.courierServiceName = courierServiceName;
+    currentOrder.zone = zone.zone;
+    currentOrder.estimatedDeliveryDate = estimatedDeliveryDate || "";
+    currentOrder.tracking.push({
+      status: "Booked",
+      StatusLocation: currentOrder.pickupAddress.city,
+      StatusDateTime: new Date(),
+      Instructions: "Order booked successfully",
+    });
+
+    // ✅ Deduct wallet inside transaction
+    currentWallet.balance -= finalCharges;
+    currentWallet.transactions.push({
+      channelOrderId: currentOrder.orderId,
+      category: "debit",
+      amount: finalCharges,
+      balanceAfterTransaction: currentWallet.balance,
+      date: new Date(),
+      awb_number: result.awb,
+      description: "Freight Charges Applied",
+    });
+
+    await currentOrder.save({ session });
+    await currentWallet.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      message: "Shipment Created Successfully",
+      data: result,
+    });
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     console.error(
       "Error creating Zipypost shipment:",
-      error.response?.data || error.message
+      error.response.data.error
     );
     return res.status(500).json({
       success: false,
-      message: "Failed to create shipment",
-      error: error.response?.data || error.message,
+      message: error.message || "Failed to create shipment",
     });
   }
 };
@@ -451,7 +400,7 @@ const cancelOrderZipypost = async (AWBNo) => {
       return {
         error: "Order is already cancelled",
         code: 400,
-        success:false
+        success: false,
       };
     }
 
@@ -486,7 +435,7 @@ const cancelOrderZipypost = async (AWBNo) => {
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
-        success:false
+        success: false,
       };
     }
   } catch (error) {

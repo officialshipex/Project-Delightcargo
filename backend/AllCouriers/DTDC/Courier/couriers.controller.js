@@ -7,7 +7,7 @@ const Wallet = require("../../../models/wallet");
 const { getDTDCAuthToken } = require("../Authorize/saveCourierContoller");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const commodityOptions = require("../../../config/commodityOptions");
-const estimatedDeliveryDate=require("../../../models/EDDMap.model")
+const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 const {
   markWooOrderAsShipped,
 } = require("../../../Channels/WooCommerce/woocommerce.controller");
@@ -46,6 +46,14 @@ const createOrder = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Order not found" });
     }
+
+    if (currentOrder.status !== "new") {
+      return res.status(400).json({
+        success: false,
+        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+      });
+    }
+
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
@@ -162,7 +170,9 @@ const createOrder = async (req, res) => {
       );
       console.log("dtdc response", response.data);
     } else {
-      return res.status(400).json({ success: false, message: "Insufficient Wallet Balance" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Insufficient Wallet Balance" });
     }
     if (response?.data?.data[0]?.success) {
       const result = response.data.data[0];
@@ -259,7 +269,7 @@ const cancelOrderDTDC = async (AWBNo) => {
       return {
         error: "Order is already cancelled",
         code: 400,
-        success:false
+        success: false,
       };
     }
 
@@ -292,7 +302,7 @@ const cancelOrderDTDC = async (AWBNo) => {
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
-        success:false
+        success: false,
       };
     }
   } catch (error) {
@@ -329,7 +339,7 @@ const trackOrderDTDC = async (AWBNo) => {
         "x-access-token": access_key,
       },
     });
-    console.log(response.data)
+    console.log(response.data);
     return { success: true, data: response.data.trackDetails };
   } catch (error) {
     // console.error(
@@ -343,7 +353,7 @@ const trackOrderDTDC = async (AWBNo) => {
     };
   }
 };
-// trackOrderDTDC('7X105009552');
+// trackOrderDTDC('7D113288320');
 
 const checkServiceabilityDTDC = async (originPincode, destinationPincode) => {
   try {

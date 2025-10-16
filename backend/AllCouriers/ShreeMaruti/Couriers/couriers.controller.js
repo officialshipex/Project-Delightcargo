@@ -9,6 +9,7 @@ const Order = require("../../../models/newOrder.model");
 const { getUniqueId } = require("../../getUniqueId");
 const Wallet = require("../../../models/wallet");
 const user = require("../../../models/User.model");
+const { getZone } = require("../../../Rate/zoneManagementController");
 
 const BASE_URL = process.env.SHREEMA_PRODUCTION_URL;
 
@@ -96,7 +97,18 @@ const createOrder = async (req, res) => {
     const currentOrder = await Order.findById(id);
     const users = await user.findById({ _id: currentOrder.userId });
     // console.log("currentOrder",currentOrder)
+
     const currentWallet = await Wallet.findById({ _id: users.Wallet });
+    const zone = await getZone(
+      currentOrder.pickupAddress.pinCode,
+      currentOrder.receiverAddress.pinCode
+    );
+    if (currentOrder.status !== "new") {
+      return res.status(400).json({
+        success: false,
+        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+      });
+    }
 
     const lineItems = Array.from(
       { length: currentOrder.productDetails.length },
@@ -221,6 +233,7 @@ const createOrder = async (req, res) => {
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.courierServiceName = courierServiceName;
       currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
+      currentOrder.zone = zone.zone;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress?.city || "N/A",
@@ -468,7 +481,7 @@ const checkServiceabilityShreeMaruti = async (payload) => {
         "Missing required fields: fromPincode, toPincode, isCodOrder, and deliveryMode are mandatory.",
     };
   }
-
+// console.log("payload")
   try {
     const token = await getToken();
     const response = await axios.post(
@@ -496,7 +509,7 @@ const checkServiceabilityShreeMaruti = async (payload) => {
     }
   } catch (error) {
     if (error.response) {
-      // console.error("API error response:", error.response.data);
+      console.error("API error response:", error.response.data);
       return { success: false };
     } else {
       // console.error("Request error:", error.message);

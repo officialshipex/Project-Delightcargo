@@ -8,8 +8,8 @@ const { getToken } = require("../Authorize/XpressbeesAuthorize.controller");
 const Wallet = require("../../../models/wallet");
 const user = require("../../../models/User.model");
 const BASE_URL = process.env.XpreesbeesUrl;
-const plan=require("../../../models/Plan.model")
-
+const plan = require("../../../models/Plan.model");
+const {getZone}=require("../../../Rate/zoneManagementController")
 
 const createShipment = async (req, res) => {
   const url = `${BASE_URL}/api/shipments2`;
@@ -17,6 +17,18 @@ const createShipment = async (req, res) => {
   const currentOrder = await Order.findById(id);
   const users = await user.findById({ _id: currentOrder.userId });
   const plans = await plan.findOne({ userId: currentOrder.userId });
+
+  if (currentOrder.status !== "new") {
+    return res.status(400).json({
+      success: false,
+      message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+    });
+  }
+
+  const zone = await getZone(
+    currentOrder.pickupAddress.pinCode,
+    currentOrder.receiverAddress.pinCode
+  );
 
   const services = await courierService.findOne({ name: courierServiceName });
 
@@ -118,6 +130,7 @@ const createShipment = async (req, res) => {
       currentOrder.totalFreightCharges = finalCharges;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.courierServiceName = courierServiceName;
+      currentOrder.zone=zone.zone;
       // currentOrder.service_details = selectedServiceDetails._id;
       // currentOrder.freightCharges =
       // req.body.finalCharges === "N/A" ? 0 : parseInt(req.body.finalCharges);
@@ -295,7 +308,7 @@ const cancelShipmentXpressBees = async (awb) => {
     // );
 
     const { status, data } = response.data;
-    console.log("huuuuu")
+    console.log("huuuuu");
     if (status) {
       await Order.updateOne(
         { awb_number: awb },

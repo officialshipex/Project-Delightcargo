@@ -27,6 +27,14 @@ const createOrderZipypost = async (
       return { success: false, message: "Order not found" };
     }
 
+    // if (currentOrder.status !== "new") {
+    //   return {
+    //     status: 400,
+    //     success: false,
+    //     message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+    //   };
+    // }
+
     const user = await User.findById(currentOrder.userId);
     if (!user) {
       return { success: false, message: "User not found" };
@@ -236,7 +244,7 @@ const createOrderZipypost = async (
       warehouse_id: warehouseId.warehouseId,
       payment_type: currentOrder.paymentDetails.method === "COD" ? 2 : 1,
       courier_id,
-      mode_id: mode_id
+      mode_id: mode_id,
     };
 
     // API call
