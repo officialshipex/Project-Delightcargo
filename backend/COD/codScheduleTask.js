@@ -121,14 +121,25 @@ const processCourierCodRemittance = async () => {
 };
 
 // Cron job
-cron.schedule(
-  "0 23 * * *", // minute 0, hour 23, every day
-  () => {
-    console.log("Running scheduled COD remittance task at 11 PM IST");
-    processCourierCodRemittance();
-  },
-  { timezone: "Asia/Kolkata" }
-);
+if (process.env.NODE_ENV === "production") {
+  cron.schedule(
+    "0 23 * * *", // Runs every day at 11:00 PM IST
+    () => {
+      console.log(
+        "⏰ Running scheduled COD remittance task at 11 PM IST (production)"
+      );
+      processCourierCodRemittance();
+    },
+    {
+      scheduled: true,
+      timezone: "Asia/Kolkata",
+    }
+  );
+} else {
+  console.log(
+    "⚙️ COD remittance cron not started (development/local environment)"
+  );
+}
 
 // processCourierCodRemittance()
 const processCodRemittanceOrder = async () => {
@@ -229,13 +240,24 @@ const processCodRemittanceOrder = async () => {
 };
 
 // Cron job
-cron.schedule(
-  "30 23 * * *", // At 23:30 (11:30 PM) every day
-  () => {
-    console.log("Running scheduled COD remittance task at 11:30 PM IST");
-    processCodRemittanceOrder();
-  },
-  { timezone: "Asia/Kolkata" }
-);
+if (process.env.NODE_ENV === "production") {
+  cron.schedule(
+    "30 23 * * *", // At 11:30 PM every day
+    () => {
+      console.log(
+        "⏰ Running scheduled COD remittance task at 11:30 PM IST (production)"
+      );
+      processCodRemittanceOrder();
+    },
+    {
+      scheduled: true,
+      timezone: "Asia/Kolkata",
+    }
+  );
+} else {
+  console.log(
+    "⚙️ COD remittance cron not started (development/local environment)"
+  );
+}
 
 // processCodRemittanceOrder();

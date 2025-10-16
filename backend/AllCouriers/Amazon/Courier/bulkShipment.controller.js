@@ -16,27 +16,40 @@ const createShipmentAmazon = async (
   charges
 ) => {
   try {
+    console.log("amazon", serviceDetails, orderId, walletId, charges);
     const accessToken = await getAmazonAccessToken();
     if (!accessToken) {
+      console.log("accesstoken")
       return { success: false, message: "Access token missing" };
     }
 
     const currentOrder = await Order.findById(orderId);
     if (!currentOrder) {
+      console.log("order")
       return { success: false, message: "Order not found" };
     }
+
+    // if (currentOrder.status !== "new") {
+    //   return {
+    //     status: 400,
+    //     success: false,
+    //     message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+    //   };
+    // }
+
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
       // res
     );
     if (!zone) {
+      console.log("sone")
       return res.status(400).json({ message: "Pincode not serviceable" });
     }
 
     const eddData = await estimatedDeliveryDate.findOne({
       courier: "Amazon Shipping",
-      serviceName: serviceDetails.name,
+      serviceName: serviceDetails.name.trim(),
     });
     let estimateDate = null;
 
@@ -67,6 +80,7 @@ const createShipmentAmazon = async (
     const availableBalance = currentWallet.balance - holdAmount;
 
     if (currentWallet.balance < charges) {
+      console.log("balance")
       return {
         success: false,
         message: "Insufficient Wallet Balance",
@@ -89,7 +103,7 @@ const createShipmentAmazon = async (
     };
 
     const { rate, requestToken, valueAddedServiceIds } =
-      await checkAmazonServiceability("Amazon", payload);
+      await checkAmazonServiceability("Amazon Shipping", payload);
 
     const isCOD = payload.payment_type === "COD";
 
@@ -122,6 +136,7 @@ const createShipmentAmazon = async (
     const result = response.data?.payload;
     console.log("resulttttttttreress", result);
     if (!result) {
+      console.log("amazon result")
       return {
         success: false,
         message: "Error creating shipment",
@@ -154,9 +169,9 @@ const createShipmentAmazon = async (
     currentOrder.cancelledAtStage = null;
     currentOrder.awb_number = result.packageDocumentDetails[0].trackingId;
     currentOrder.shipment_id = `${result.shipmentId}`;
-    currentOrder.provider = "Amazon";
+    currentOrder.provider = "Amazon Shipping";
     currentOrder.totalFreightCharges = charges;
-    currentOrder.courierServiceName = serviceDetails.courierServiceName;
+    currentOrder.courierServiceName = serviceDetails.name.trim();
     currentOrder.shipmentCreatedAt = new Date();
     currentOrder.label = labelUrl;
     currentOrder.zone = zone.zone;

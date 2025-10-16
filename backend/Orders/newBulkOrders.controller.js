@@ -55,115 +55,123 @@ const updatePickup = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
-const createShipment = async (serviceDetails, order, wh, walletId, charges) => {
-  // console.log("create shipement",serviceDetails,order,wh,walletId,charges)
-  try {
-    let result;
 
-    switch (serviceDetails.provider) {
-      case "NimbusPost":
-        result = await createShipmentFunctionNimbusPost(
-          serviceDetails,
-          order._id,
-          wh,
-          walletId,
-          charges
-        );
-        break;
-      case "Amazon Shipping":
-        result = await createShipmentAmazon(
-          serviceDetails,
-          order._id,
-          wh,
-          walletId,
-          charges
-        );
-        break;
-      // case "Shiprocket":
-      //   result = await createShipmentFunctionShipRocket(
-      //     serviceDetails,
-      //     order._id,
-      //     wh,
-      //     walletId,
-      //     charges
-      //   );
-      //   break;
-      // case "Xpressbees":
-      //   result = await createShipmentFunctionXpressBees(
-      //     serviceDetails,
-      //     order._id,
-      //     wh,
-      //     walletId,
-      //     charges
-      //   );
-      //   break;
-      case "Delhivery":
-        result = await createShipmentFunctionDelhivery(
-          serviceDetails,
-          order._id,
-          wh,
-          walletId,
-          charges
-        );
-        break;
-      case "EcomExpress":
-        result = await createShipmentFunctionEcomExpress(
-          serviceDetails,
-          order._id,
-          wh,
-          walletId,
-          charges
-        );
-        break;
-      case "Dtdc":
-        result = await createOrderDTDC(
-          serviceDetails,
-          order._id,
-          wh,
-          walletId,
-          charges
-        );
-        break;
-      case "Smartship":
-        result = await orderRegistrationOneStep(
-          serviceDetails,
-          order._id,
-          wh,
-          walletId,
-          charges
-        );
-        break;
-      case "Shree Maruti":
-        result = await createShipmentFunctionShreeMaruti(
-          serviceDetails,
-          order._id,
-          wh,
-          walletId,
-          charges
-        );
-        break;
-      case "ZipyPost":
-        result = await createOrderZipypost(
-          serviceDetails,
-          order._id,
-          wh,
-          walletId,
-          charges
-        );
-        break;
-      default:
-        console.error(
-          `No function defined for ${serviceDetails.courierProviderName}`
-        );
-        return false;
-    }
-    console.log("resuuuulllltttt", result);
-    return result?.status === 200 || result?.status === 201 || result?.success;
-  } catch (error) {
-    console.error(`Error creating shipment:`, error);
-    return false;
-  }
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Atomically claim an order for processing
+const claimOrder = async (orderId) => {
+  return Order.findOneAndUpdate(
+    { _id: orderId, status: "new" },
+    { $set: { status: "processing", processingStartedAt: new Date() } },
+    { new: true }
+  );
 };
+
+const callProviderWithRetry = async (
+  serviceDetails,
+  order,
+  wh,
+  walletId,
+  charges,
+  maxRetries = 1,
+  retryDelay = 1000
+) => {
+  // console.log("service",serviceDetails.provider)
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      let result;
+      switch (serviceDetails.provider) {
+        case "NimbusPost":
+          result = await createShipmentFunctionNimbusPost(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges
+          );
+          break;
+        case "Amazon Shipping":
+          result = await createShipmentAmazon(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges
+          );
+          // console.log("result",result)
+          break;
+        case "Delhivery":
+          result = await createShipmentFunctionDelhivery(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges
+          );
+          break;
+        case "EcomExpress":
+          result = await createShipmentFunctionEcomExpress(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges
+          );
+          break;
+        case "Dtdc":
+          result = await createOrderDTDC(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges
+          );
+          break;
+        case "Smartship":
+          result = await orderRegistrationOneStep(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges
+          );
+          break;
+        case "Shree Maruti":
+          result = await createShipmentFunctionShreeMaruti(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges
+          );
+          break;
+        case "ZipyPost":
+          result = await createOrderZipypost(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges
+          );
+          break;
+        default:
+          console.error(
+            `No shipment function defined for ${serviceDetails.courierProviderName}`
+          );
+          return false;
+      }
+
+      if (result?.status === 200 || result?.status === 201 || result?.success) {
+        return result;
+      } else throw new Error("Provider call failed");
+    } catch (error) {
+      console.error(`Attempt ${attempt} failed for order ${order._id}:`, error);
+      if (attempt < maxRetries) await delay(retryDelay);
+    }
+  }
+  return false;
+};
+
 const shipBulkOrder = async (req, res) => {
   try {
     //   const { id, pincode, plan, isBulkShip } = req.body;
@@ -191,7 +199,7 @@ const shipBulkOrder = async (req, res) => {
         const serviceable = await Promise.all(
           enabledServices.map(async (svc) => {
             const result = await checkServiceabilityAll(svc, item, pinCode);
-            return result ? svc : null;
+            return result.success ? svc : null;
           })
         );
         return serviceable.filter(Boolean);
@@ -199,20 +207,49 @@ const shipBulkOrder = async (req, res) => {
     );
     // console.log("avail",availableServices)
     // console.log("enabled",enabledServices)
-    const flattenedAvailableService = [...new Set(availableServices.flat())];
-    // console.log(flattenedAvailableService)
+    const flatServices = availableServices.flat();
+
+    // Deduplicate by name
+    const flattenedAvailableService = [];
+    const serviceNames = new Set();
+
+    for (const svc of flatServices) {
+      const nameKey = svc.name.trim().toLowerCase();
+      if (!serviceNames.has(nameKey)) {
+        serviceNames.add(nameKey);
+        flattenedAvailableService.push(svc);
+      }
+    }
+    // console.log(flattenedAvailableService);
 
     const fplans = plans.flatMap((plan) =>
       plan.rateCard.map((item) => item.courierServiceName)
     );
+    // console.log("Before filtering with fplans:");
+    // flattenedAvailableService.forEach((svc) => console.log(`"${svc.name}"`));
 
-    // console.log(fplans)
+    // console.log("fplans:");
+    // fplans.forEach((plan) => console.log(`"${plan}"`));
+    // console.log("fplans", fplans);
 
     const flattenedAvailableServices = flattenedAvailableService.filter(
-      (item) => fplans.includes(item.name)
+      (item) =>
+        fplans.some(
+          (planName) =>
+            planName
+              .normalize("NFKC") // normalize unicode
+              .replace(/\s+/g, " ") // replace multiple spaces with single
+              .trim()
+              .toLowerCase() ===
+            item.name
+              .normalize("NFKC")
+              .replace(/\s+/g, " ")
+              .trim()
+              .toLowerCase()
+        )
     );
 
-    // console.log(flattenedAvailableServices); // Only matched services will be returned
+    // console.log("flattend",flattenedAvailableServices); // Only matched services will be returned
 
     // console.log(flattenedAvailableServices);
 
@@ -234,117 +271,93 @@ const createBulkOrder = async (req, res) => {
   const { item, selectedOrders, wh, id, selectedServiceDetails } = req.body;
   let successCount = 0;
   let failureCount = 0;
-  const userId = req.user._id;
-
+  console.log("selected", selectedOrders, item, wh);
   try {
-    const user = await User.findOne({ _id: userId });
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
     const walletId = user.Wallet;
-    const wallet = await Wallet.findOne({ _id: walletId });
 
-    const remainingOrders = [...(selectedOrders || id || [])];
+    const ordersToProcess =
+      Array.isArray(selectedOrders) && selectedOrders.length > 0
+        ? selectedOrders.map((o) => (typeof o === "object" ? o._id : o))
+        : Array.isArray(id)
+        ? id
+        : id
+        ? [id]
+        : [];
 
-    // Helper for delay
-    const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-    // ---------------------- AUTO-SHIP ORDERS ----------------------
-    if (item) {
-      for (const order of selectedOrders) {
-        try {
-          const orderDetails = await Order.findOne({ _id: order });
-
-          const details = {
-            pickupPincode: `${wh.pinCode}`,
-            deliveryPincode: `${orderDetails.receiverAddress.pinCode}`,
-            length: orderDetails.packageDetails.volumetricWeight.length,
-            breadth: orderDetails.packageDetails.volumetricWeight.width,
-            height: orderDetails.packageDetails.volumetricWeight.height,
-            weight: orderDetails.packageDetails.applicableWeight,
-            cod: orderDetails.paymentDetails.method === "COD" ? "Yes" : "No",
-            valueInINR: orderDetails.paymentDetails.amount,
-            userID: userId,
-            filteredServices: item,
-          };
-
-          const rates = await calculateRateForServiceBulk(details);
-          const charges = parseInt(rates[0]?.forward?.finalCharges);
-
-          if (!charges) throw new Error("Invalid charges calculated.");
-
-          const result = await createShipment(
-            item,
-            orderDetails,
-            wh,
-            walletId,
-            charges
-          );
-
-          if (result) {
-            successCount++;
-            remainingOrders.splice(remainingOrders.indexOf(order), 1);
-          } else {
-            failureCount++;
-          }
-        } catch (error) {
-          console.error(`Error processing AutoShip order ${order}:`, error);
-          failureCount++;
-        }
-
-        // ✅ Add delay between orders
-        await delay(1000);
+    for (const orderId of ordersToProcess) {
+      // const orderId = orderObj._id;
+      // Atomically claim order
+      const claimedOrder = await claimOrder(orderId);
+      if (!claimedOrder) {
+        console.log(`Order ${orderId} is already processed. Skipping.`);
+        continue;
       }
 
-      return res.status(201).json({
-        message: `${successCount} orders created successfully & ${failureCount} failed.`,
-        successCount,
-        failureCount,
-        remainingOrdersCount: remainingOrders.length,
-        remainingOrders,
-      });
-    }
+      try {
+        const orderDetails = await Order.findById(orderId);
+        // console.log("orderdetails",orderDetails)
+        if (!orderDetails) throw new Error("Order details not found");
 
-    // ---------------------- NON-AUTOSHIP ORDERS ----------------------
-    if (id && Array.isArray(id)) {
-      for (const order of id) {
-        try {
-          const details = {
-            pickupPincode: `${wh.pinCode}`,
-            deliveryPincode: `${order.shipping_details.pinCode}`,
-            length: order.shipping_cost.dimensions.length,
-            breadth: order.shipping_cost.dimensions.width,
-            height: order.shipping_cost.dimensions.height,
-            weight: order.shipping_cost.weight,
-            cod: order.order_type === "Cash on Delivery" ? "Yes" : "No",
-            valueInINR: order.sub_total,
-            filteredServices: [selectedServiceDetails],
-            rateCardType: req.body.plan,
-          };
+        const details = {
+          pickupPincode: `${wh.pinCode}`,
+          deliveryPincode: `${orderDetails.receiverAddress.pinCode}`,
+          length: orderDetails.packageDetails.volumetricWeight.length,
+          breadth: orderDetails.packageDetails.volumetricWeight.width,
+          height: orderDetails.packageDetails.volumetricWeight.height,
+          weight: orderDetails.packageDetails.applicableWeight,
+          cod: orderDetails.paymentDetails.method === "COD" ? "Yes" : "No",
+          valueInINR: orderDetails.paymentDetails.amount,
+          userID: userId,
+          filteredServices: item,
+        };
+        // console.log("details",details)
 
-          const rates = await calculateRateForService(details);
-          const charges = parseInt(rates[0]?.forward?.finalCharges);
+        const rates = item
+          ? await calculateRateForServiceBulk(details)
+          : await calculateRateForService(details);
+        // console.log("rates", rates);
+        const charges = parseInt(rates[0]?.forward?.finalCharges);
+        if (!charges) throw new Error("Invalid shipping charges");
 
-          if (!charges) throw new Error("Invalid charges calculated.");
+        // Call provider (wallet deduction handled inside courier function)
+        const result = await callProviderWithRetry(
+          item ? item : selectedServiceDetails,
+          orderDetails,
+          wh,
+          walletId,
+          charges
+        );
 
-          const result = await createShipment(
-            selectedServiceDetails,
-            order,
-            wh,
-            walletId,
-            charges
-          );
-
-          if (result) {
-            successCount++;
-            remainingOrders.splice(remainingOrders.indexOf(order), 1);
-          } else {
-            failureCount++;
-          }
-        } catch (error) {
-          console.error(`Error processing order ${order._id}:`, error);
+        if (!result) {
+          await Order.findByIdAndUpdate(orderId, {
+            $set: {
+              status: "new",
+              failureReason: "Provider shipment failed",
+            },
+          });
           failureCount++;
+        } else {
+          // await Order.findByIdAndUpdate(orderId, {
+          //   $set: {
+          //     status: "booked",
+          //     awb: result?.awb || "",
+          //     shipmentCreatedAt: new Date(),
+          //   },
+          // });
+          successCount++;
         }
 
-        // ✅ Add delay between orders
-        await delay(1000);
+        await delay(1000); // delay between orders
+      } catch (error) {
+        console.error(`Order ${orderId} processing error:`, error.message);
+        await Order.findByIdAndUpdate(orderId, {
+          $set: { status: "new", failureReason: error.message },
+        });
+        failureCount++;
       }
     }
 
@@ -352,18 +365,14 @@ const createBulkOrder = async (req, res) => {
       message: `${successCount} orders created successfully & ${failureCount} failed.`,
       successCount,
       failureCount,
-      remainingOrdersCount: remainingOrders.length,
-      remainingOrders,
+      remainingOrdersCount:
+        ordersToProcess.length - successCount - failureCount,
     });
   } catch (error) {
-    console.error("Error in creating bulk orders:", error);
+    console.error("Bulk order creation error:", error.message);
     return res.status(500).json({
       error: "Internal Server Error",
       message: error.message,
-      successCount,
-      failureCount,
-      remainingOrdersCount: selectedOrders?.length || id?.length || 0,
-      remainingOrders: selectedOrders || id || [],
     });
   }
 };

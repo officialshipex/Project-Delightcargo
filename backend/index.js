@@ -3,7 +3,7 @@ const connection = require("./config/database");
 const app = require("./server");
 
 const PORT = process.env.PORT || 5000;
-
+// console.log("hello")
 (async function () {
   try {
     await connection();

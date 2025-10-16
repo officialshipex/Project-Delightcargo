@@ -1,12 +1,12 @@
-if(process.env.NODE_ENV!="production"){
-    require('dotenv').config();
+if (process.env.NODE_ENV != "production") {
+  require("dotenv").config();
 }
 
 const axios = require("axios");
 const Order = require("../../../models/orderSchema.model");
 const { getAuthToken } = require("../Authorize/XpressbeesAuthorize.controller");
 const Wallet = require("../../../models/wallet");
-const BASE_URL=process.env.XpreesbeesUrl;
+const BASE_URL = process.env.XpreesbeesUrl;
 
 const createShipmentFunctionXpressBees = async (
   selectedServiceDetails,
@@ -18,7 +18,13 @@ const createShipmentFunctionXpressBees = async (
   try {
     const currentOrder = await Order.findById(id);
     const currentWallet = await Wallet.findById(walletId);
-
+    if (currentOrder.status !== "new") {
+      return {
+        status: 400,
+        success: false,
+        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+      };
+    }
     const order_items = currentOrder.Product_details.map((item) => ({
       name: item.product,
       qty: item.quantity,
@@ -117,6 +123,5 @@ const createShipmentFunctionXpressBees = async (
     };
   }
 };
-
 
 module.exports = { createShipmentFunctionXpressBees };

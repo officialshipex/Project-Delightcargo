@@ -26,6 +26,13 @@ const createVamashipShipment = async (req, res) => {
         .json({ success: false, message: "Order not found" });
     }
 
+    if (currentOrder.status !== "new") {
+      return res.status(400).json({
+        success: false,
+        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+      });
+    }
+
     // Fetch user
     const user = await User.findById(currentOrder.userId);
     if (!user) {
@@ -41,6 +48,11 @@ const createVamashipShipment = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Wallet not found" });
     }
+
+    const zone = await getZone(
+      currentOrder.pickupAddress.pinCode,
+      currentOrder.receiverAddress.pinCode
+    );
 
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
@@ -152,6 +164,7 @@ const createVamashipShipment = async (req, res) => {
       currentOrder.totalFreightCharges = parseInt(finalCharges);
       currentOrder.courierServiceName = courierServiceName;
       currentOrder.shipmentCreatedAt = new Date();
+      currentOrder.zone=zone.zone;
       await currentOrder.save();
 
       await currentWallet.updateOne({
@@ -312,7 +325,6 @@ const cancelVamashipOrder = async (shipment_id) => {
 
 const trackOrderVamaship = async (AWBNo) => {
   try {
-    
     // Call Vamaship tracking endpoint
     const response = await axios.get(
       `https://ecom.vamaship.com/ecom/api/v1/trackawb/${AWBNo}`,

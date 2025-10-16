@@ -213,4 +213,8 @@ const startRtoLoop = async () => {
 };
 
 // start the loop once
-startRtoLoop();
+// startRtoLoop();
+
+if(process.env.NODE_ENV ==="production"){
+  startRtoLoop()
+}

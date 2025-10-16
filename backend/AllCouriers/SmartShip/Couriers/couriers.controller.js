@@ -83,7 +83,13 @@ const registerSmartshipHub = async (userId, pinCode) => {
 
 const orderRegistrationOneStep = async (req, res) => {
   try {
-    const { id, finalCharges, courierServiceName, provider,estimatedDeliveryDate } = req.body;
+    const {
+      id,
+      finalCharges,
+      courierServiceName,
+      provider,
+      estimatedDeliveryDate,
+    } = req.body;
     console.log("req.body", req.body);
     const accessToken = await getAccessToken();
     const currentOrder = await Order.findById(id);
@@ -92,6 +98,14 @@ const orderRegistrationOneStep = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Order not found" });
     }
+
+    if (currentOrder.status !== "new") {
+      return res.status(400).json({
+        success: false,
+        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+      });
+    }
+
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
@@ -245,7 +259,7 @@ const orderRegistrationOneStep = async (req, res) => {
       currentOrder.courierServiceName = courierServiceName;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.zone = zone.zone;
-      currentOrder.estimatedDeliveryDate=estimatedDeliveryDate;
+      currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress?.city || "N/A",
@@ -408,7 +422,7 @@ const cancelSmartshipOrder = async (client_order_reference_id) => {
       return {
         code: 400,
         error: true,
-        success:false,
+        success: false,
         message: "Failed to cancel order",
         details: cancellationDetails?.failure || {},
       };
@@ -445,12 +459,12 @@ const trackOrderSmartShip = async (AWBNo, shipment_id) => {
     );
 
     // console.log("response data", response.data);
-    console.log("respose status",response.data.data.scans)
+    console.log("respose status", response.data.data.scans);
     // console.log("response status", response.data.data.scans["20726635"][0].call_logs);
     if (response.data.message === "success") {
-      const trackingData=response.data.data.scans
-      const request_order_id=Object.keys(trackingData || {})[0];
-      const trackingArray=trackingData?.[request_order_id];
+      const trackingData = response.data.data.scans;
+      const request_order_id = Object.keys(trackingData || {})[0];
+      const trackingArray = trackingData?.[request_order_id];
       return { success: true, data: trackingArray };
     }
   } catch (error) {

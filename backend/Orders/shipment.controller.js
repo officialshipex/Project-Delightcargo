@@ -58,7 +58,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
           deliveryPincode,
           paymentMethod
         );
-        console.log(`Local serviceability for ${service.provider}:`, result);
+        // console.log(`Local serviceability for ${service.provider}:`, result);
         return result;
       } catch (err) {
         console.error(
@@ -147,6 +147,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
 
     // ----------------------- Shree Maruti -----------------------
     if (service.provider === "Shree Maruti") {
+      // console.log("servi",service.provider)
       const local = await checkLocalServiceability();
       if (local.success) return local;
 
@@ -185,6 +186,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
           pickupPincode,
           deliveryPincode
         );
+        // console.log("result",result)
         return result;
       }
     }

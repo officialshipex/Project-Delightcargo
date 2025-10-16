@@ -33,6 +33,14 @@ const createOrderDTDC = async (
       return { success: false, message: "Order not found" };
     }
 
+    // if (currentOrder.status !== "new") {
+    //   return {
+    //     status: 400,
+    //     success: false,
+    //     message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+    //   };
+    // }
+
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
@@ -41,7 +49,7 @@ const createOrderDTDC = async (
     if (!zone) {
       return { success: false, message: "Pincode not serviceable" };
     }
-   
+
     const eddData = await estimatedDeliveryDate.findOne({
       courier: "Dtdc",
       serviceName: serviceDetails.name,
@@ -158,7 +166,7 @@ const createOrderDTDC = async (
         },
       }
     );
-    console.log("response dtdc",response.data)
+    console.log("response dtdc", response.data);
     // } else {
     // return res.status(400).json({ success: false, message: "Low Balance" });
     // }

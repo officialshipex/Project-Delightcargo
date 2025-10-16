@@ -232,22 +232,21 @@ const deleteRateCard = async (req, res) => {
     for (const plan of plans) {
       const originalLength = plan.rateCard.length;
 
-      plan.rateCard = plan.rateCard.filter(
-        (rc) => rc._id.toString() !== id
-      );
+      plan.rateCard = plan.rateCard.filter((rc) => rc._id.toString() !== id);
 
       if (plan.rateCard.length !== originalLength) {
         await plan.save();
       }
     }
 
-    res.status(200).json({ message: "Rate Card deleted and removed from all matching plans." });
+    res.status(200).json({
+      message: "Rate Card deleted and removed from all matching plans.",
+    });
   } catch (error) {
     console.error("Error deleting rate card from plans:", error);
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 };
-
 
 const getRateCardById = async (req, res) => {
   try {
@@ -573,20 +572,23 @@ const uploadRatecard = async (req, res) => {
       CourierService.find().lean(),
       PlanName.find().lean(),
     ]);
+    const normalize = (str = "") =>
+      str
+        .trim()
+        .replace(/\s+/g, " ") // collapse multiple spaces
+        .replace(/\u00A0/g, " ") // replace non-breaking spaces
+        .toLowerCase();
     // console.log("plans", plans);
     const providerSet = new Set(
-      providers.map((p) => String(p.courierProvider).trim().toLowerCase())
+      providers.map((p) => normalize(p.courierProvider))
     );
-    const serviceSet = new Set(
-      services.map((s) => String(s.name).trim().toLowerCase())
-    );
-    const planSet = new Set(
-      plans.map((p) => String(p.name).trim().toLowerCase())
-    );
+    const serviceSet = new Set(services.map((s) => normalize(s.name)));
+    const planSet = new Set(plans.map((p) => normalize(p.name)));
+
     // console.log("planSet",planSet)
     const errors = [];
     const savedRatecards = [];
-
+    const toFixedNum = (num) => Number(parseFloat(num || 0).toFixed(2));
     // Group rows by (plan, provider, service)
     const grouped = {};
     for (let i = 0; i < rows.length; i++) {
@@ -595,14 +597,13 @@ const uploadRatecard = async (req, res) => {
       // console.log(row["Plan Name"])
       // console.log(row["Courier Provider Name"])
       // console.log(row["Courier Service Name"])
-      const plan = (row["Plan Name"] || "").trim().toLowerCase();
-      const provider = (row["Courier Provider Name"] || "")
-        .trim()
-        .toLowerCase();
-      const service = (row["Courier Service Name"] || "").trim().toLowerCase();
+      const plan = normalize(row["Plan Name"]);
+      const provider = normalize(row["Courier Provider Name"]);
+      const service = normalize(row["Courier Service Name"]);
+
       // console.log("plan", plan);
       // console.log("provider", provider);
-      // console.log("sercvice", service);
+      console.log("sercvice", service);
       // Validation
       if (!planSet.has(plan)) {
         errors.push(`Row ${rowNum}: Invalid Plan`);
@@ -613,7 +614,12 @@ const uploadRatecard = async (req, res) => {
         continue;
       }
       if (!serviceSet.has(service)) {
-        errors.push(`Row ${rowNum}: Invalid Service`);
+        console.log("❌ Missing service:", JSON.stringify(service));
+        console.log(
+          "Closest match:",
+          [...serviceSet].find((s) => s.includes("bluedart"))
+        );
+        errors.push(`Row ${rowNum}: Invalid Service (${service})`);
         continue;
       }
 
@@ -625,18 +631,18 @@ const uploadRatecard = async (req, res) => {
           courierServiceName: row["Courier Service Name"],
           weightPriceBasic: [],
           weightPriceAdditional: [],
-          codCharge: row["COD Charge"] || 0,
-          codPercent: row["COD_Percentage"] || 0,
+          codCharge: toFixedNum(row["COD Charge"]),
+          codPercent: toFixedNum(row["COD_Percentage"]),
         };
       }
 
       const weightObj = {
-        weight: (parseFloat(row["weight"]) || 0) * 1000, // convert kg to grams
-        zoneA: parseFloat(row["zoneA"]) || 0,
-        zoneB: parseFloat(row["zoneB"]) || 0,
-        zoneC: parseFloat(row["zoneC"]) || 0,
-        zoneD: parseFloat(row["zoneD"]) || 0,
-        zoneE: parseFloat(row["zoneE"]) || 0,
+        weight: toFixedNum(row["weight"]) * 1000, // kg to grams
+        zoneA: toFixedNum(row["zoneA"]),
+        zoneB: toFixedNum(row["zoneB"]),
+        zoneC: toFixedNum(row["zoneC"]),
+        zoneD: toFixedNum(row["zoneD"]),
+        zoneE: toFixedNum(row["zoneE"]),
       };
 
       // console.log("weight", weightObj);
@@ -658,9 +664,7 @@ const uploadRatecard = async (req, res) => {
       const g = grouped[key];
 
       const mode = services.find(
-        (s) =>
-          s.name.trim().toLowerCase() ===
-          g.courierServiceName.trim().toLowerCase()
+        (s) => normalize(s.name) === normalize(g.courierServiceName)
       )?.courierType;
 
       const rateCardDoc = new RateCard({

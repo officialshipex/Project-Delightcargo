@@ -112,6 +112,13 @@ const createOrder = async (req, res) => {
     const waybills = await fetchBulkWaybills(1);
     const plans = await plan.findOne({ userId: currentOrder.userId });
 
+    if (currentOrder.status !== "new") {
+      return res.status(400).json({
+        success: false,
+        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+      });
+    }
+
     if (!waybills.length) {
       return res
         .status(400)
@@ -376,7 +383,7 @@ const trackShipmentDelhivery = async (waybill) => {
 
     // Extract scans and remove the ScanDetail key
     const scans = shipmentData.Scans?.map((item) => item.ScanDetail) || [];
-// console.log("ship",scans)
+    console.log("ship",scans)
     return {
       success: true,
       id: shipmentData.ReferenceNo,
@@ -391,7 +398,7 @@ const trackShipmentDelhivery = async (waybill) => {
   }
 };
 
-// trackShipmentDelhivery("35973710033224")
+// trackShipmentDelhivery("35973710040272")
 
 const generateShippingLabel = async (req, res) => {
   const { waybill } = req.params;
@@ -554,7 +561,7 @@ const cancelOrderDelhivery = async (awb_number) => {
   if (isCancelled) {
     console.log("Order is already cancelled");
     return {
-      success:false,
+      success: false,
       error: "Order is already cancelled",
       code: 400,
     };
@@ -581,7 +588,7 @@ const cancelOrderDelhivery = async (awb_number) => {
       return { data: response.data, code: 201 };
     } else {
       return {
-        success:false,
+        success: false,
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
@@ -590,7 +597,7 @@ const cancelOrderDelhivery = async (awb_number) => {
   } catch (error) {
     console.error("Error in cancelOrderDelhivery:", error);
     return {
-      success:false,
+      success: false,
       error: "Internal Server Error",
       message: error.message,
       code: 500,

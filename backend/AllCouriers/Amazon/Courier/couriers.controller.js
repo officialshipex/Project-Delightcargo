@@ -28,6 +28,14 @@ const createOneClickShipment = async (req, res) => {
     if (!currentOrder) {
       return res.status(404).json({ message: "Order not found" });
     }
+
+    if (currentOrder.status !== "new") {
+      return res.status(400).json({
+        success: false,
+        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+      });
+    }
+
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
@@ -216,7 +224,7 @@ const cancelShipment = async (shipmentId) => {
   if (isCancelled) {
     console.log("order is allready cancelled");
     return {
-      success:false,
+      success: false,
       error: "Order is allready cancelled",
       code: 400,
     };
@@ -252,7 +260,7 @@ const cancelShipment = async (shipmentId) => {
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
-        success:false
+        success: false,
       };
     }
 
@@ -306,10 +314,10 @@ const getShipmentTracking = async (trackingId) => {
       ].shipmentType === "FORWARD"
     ) {
       remark = remarkData?.forward?.[0];
-    } else{
-      remark=remarkData?.reverse[1]
+    } else {
+      remark = remarkData?.reverse[1];
     }
-    return { success: true, data: response.data.payload.eventHistory,remark };
+    return { success: true, data: response.data.payload.eventHistory, remark };
   } catch (error) {
     console.error(
       "Error fetching tracking information:",

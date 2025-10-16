@@ -186,10 +186,16 @@ const codToBeRemitteds = async () => {
     console.error("❌ Error in COD to be remitted:", error);
   }
 };
-cron.schedule("1 1 * * *", () => {
-  console.log("Running scheduled task at 1:01 AM: Fetching orders...");
-  codToBeRemitteds();
-});
+if (process.env.NODE_ENV === "production") {
+  cron.schedule("1 1 * * *", () => {
+    console.log(
+      "⏰ Running scheduled task at 1:01 AM (production): Fetching orders..."
+    );
+    codToBeRemitteds();
+  });
+} else {
+  console.log("⚙️ Cron job not started (development mode)");
+}
 // codToBeRemitteds();
 
 const remittanceScheduleData = async () => {
@@ -254,7 +260,6 @@ const remittanceScheduleData = async () => {
         uniqueId = Math.floor(10000 + Math.random() * 90000);
       } while (await adminCodRemittance.findOne({ remitanceId: uniqueId }));
 
-
       // Only store minimal info if not due (raw data, no business calculation)
       const remittanceEntry = {
         date: today,
@@ -292,17 +297,23 @@ const remittanceScheduleData = async () => {
   }
 };
 
-cron.schedule(
-  "45 1 * * *",
-  () => {
-    console.log("Running scheduled task at 1:45 AM IST: Fetching orders...");
-    remittanceScheduleData();
-  },
-  {
-    scheduled: true,
-    timezone: "Asia/Kolkata",
-  }
-);
+if (process.env.NODE_ENV === "production") {
+  cron.schedule(
+    "45 1 * * *",
+    () => {
+      console.log(
+        "⏰ Running scheduled task at 1:45 AM IST (production): Fetching orders..."
+      );
+      remittanceScheduleData();
+    },
+    {
+      scheduled: true,
+      timezone: "Asia/Kolkata",
+    }
+  );
+} else {
+  console.log("⚙️ Cron job not started (development/local environment)");
+}
 
 // remittanceScheduleData();
 
@@ -501,19 +512,23 @@ const fetchExtraData = async () => {
   }
 };
 
-cron.schedule(
-  "25 2 * * *",
-  () => {
-    console.log(
-      "Running scheduled task at 2:25 AM IST: Migrating afterPlan with recalculation..."
-    );
-    fetchExtraData();
-  },
-  {
-    scheduled: true,
-    timezone: "Asia/Kolkata",
-  }
-);
+if (process.env.NODE_ENV === "production") {
+  cron.schedule(
+    "25 2 * * *",
+    () => {
+      console.log(
+        "⏰ Running scheduled task at 2:25 AM IST (production): Migrating afterPlan with recalculation..."
+      );
+      fetchExtraData();
+    },
+    {
+      scheduled: true,
+      timezone: "Asia/Kolkata",
+    }
+  );
+} else {
+  console.log("⚙️ Cron job not started (development/local environment)");
+}
 
 // fetchExtraData();
 
@@ -2385,7 +2400,7 @@ const transferCOD = async (req, res) => {
     remittanceRecord.RemittanceInitiated =
       (remittanceRecord.RemittanceInitiated || 0) - initiatedSum;
     remittanceRecord.TotalCODRemitted =
-  (Number(remittanceRecord.TotalCODRemitted) || 0) + initiatedSum;
+      (Number(remittanceRecord.TotalCODRemitted) || 0) + initiatedSum;
 
     await remittanceRecord.save();
 
