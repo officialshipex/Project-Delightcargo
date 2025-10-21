@@ -15,7 +15,7 @@ router.get("/couriers", async (req, res) => {
 // ✅ Create New Courier Service
 router.post("/couriers", async (req, res) => {
   try {
-    const { provider,courier, courierType, name, status } = req.body;
+    const { provider, courier, courierType, name, status } = req.body;
 
     const newCourier = new CourierService({
       provider,
@@ -33,15 +33,46 @@ router.post("/couriers", async (req, res) => {
   }
 });
 
+router.put("/updateStatus/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status || !["Enable", "Disable"].includes(status)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid status value" });
+    }
+
+    const updatedCourier = await CourierService.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true }
+    );
+
+    if (!updatedCourier) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Courier not found" });
+    }
+
+    res
+      .status(200)
+      .json({ success: true, message: "Status updated", data: updatedCourier });
+  } catch (error) {
+    console.error("Error updating courier status:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 // ✅ Update Courier Service
 router.put("/couriers/:id", async (req, res) => {
   try {
-    console.log(req.params.id)
+    console.log(req.params.id);
     const updatedCourier = await CourierService.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true }
-
     );
 
     if (!updatedCourier) {
@@ -57,7 +88,9 @@ router.put("/couriers/:id", async (req, res) => {
 // ✅ Delete Courier Service
 router.delete("/couriers/:id", async (req, res) => {
   try {
-    const deletedCourier = await CourierService.findByIdAndDelete(req.params.id);
+    const deletedCourier = await CourierService.findByIdAndDelete(
+      req.params.id
+    );
     if (!deletedCourier) {
       return res.status(404).json({ message: "Courier not found" });
     }

@@ -1049,7 +1049,7 @@ const ShipeNowOrder = async (req, res) => {
     // ✅ fetch EDDMap
     const EDDRates = await EDDMap.find();
 
-    // ✅ enabled courier services
+    // ✅ fetch enabled + active courier services
     const services = await CourierService.find({ status: "Enable" });
     const enabledServices = [];
 
@@ -1057,8 +1057,20 @@ const ShipeNowOrder = async (req, res) => {
       const provider = await Courier.findOne({
         courierProvider: srvc.provider,
       });
-      if (provider?.status === "Enable") {
-        enabledServices.push(srvc);
+      // console.log("service",srvc)
+      // ✅ check both provider & courier service statuses
+      if (provider?.status === "Enable" && srvc.status === "Enable") {
+        // console.log("plan", plan);
+        const planRateCard = plan.rateCard.find(
+          (card) =>
+            card.courierServiceName.trim() === srvc.name.trim() &&
+            card.courierProviderName.trim() === srvc.provider.trim() &&
+            card.status === "Active" // <-- Only Active entries
+        );
+        // console.log("planRateCard",planRateCard)
+        if (planRateCard) {
+          enabledServices.push(srvc);
+        }
       }
     }
 
@@ -1074,11 +1086,11 @@ const ShipeNowOrder = async (req, res) => {
         }
       })
     );
-    // console.log("availa", availableServices);
+    // console.log("available", availableServices);
 
     const filteredServices = availableServices.filter(Boolean);
-    // console.log("filteredServicess",filteredServices)
-    // ✅ calculate zone based on pincodes
+
+    // ✅ calculate zone
     const zone = await getZone(
       order.pickupAddress.pinCode,
       order.receiverAddress.pinCode
@@ -1099,9 +1111,8 @@ const ShipeNowOrder = async (req, res) => {
     };
 
     let rates = await calculateRateForService(payload);
-    // console.log("rates",rates)
-
-    // ✅ normalize helper
+    // console.log("rate", rates);
+    // console.log("filtere", filteredServices);
     const normalize = (str) => str?.toLowerCase().replace(/\s+/g, "").trim();
 
     // ✅ Build updatedRates only for serviceable couriers
@@ -1112,7 +1123,7 @@ const ShipeNowOrder = async (req, res) => {
             normalize(rate.courierServiceName) === normalize(service.item.name)
         );
 
-        if (!matchedRate) return null; // ❌ skip if no rate (not serviceable)
+        if (!matchedRate) return null;
 
         const matchedEDD = EDDRates.find(
           (edd) => normalize(edd.serviceName) === normalize(service.item.name)
@@ -1120,7 +1131,7 @@ const ShipeNowOrder = async (req, res) => {
 
         let estimatedDeliveryDate = null;
         if (matchedEDD && matchedEDD.zoneRates) {
-          const zoneKey = zone.zone; // already like "zoneA"
+          const zoneKey = zone.zone;
           const days = matchedEDD.zoneRates[zoneKey];
           if (days) {
             const eddDate = new Date();
@@ -1138,15 +1149,51 @@ const ShipeNowOrder = async (req, res) => {
           estimatedDeliveryDate,
         };
       })
-      .filter(Boolean); // remove nulls
+      .filter(Boolean);
+    // console.log("update", updatedRates);
+    // ✅ SORTING based on plan.priorityType
+    let sortedRates = [...updatedRates];
+
+    let priorityType = plan?.priorityType?.toLowerCase();
+    if (!["cheapest", "fastest", "custom"].includes(priorityType)) {
+      priorityType = "cheapest";
+    }
+    if (priorityType === "cheapest") {
+      // Sort by lowest finalCharges
+      sortedRates.sort((a, b) => {
+        const chargeA = parseFloat(
+          a.forward?.finalCharges || a.forward?.charges || 0
+        );
+        const chargeB = parseFloat(
+          b.forward?.finalCharges || b.forward?.charges || 0
+        );
+        return chargeA - chargeB;
+      });
+    } else if (priorityType === "fastest") {
+      sortedRates.sort(
+        (a, b) =>
+          new Date(a.estimatedDeliveryDate) - new Date(b.estimatedDeliveryDate)
+      );
+    } else if (priorityType === "custom" && Array.isArray(plan.rateCard)) {
+      const customOrder = plan.rateCard.map((r) =>
+        r?.courierServiceName?.toLowerCase()
+      );
+      sortedRates.sort((a, b) => {
+        const indexA = customOrder.indexOf(a.courierServiceName?.toLowerCase());
+        const indexB = customOrder.indexOf(b.courierServiceName?.toLowerCase());
+        return indexA - indexB;
+      });
+    }
+
+    // console.log("sortedRates", sortedRates);
 
     res.status(201).json({
       success: true,
       order,
-      updatedRates, // ✅ only serviceable with rates
+      updatedRates: sortedRates,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error in ShipeNowOrder:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -1864,5 +1911,5 @@ module.exports = {
   deletePickupAddress,
   getShippingOrders,
   bulkCancelOrder,
-  checkBulkPickup
+  checkBulkPickup,
 };

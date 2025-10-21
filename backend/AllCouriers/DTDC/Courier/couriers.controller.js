@@ -2,6 +2,7 @@ const express = require("express");
 const axios = require("axios");
 const User = require("../../../models/User.model");
 require("dotenv").config();
+const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
 const { getDTDCAuthToken } = require("../Authorize/saveCourierContoller");
@@ -20,10 +21,9 @@ const X_ACCESS_TOKEN = process.env.DTDC_X_ACCESS_TOKEN;
 
 // Create a new shipment
 const createOrder = async (req, res) => {
-  try {
-    console.log("API Key:", API_KEY);
-    console.log("Access Token:", X_ACCESS_TOKEN);
+  const session = await mongoose.startSession();
 
+  try {
     const {
       id,
       provider,
@@ -32,50 +32,79 @@ const createOrder = async (req, res) => {
       courier,
       estimatedDeliveryDate,
     } = req.body;
-    console.log(id, provider, finalCharges, courierServiceName, courier);
+
     if (!courier) {
       return res.status(400).json({
         success: false,
         message: "service_type_id missing please refresh your page",
       });
     }
-    // Fetch order, user, and wallet details
-    const currentOrder = await Order.findById(id);
-    if (!currentOrder) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Order not found" });
-    }
 
-    if (currentOrder.status !== "new") {
+    session.startTransaction();
+
+    // --- Fetch & lock Order atomically ---
+    const currentOrder = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
+    );
+
+    if (!currentOrder) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
-        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+        message: `Shipment cannot be created because order is already processed or not in 'new' status.`,
       });
     }
 
-    const zone = await getZone(
-      currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode
-      // res
-    );
-    console.log("zone", zone);
+    // --- Parallel fetch zone and user ---
+    const [zone, user] = await Promise.all([
+      getZone(
+        currentOrder.pickupAddress.pinCode,
+        currentOrder.receiverAddress.pinCode
+      ),
+      User.findById(currentOrder.userId).session(session),
+    ]);
+
     if (!zone) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: "Pincode not serviceable" });
     }
-    const user = await User.findById(currentOrder.userId);
+
     if (!user) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
     }
 
-    const currentWallet = await Wallet.findById(user.Wallet);
+    const currentWallet = await Wallet.findById(user.Wallet).session(session);
     if (!currentWallet) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "Wallet not found" });
     }
+
+    // --- Wallet check ---
+    const effectiveBalance =
+      currentWallet.balance - (currentWallet.holdAmount || 0);
+    if (currentWallet.balance < finalCharges) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({ success: false, message: "Insufficient Wallet Balance" });
+    }
+
     const productNames = currentOrder.productDetails
       .map((product) => product.name)
       .join(", ");
@@ -145,18 +174,16 @@ const createOrder = async (req, res) => {
         },
       ],
     };
-    console.log(
-      "consignments",
-      shipmentData,
-      shipmentData.consignments[0].origin_details,
-      shipmentData.consignments[0].destination_details
-    );
+    // console.log(
+    //   "consignments",
+    //   shipmentData,
+    //   shipmentData.consignments[0].origin_details,
+    //   shipmentData.consignments[0].destination_details
+    // );
 
-    // API call to DTDC
+    // --- Create shipment API call ---
     let response;
-    const walletHoldAmount = currentWallet?.holdAmount || 0;
-    const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    if (currentWallet.balance >= finalCharges) {
+    try {
       response = await axios.post(
         `${DTDC_API_URL}/customer/integration/consignment/softdata`,
         shipmentData,
@@ -168,75 +195,105 @@ const createOrder = async (req, res) => {
           },
         }
       );
-      console.log("dtdc response", response.data);
-    } else {
-      return res
-        .status(400)
-        .json({ success: false, message: "Insufficient Wallet Balance" });
-    }
-    if (response?.data?.data[0]?.success) {
-      const result = response.data.data[0];
-      currentOrder.status = "Booked";
-      currentOrder.cancelledAtStage = null;
-      currentOrder.awb_number = result.reference_number;
-      currentOrder.shipment_id = `${result.customer_reference_number}`;
-      currentOrder.provider = provider;
-      currentOrder.totalFreightCharges =
-        finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-      currentOrder.courierServiceName = courierServiceName;
-      currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.zone = zone.zone;
-      currentOrder.estimatedDeliveryDate = estimatedDeliveryDate || "";
-      currentOrder.tracking.push({
-        status: "Booked",
-        StatusLocation: currentOrder.pickupAddress?.city || "N/A",
-        StatusDateTime: new Date(),
-        Instructions: "Order booked successfully",
-      });
-      let savedOrder = await currentOrder.save();
-      let balanceToBeDeducted =
-        finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-      // console.log("sjakjska",balanceToBeDeducted)
-      await Wallet.findOneAndUpdate(
-        { _id: user.Wallet, balance: { $gte: balanceToBeDeducted } },
-        {
-          $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId || null, // Include if available
-              category: "debit",
-              amount: balanceToBeDeducted, // Fixing incorrect reference
-              balanceAfterTransaction:
-                currentWallet.balance - balanceToBeDeducted,
-              date: new Date(),
-              awb_number: result.reference_number || "", // Ensuring it follows the schema
-              description: `Freight Charges Applied`,
-            },
-          },
-        }
+    } catch (shipmentErr) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      console.error(
+        "❌ DTDC Shipment API failed:",
+        shipmentErr.response?.data || shipmentErr.message
       );
-      // if (currentOrder.channel?.toLowerCase() === "woocommerce") {
-      //   await markWooOrderAsSihpped(
-      //     currentOrder.storeUrl,
-      //     currentOrder.channelId,
-      //     currentOrder.awb_number,
-      //     currentOrder.provider
-      //   );
-      // }
-    } else {
-      console.log("ererer", response.data);
-      return res.status(400).json({ message: response.data.data[0].message });
+      return res.status(500).json({
+        success: false,
+        message: shipmentErr.response?.data?.message || "Shipment failed",
+        error: shipmentErr.response?.data || shipmentErr.message,
+      });
     }
 
-    console.log(response.data.data);
+    const result = response?.data?.data?.[0];
+    if (!result?.success) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: result?.message || "Shipment failed",
+      });
+    }
 
-    return res.status(200).json({
-      message: "Shipment Created Successfully",
+    // --- Update Order inside transaction ---
+    const balanceToBeDeducted = parseInt(finalCharges) || 0;
+
+    await Order.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: "Booked",
+          cancelledAtStage: null,
+          awb_number: result.reference_number,
+          shipment_id: result.customer_reference_number,
+          provider,
+          totalFreightCharges: balanceToBeDeducted,
+          courierServiceName,
+          shipmentCreatedAt: new Date(),
+          zone: zone.zone,
+          estimatedDeliveryDate: estimatedDeliveryDate || "",
+        },
+        $push: {
+          tracking: {
+            status: "Booked",
+            StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+            StatusDateTime: new Date(),
+            Instructions: "Order booked successfully",
+          },
+        },
+      },
+      { session, new: true }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // --- Early response ---
+    res.status(200).json({
       success: true,
-      data: response.data,
+      message: "Shipment Created Successfully",
+      awb: result.reference_number,
+    });
+
+    // --- Wallet update (background, safe) ---
+    process.nextTick(async () => {
+      try {
+        await Wallet.findOneAndUpdate(
+          { _id: user.Wallet, balance: { $gte: balanceToBeDeducted } },
+          {
+            $inc: { balance: -balanceToBeDeducted },
+            $push: {
+              transactions: {
+                channelOrderId: currentOrder.orderId || null,
+                category: "debit",
+                amount: balanceToBeDeducted,
+                balanceAfterTransaction:
+                  currentWallet.balance - balanceToBeDeducted,
+                date: new Date(),
+                awb_number: result.reference_number || "",
+                description: "Freight Charges Applied",
+              },
+            },
+          }
+        );
+      } catch (err) {
+        console.error("Wallet update error:", err.message);
+      }
     });
   } catch (error) {
-    console.error("Error creating shipment:", error);
+    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
+    await session.abortTransaction();
+    session.endSession();
+    console.error(
+      "❌ Error creating shipment:",
+      error.response?.data || error.message
+    );
     return res.status(500).json({
       success: false,
       message: "Failed to create shipment",
@@ -339,7 +396,7 @@ const trackOrderDTDC = async (AWBNo) => {
         "x-access-token": access_key,
       },
     });
-    console.log(response.data);
+    // console.log(response.data);
     return { success: true, data: response.data.trackDetails };
   } catch (error) {
     // console.error(

@@ -3,7 +3,7 @@ if (process.env.NODE_ENV != "production") {
 }
 const axios = require("axios");
 const { getToken } = require("../Authorize/shreeMaruti.controller");
-const Courier = require("../../../models/courierSecond");
+
 const Services = require("../../../models/CourierService.Schema");
 const Order = require("../../../models/newOrder.model");
 const { getUniqueId } = require("../../getUniqueId");

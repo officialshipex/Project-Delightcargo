@@ -6,7 +6,7 @@ const { getZone } = require("../../../Rate/zoneManagementController");
 const Wallet = require("../../../models/wallet");
 const User = require("../../../models/User.model");
 const PickupAddress = require("../../../models/pickupAddress.model");
-
+const https = require("https");
 const registerSmartshipHub = async (userId, pinCode) => {
   try {
     const pickupAddress = await PickupAddress.findOne({
@@ -81,7 +81,24 @@ const registerSmartshipHub = async (userId, pinCode) => {
   }
 };
 
+// Reuse persistent HTTPS connection
+const httpsAgent = new https.Agent({ keepAlive: true });
+axios.defaults.httpsAgent = httpsAgent;
+
+// Optional: simple in-memory cache for zone lookup
+const zoneCache = new Map();
+const getCachedZone = async (from, to) => {
+  const key = `${from}-${to}`;
+  if (zoneCache.has(key)) return zoneCache.get(key);
+  const zone = await getZone(from, to);
+  if (zone) zoneCache.set(key, zone);
+  return zone;
+};
+
 const orderRegistrationOneStep = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const {
       id,
@@ -90,53 +107,56 @@ const orderRegistrationOneStep = async (req, res) => {
       provider,
       estimatedDeliveryDate,
     } = req.body;
-    console.log("req.body", req.body);
-    const accessToken = await getAccessToken();
-    const currentOrder = await Order.findById(id);
-    if (!currentOrder) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Order not found" });
-    }
 
-    if (currentOrder.status !== "new") {
+    console.log("req.body", req.body);
+
+    // ✅ Lock order for processing
+    const currentOrder = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
+    );
+
+    if (!currentOrder) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
-        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+        message:
+          "Shipment already created or order is being processed by another request.",
       });
     }
 
-    const zone = await getZone(
-      currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode
-      // res
-    );
-    // console.log("zone", zone);
+    // ✅ Parallel fetch (fast)
+    const [zone, user, accessToken] = await Promise.all([
+      getCachedZone(
+        currentOrder.pickupAddress.pinCode,
+        currentOrder.receiverAddress.pinCode
+      ),
+      User.findById(currentOrder.userId),
+      getAccessToken(),
+    ]);
+
     if (!zone) {
-      return res.status(400).json({ message: "Pincode not serviceable" });
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({ success: false, message: "Pincode not serviceable" });
     }
-    const user = await User.findById(currentOrder.userId);
+
     if (!user) {
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
     }
 
-    const smartshipHub = await registerSmartshipHub(
-      user._id,
-      currentOrder.pickupAddress.pinCode
-    );
-    // console.log("Smartship Hub:", smartshipHub);
-    if (smartshipHub.success === false) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Pickup pincode is not registered. Please add a pickup address first.",
-      });
-    }
-
-    const currentWallet = await Wallet.findById(user.Wallet);
+    const currentWallet = await Wallet.findById(user.Wallet).session(session);
     if (!currentWallet) {
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "Wallet not found" });
@@ -145,20 +165,31 @@ const orderRegistrationOneStep = async (req, res) => {
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
     if (currentWallet.balance < finalCharges) {
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(400)
         .json({ success: false, message: "Insufficient Wallet Balance" });
     }
 
-    const productNames = currentOrder.productDetails
-      .map((p) => p.name)
-      .join(", ");
+    // ✅ Register hub
+    const smartshipHub = await registerSmartshipHub(
+      user._id,
+      currentOrder.pickupAddress.pinCode
+    );
+    if (smartshipHub?.success === false) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message:
+          "Pickup pincode not registered. Please add a pickup address first.",
+      });
+    }
 
+    // ✅ Build payload
     const payload = {
-      request_info: {
-        client_id: "", // Optional
-        run_type: "create",
-      },
+      request_info: { run_type: "create" },
       orders: [
         {
           client_order_reference_id: currentOrder.orderId,
@@ -168,10 +199,10 @@ const orderRegistrationOneStep = async (req, res) => {
               ? currentOrder.paymentDetails.amount
               : 0,
           total_order_value: currentOrder.paymentDetails.amount.toString(),
-          payment_type: currentOrder.paymentDetails.method.toLowerCase(), // cod or prepaid
+          payment_type: currentOrder.paymentDetails.method.toLowerCase(),
           package_order_weight: (
             currentOrder.packageDetails.applicableWeight * 1000
-          ).toString(), // in grams
+          ).toString(),
           package_order_length:
             currentOrder.packageDetails.volumetricWeight.length.toString(),
           package_order_height:
@@ -179,22 +210,19 @@ const orderRegistrationOneStep = async (req, res) => {
           package_order_width:
             currentOrder.packageDetails.volumetricWeight.width.toString(),
           shipper_hub_id: smartshipHub.hubId || "",
-          shipper_gst_no: "",
-          order_invoice_date: new Date().toISOString().slice(0, 10), // today's date (or you can pull from order)
-          order_invoice_number: `INV-${currentOrder.orderId}-${Date.now()}`, // optional
+          order_invoice_date: new Date().toISOString().slice(0, 10),
+          order_invoice_number: `INV-${currentOrder.orderId}-${Date.now()}`,
           is_return_qc: "0",
           return_reason_id: "0",
-          order_meta: {
-            preferred_carriers: [279], // use given courier
-          },
-          product_details: currentOrder.productDetails.map((product) => ({
-            client_product_reference_id: product._id.toString(),
-            product_name: product.name,
-            product_category: product.category || "General",
-            product_hsn_code: product.hsn || "0000",
-            product_quantity: product.quantity || 1,
-            product_gst_tax_rate: product.gst || "0",
-            product_invoice_value: product.unitPrice.toString(),
+          order_meta: { preferred_carriers: [279] },
+          product_details: currentOrder.productDetails.map((p) => ({
+            client_product_reference_id: p._id.toString(),
+            product_name: p.name,
+            product_category: p.category || "General",
+            product_hsn_code: p.hsn || "0000",
+            product_quantity: p.quantity || 1,
+            product_gst_tax_rate: p.gst || "0",
+            product_invoice_value: p.unitPrice.toString(),
           })),
           consignee_details: {
             consignee_name: currentOrder.receiverAddress.contactName,
@@ -208,6 +236,7 @@ const orderRegistrationOneStep = async (req, res) => {
       ],
     };
 
+    // ✅ Smartship API call
     const response = await axios.post(
       "https://api.smartship.in/v2/app/Fulfillmentservice/orderRegistrationOneStep",
       payload,
@@ -218,57 +247,59 @@ const orderRegistrationOneStep = async (req, res) => {
         },
       }
     );
-    console.log("Smartship Order Response:", response.data);
-    // console.log(
-    //   "Smartship Order Response:",
-    //   response.data.data.errors.data_discrepancy
-    // );
 
-    if (response.data.data.errors) {
-      return res.status(400).json({
-        success: false,
-        message: "Error creating Shipment",
-      });
-    }
-
-    // Duplicate order check
     const respData = response.data?.data;
+    console.log("Smartship Response:", respData);
+
+    if (respData?.errors) throw new Error("Smartship returned errors");
+
     if (
-      (!respData?.success_order_details ||
-        !respData.success_order_details.orders ||
-        respData.success_order_details.orders.length === 0) &&
+      !respData?.success_order_details?.orders?.length &&
       respData?.duplicate_orders
     ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Duplicate orderId is not allowed in courier Bluedart, ship with another courier",
-        errors: respData.errors,
-        duplicate_orders: respData.duplicate_orders,
-      });
+      throw new Error("Duplicate orderId not allowed for this courier");
     }
-    // Save AWB and update order status
-    const result = response.data?.data?.success_order_details?.orders?.[0];
 
-    if (result?.awb_number) {
-      currentOrder.status = "Booked";
-      currentOrder.awb_number = result.awb_number;
-      currentOrder.shipment_id = result.request_order_id || "";
-      currentOrder.provider = provider;
-      currentOrder.totalFreightCharges = parseInt(finalCharges);
-      currentOrder.courierServiceName = courierServiceName;
-      currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.zone = zone.zone;
-      currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
-      currentOrder.tracking.push({
-        status: "Booked",
-        StatusLocation: currentOrder.pickupAddress?.city || "N/A",
-        StatusDateTime: new Date(),
-        Instructions: "Order booked successfully",
-      });
-      await currentOrder.save();
+    const result = respData?.success_order_details?.orders?.[0];
+    if (!result?.awb_number) throw new Error("AWB not received from Smartship");
 
-      await currentWallet.updateOne({
+    // ✅ Commit response early for better UX
+    res.status(200).json({
+      success: true,
+      message: "Shipment Created Successfully",
+      data: result,
+    });
+
+    // ✅ Continue in background safely
+    await Order.updateOne(
+      { _id: currentOrder._id },
+      {
+        $set: {
+          status: "Booked",
+          awb_number: result.awb_number,
+          shipment_id: result.request_order_id || "",
+          provider,
+          totalFreightCharges: parseInt(finalCharges),
+          courierServiceName,
+          shipmentCreatedAt: new Date(),
+          zone: zone.zone,
+          estimatedDeliveryDate,
+        },
+        $push: {
+          tracking: {
+            status: "Booked",
+            StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+            StatusDateTime: new Date(),
+            Instructions: "Order booked successfully",
+          },
+        },
+      },
+      { session }
+    );
+
+    await Wallet.updateOne(
+      { _id: currentWallet._id },
+      {
         $inc: { balance: -parseInt(finalCharges) },
         $push: {
           transactions: {
@@ -281,19 +312,28 @@ const orderRegistrationOneStep = async (req, res) => {
             description: `Freight Charges Applied`,
           },
         },
-      });
-    }
-
-    return res.status(200).json({
-      message: "Shipment Created Successfully",
-      success: true,
-      data: response.data,
-    });
-  } catch (error) {
-    console.error(
-      "Smartship Order Registration Error:",
-      error?.response?.data || error.message
+      },
+      { session }
     );
+
+    await session.commitTransaction();
+    session.endSession();
+  } catch (error) {
+    console.error("Smartship Order Registration Error:", error.message);
+
+    try {
+      await session.abortTransaction();
+      session.endSession();
+
+      // Revert order to 'new' if processing failed
+      if (req.body?.id) {
+        await Order.updateOne(
+          { _id: req.body.id, status: "processing" },
+          { $set: { status: "new" } }
+        );
+      }
+    } catch {}
+
     return res.status(500).json({
       success: false,
       message: "Failed to register order",
@@ -459,7 +499,7 @@ const trackOrderSmartShip = async (AWBNo, shipment_id) => {
     );
 
     // console.log("response data", response.data);
-    console.log("respose status", response.data.data.scans);
+    // console.log("respose status", response.data.data.scans);
     // console.log("response status", response.data.data.scans["20726635"][0].call_logs);
     if (response.data.message === "success") {
       const trackingData = response.data.data.scans;

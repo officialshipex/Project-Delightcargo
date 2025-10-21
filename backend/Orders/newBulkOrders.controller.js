@@ -3,9 +3,11 @@ const Courier = require("../models/AllCourierSchema");
 const Order = require("../models/newOrder.model");
 const plan = require("../models/Plan.model");
 const User = require("../models/User.model");
+const EDDMap = require("../models/EDDMap.model");
 const { checkServiceabilityAll } = require("./shipment.controller");
 const Wallet = require("../models/wallet");
 const { AutoShip } = require("./AutoShipB2c.controller");
+const { getZone } = require("../Rate/zoneManagementController");
 const {
   calculateRateForService,
   calculateRateForServiceBulk,
@@ -156,7 +158,7 @@ const callProviderWithRetry = async (
           break;
         default:
           console.error(
-            `No shipment function defined for ${serviceDetails.courierProviderName}`
+            `No shipment function defined for ${serviceDetails.provider}`
           );
           return false;
       }
@@ -268,29 +270,27 @@ const shipBulkOrder = async (req, res) => {
 };
 
 const createBulkOrder = async (req, res) => {
-  const { item, selectedOrders, wh, id, selectedServiceDetails } = req.body;
+  const { selectedOrders } = req.body;
   let successCount = 0;
   let failureCount = 0;
-  console.log("selected", selectedOrders, item, wh);
+  // console.log("selected", selectedOrders);
   try {
     const userId = req.user._id;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
+    const plans = await plan.findOne({ userId });
+    if (!plan) return res.status(404).json({ error: "User plan not found" });
+
     const walletId = user.Wallet;
+    const EDDRates = await EDDMap.find();
+    const couriers = await Courier.find({ status: "Enable" });
+    const courierServices = await Services.find({ status: "Enable" });
 
-    const ordersToProcess =
-      Array.isArray(selectedOrders) && selectedOrders.length > 0
-        ? selectedOrders.map((o) => (typeof o === "object" ? o._id : o))
-        : Array.isArray(id)
-        ? id
-        : id
-        ? [id]
-        : [];
+    const normalize = (str) => str?.toLowerCase().replace(/\s+/g, "").trim();
 
-    for (const orderId of ordersToProcess) {
-      // const orderId = orderObj._id;
-      // Atomically claim order
+    // 🔁 Process each selected order
+    for (const orderId of selectedOrders) {
       const claimedOrder = await claimOrder(orderId);
       if (!claimedOrder) {
         console.log(`Order ${orderId} is already processed. Skipping.`);
@@ -298,60 +298,161 @@ const createBulkOrder = async (req, res) => {
       }
 
       try {
-        const orderDetails = await Order.findById(orderId);
-        // console.log("orderdetails",orderDetails)
-        if (!orderDetails) throw new Error("Order details not found");
+        const order = await Order.findById(orderId);
+        if (!order) throw new Error("Order details not found");
 
-        const details = {
-          pickupPincode: `${wh.pinCode}`,
-          deliveryPincode: `${orderDetails.receiverAddress.pinCode}`,
-          length: orderDetails.packageDetails.volumetricWeight.length,
-          breadth: orderDetails.packageDetails.volumetricWeight.width,
-          height: orderDetails.packageDetails.volumetricWeight.height,
-          weight: orderDetails.packageDetails.applicableWeight,
-          cod: orderDetails.paymentDetails.method === "COD" ? "Yes" : "No",
-          valueInINR: orderDetails.paymentDetails.amount,
-          userID: userId,
-          filteredServices: item,
-        };
-        // console.log("details",details)
+        const applicableWeight = order.packageDetails.applicableWeight;
 
-        const rates = item
-          ? await calculateRateForServiceBulk(details)
-          : await calculateRateForService(details);
-        // console.log("rates", rates);
-        const charges = parseInt(rates[0]?.forward?.finalCharges);
-        if (!charges) throw new Error("Invalid shipping charges");
+        // ✅ Find eligible courier services based on plan.rateCard & weight
+        // Step 1: Filter all slabs that are >= applicableWeight
+        let eligibleCouriers = plans.rateCard
+          .filter((rc) => rc.status === "Active") // Active only
+          .filter((rc) => {
+            const weightSlab = rc.weightPriceBasic?.[0]?.weight / 1000 || 0;
+            return weightSlab >= applicableWeight;
+          });
 
-        // Call provider (wallet deduction handled inside courier function)
-        const result = await callProviderWithRetry(
-          item ? item : selectedServiceDetails,
-          orderDetails,
-          wh,
-          walletId,
-          charges
+        // Step 2: Find the minimum (nearest) slab among them
+        if (eligibleCouriers.length > 0) {
+          const minSlab = Math.min(
+            ...eligibleCouriers.map(
+              (rc) => rc.weightPriceBasic?.[0]?.weight / 1000 || 0
+            )
+          );
+
+          // Step 3: Keep only those couriers with that exact nearest slab
+          eligibleCouriers = eligibleCouriers.filter(
+            (rc) => rc.weightPriceBasic?.[0]?.weight / 1000 === minSlab
+          );
+        }
+
+        // console.log("eligible courier", eligibleCouriers);
+        if (eligibleCouriers.length === 0) {
+          throw new Error("No courier available for this weight slab");
+        }
+
+        // ✅ Filter active + enabled couriers
+        eligibleCouriers = eligibleCouriers.filter((rc) => {
+          const service = courierServices.find(
+            (cs) =>
+              normalize(cs.name) === normalize(rc.courierServiceName) &&
+              cs.status === "Enable"
+          );
+          const provider = couriers.find(
+            (c) =>
+              normalize(c.courierProvider) === normalize(rc.courierProviderName)
+          );
+          return service && provider?.status === "Enable";
+        });
+
+        // ✅ Sort based on plan.priorityType
+        const zone = await getZone(
+          order.pickupAddress.pinCode,
+          order.receiverAddress.pinCode
         );
 
-        if (!result) {
+        let priorityType = plans.priorityType?.toLowerCase();
+        if (!["cheapest", "fastest", "custom"].includes(priorityType)) {
+          priorityType = "cheapest";
+        }
+        if (priorityType === "cheapest") {
+          eligibleCouriers.sort((a, b) => {
+            const costA = parseFloat(a.weightPriceBasic[0][zone.zone]) || 0;
+            const costB = parseFloat(b.weightPriceBasic[0][zone.zone]) || 0;
+            return costA - costB;
+          });
+        } else if (priorityType === "fastest") {
+          eligibleCouriers.sort((a, b) => {
+            const eddA = EDDRates.find(
+              (e) =>
+                normalize(e.serviceName) === normalize(a.courierServiceName)
+            );
+            const eddB = EDDRates.find(
+              (e) =>
+                normalize(e.serviceName) === normalize(b.courierServiceName)
+            );
+            const daysA =
+              eddA?.zoneRates?.[zone.zone] ?? Number.MAX_SAFE_INTEGER;
+            const daysB =
+              eddB?.zoneRates?.[zone.zone] ?? Number.MAX_SAFE_INTEGER;
+            return daysA - daysB;
+          });
+        } else if (priorityType === "custom") {
+          const customOrder = plans.rateCard.map((r) =>
+            r?.courierServiceName?.toLowerCase()
+          );
+          eligibleCouriers.sort((a, b) => {
+            const indexA = customOrder.indexOf(
+              a.courierServiceName?.toLowerCase()
+            );
+            const indexB = customOrder.indexOf(
+              b.courierServiceName?.toLowerCase()
+            );
+            return indexA - indexB;
+          });
+        }
+
+        // ✅ Try couriers sequentially
+        let shipmentSuccess = false;
+        for (const courier of eligibleCouriers) {
+          try {
+            const details = {
+              pickupPincode: order.pickupAddress.pinCode,
+              deliveryPincode: order.receiverAddress.pinCode,
+              length: order.packageDetails.volumetricWeight.length,
+              breadth: order.packageDetails.volumetricWeight.width,
+              height: order.packageDetails.volumetricWeight.height,
+              weight: applicableWeight,
+              cod: order.paymentDetails.method === "COD" ? "Yes" : "No",
+              valueInINR: order.paymentDetails.amount,
+              userID: userId,
+              filteredServices: courier,
+            };
+
+            const rates = await calculateRateForServiceBulk(details);
+            // console.log("courier",courier)
+            const charges = parseFloat(rates?.[0]?.forward?.finalCharges || 0);
+            if (!charges) throw new Error("Invalid charges");
+            // console.log("charges", charges);
+            const courierDetails = {
+              provider: courier.courierProviderName,
+              name: courier.courierServiceName,
+            };
+            const result = await callProviderWithRetry(
+              courierDetails,
+              order,
+              order.pickupAddress,
+              walletId,
+              charges
+            );
+
+            if (result) {
+              shipmentSuccess = true;
+              successCount++;
+              console.log(
+                `✅ Order ${orderId} created with ${courier.courierServiceName}`
+              );
+              break;
+            }
+          } catch (err) {
+            console.warn(
+              `Courier ${courier.courierServiceName} failed for order ${orderId}: ${err.message}`
+            );
+            continue; // try next courier
+          }
+        }
+
+        if (!shipmentSuccess) {
+          failureCount++;
           await Order.findByIdAndUpdate(orderId, {
             $set: {
               status: "new",
-              failureReason: "Provider shipment failed",
+              failureReason: "All couriers failed",
             },
           });
-          failureCount++;
-        } else {
-          // await Order.findByIdAndUpdate(orderId, {
-          //   $set: {
-          //     status: "booked",
-          //     awb: result?.awb || "",
-          //     shipmentCreatedAt: new Date(),
-          //   },
-          // });
-          successCount++;
         }
 
-        await delay(1000); // delay between orders
+        await delay(1000);
       } catch (error) {
         console.error(`Order ${orderId} processing error:`, error.message);
         await Order.findByIdAndUpdate(orderId, {
@@ -362,11 +463,10 @@ const createBulkOrder = async (req, res) => {
     }
 
     return res.status(201).json({
+      success: true,
       message: `${successCount} orders created successfully & ${failureCount} failed.`,
       successCount,
       failureCount,
-      remainingOrdersCount:
-        ordersToProcess.length - successCount - failureCount,
     });
   } catch (error) {
     console.error("Bulk order creation error:", error.message);

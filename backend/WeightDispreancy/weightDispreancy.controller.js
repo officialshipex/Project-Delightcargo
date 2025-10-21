@@ -119,7 +119,7 @@ const uploadDispreancy = async (req, res) => {
       let userPlan = planCache.get(userId);
 
       if (!userPlan) {
-        console.log("user plan",userPlan)
+        console.log("user plan", userPlan);
         userPlan = await Plan.findOne({ userId });
         if (!userPlan) continue;
         planCache.set(userId, userPlan);
@@ -612,56 +612,58 @@ const AllDiscrepancyBasedId = async (req, res) => {
 };
 
 const AcceptDiscrepancy = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const userId = req.user._id;
     const { awb_number } = req.body;
 
-    // Fetch the discrepancy details
-    const discrepancies = await WeightDiscrepancy.findOne({
-      awbNumber: awb_number,
-    });
+    // 1. Fetch discrepancy inside session
+    const discrepancies = await WeightDiscrepancy.findOne(
+      { awbNumber: awb_number },
+      null,
+      { session }
+    );
+
     if (!discrepancies) {
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "Discrepancy not found" });
     }
 
-    // Ensure discrepancy is in 'new' status
     if (discrepancies.status !== "new") {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
-        message: "Discrepancy is already processed or not in 'new' status",
+        message: "Discrepancy already processed",
       });
     }
 
     const extraCharges = parseFloat(
       discrepancies.excessWeightCharges.excessCharges
     );
-    const user = await User.findById(userId);
-    if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+
+    const user = await User.findById(userId, null, { session });
+    if (!user) throw new Error("User not found");
+
+    const wallet = await Wallet.findById(user.Wallet, null, { session });
+    if (!wallet) throw new Error("Wallet not found");
+
+    if (wallet.balance < extraCharges) {
+      throw new Error("Insufficient wallet balance");
     }
 
-    const wallet = await Wallet.findById(user.Wallet);
-    if (!wallet) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Wallet not found" });
-    }
-
-    console.log("Wallet Balance (Before):", wallet.balance);
-    console.log("Wallet Hold Amount (Before):", wallet.holdAmount);
-
-    // Deduct extraCharges from wallet balance and holdAmount
+    // Deduct atomically
     wallet.balance = parseFloat((wallet.balance - extraCharges).toFixed(2));
     wallet.holdAmount = Math.max(
       0,
       parseFloat((wallet.holdAmount - extraCharges).toFixed(2))
     );
 
-    // Add transaction entry
     const newTransaction = {
       channelOrderId: discrepancies.orderId,
       category: "debit",
@@ -672,23 +674,27 @@ const AcceptDiscrepancy = async (req, res) => {
     };
     wallet.transactions.push(newTransaction);
 
-    // Save wallet and discrepancy changes
-    await wallet.save();
+    await wallet.save({ session });
 
     discrepancies.status = "Accepted";
     discrepancies.clientStatus = "Accepted by Client";
     discrepancies.adminStatus = "Accepted";
     discrepancies.excessWeightCharges.pendingAmount = 0;
-    await discrepancies.save();
+    await discrepancies.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
 
     return res.status(200).json({
       success: true,
-      message: "Discrepancy accepted",
+      message: "Discrepancy accepted successfully",
       updatedWalletBalance: wallet.balance,
       updatedHoldAmount: wallet.holdAmount,
       transaction: newTransaction,
     });
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     console.error("Error in AcceptDiscrepancy:", error);
     return res.status(500).json({
       success: false,
@@ -897,7 +903,9 @@ const autoAcceptDiscrepancies = async () => {
 };
 
 // Schedule job to run every day at midnight
-cron.schedule("0 0 * * *", autoAcceptDiscrepancies);
+if (process.env.NODE_ENV === "local") {
+  cron.schedule("0 0 * * *", autoAcceptDiscrepancies);
+}
 
 // Raise Discrepancies
 const raiseDiscrepancies = async (req, res) => {

@@ -2,8 +2,7 @@ if(process.env.NODE_ENV!="production"){
   require('dotenv').config();
 }
 
-const Courier=require("../../../models/courierSecond");
-const Services = require("../../../models/courierServiceSecond.model");
+
 const AllCourier=require("../../../models/AllCourierSchema");
 const axios=require("axios");
 
