@@ -3,8 +3,7 @@ if(process.env.NODE_ENV!="production"){
   }
 const axios = require('axios');
 const mongoose = require("mongoose");
-const Courier = require("../../../models/courierSecond");
-const Services = require("../../../models/courierServiceSecond.model");
+
 const { getAuthToken, getToken } = require("../Authorize/XpressbeesAuthorize.controller");
 const { getUniqueId } = require("../../getUniqueId");
 

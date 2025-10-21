@@ -438,106 +438,74 @@ async function calculateRateForServiceBulk(payload) {
       valueInINR,
       userID,
       filteredServices,
-      // rateCardType,
     } = payload;
-    // console.log("9999999999", payload);
-    const result = await getZone(pickupPincode, deliveryPincode);
 
-    const currentZone = result.zone;
+    const { zone: currentZone } = await getZone(pickupPincode, deliveryPincode);
 
-    const ans = [];
     const l = parseFloat(length);
     const b = parseFloat(breadth);
     const h = parseFloat(height);
-    const deadweight = parseFloat(weight) / 1000;
-    const volumetricWeight = (l * b * h) / 5000;
-    const chargedWeight = weight * 1000;
-
-    // let codCharge = 0;
+    const chargedWeight = parseFloat(weight) * 1000; // weight in grams
     const gstRate = 18;
 
-    // const rateCards = [];
     const plan = await Plan.findOne({ userId: userID });
-    let RateCards = plan.rateCard;
+    if (!plan) throw new Error("Plan not found for user");
 
-    // for (rc of RateCards) {
-    //   let currentRate = await RateCard.findOne({
-    //     courierProviderName: fls.item.provider,
-    //     courierServiceName: fls.item.name,
-    //   });
-    //   rateCards.push(currentRate);
-    // }
-    // const finalRate = rateCards.filter(Boolean);
+    // 🟢 Only find the matching courier from the plan rateCard
+    const rc = plan.rateCard.find(
+      (r) =>
+        r.courierServiceName?.trim().toLowerCase() ===
+        filteredServices.courierServiceName?.trim().toLowerCase()
+    );
 
-    for (const rc of RateCards) {
-      // const basicWeight = parseFloat(rc.weightPriceBasic[0].weight);
-      // const additionalWeight = parseFloat(rc.weightPriceAdditional[0].weight);
+    if (!rc) throw new Error("Selected courier not found in plan rate card");
 
-      // if(rc.courierServiceName==){
-      const basicChargeForward = parseFloat(
-        rc.weightPriceBasic[0][currentZone]
-      );
-      const additionalChargeForward = parseFloat(
-        rc.weightPriceAdditional[0][currentZone]
-      );
+    // Extract basic & additional weight/charges
+    const basicWeight = parseFloat(rc.weightPriceBasic?.[0]?.weight || 0);
+    const addWeight = parseFloat(rc.weightPriceAdditional?.[0]?.weight || 0);
+    const basicCharge = parseFloat(
+      rc.weightPriceBasic?.[0]?.[currentZone] || 0
+    );
+    const addCharge = parseFloat(
+      rc.weightPriceAdditional?.[0]?.[currentZone] || 0
+    );
 
-      let totalForwardCharge;
-      const count = Math.ceil(
-        (chargedWeight - rc.weightPriceBasic[0].weight) /
-          rc.weightPriceAdditional[0].weight
-      );
-      if (rc.weightPriceBasic[0].weight >= chargedWeight) {
-        totalForwardCharge = basicChargeForward;
-      } else if (rc.weightPriceBasic[0].weight < chargedWeight) {
-        totalForwardCharge =
-          basicChargeForward + additionalChargeForward * count;
-      }
-      let codCharge = 0;
-      if (cod === "Yes") {
-        const orderValue = Number(valueInINR) || 0;
-        if (
-          typeof rc.codCharge === "number" &&
-          typeof rc.codPercent === "number"
-        ) {
-          const calculatedCodCharge = Math.max(
-            rc.codCharge,
-            orderValue * (rc.codPercent / 100)
-          );
-          codCharge += calculatedCodCharge;
-        } else {
-          console.error("COD charge or percentage is not properly defined.");
-        }
-      }
-      // }
-      const gstAmountForward = (
-        (totalForwardCharge + codCharge) *
-        (gstRate / 100)
-      ).toFixed(2);
-      const totalChargesForward = (
-        totalForwardCharge +
-        codCharge +
-        (totalForwardCharge + codCharge) * (gstRate / 100)
-      ).toFixed(2);
-
-      const allRates = {
-        courierServiceName: rc.courierServiceName,
-        cod: codCharge,
-        forward: {
-          charges: totalForwardCharge,
-          gst: gstAmountForward,
-          finalCharges: totalChargesForward,
-        },
-      };
-      if (allRates.courierServiceName.trim() === filteredServices.name.trim()) {
-        ans.push(allRates);
-      }
-      // ans.push(allRates);
+    // 🧮 Calculate total forward charge
+    let totalForwardCharge = 0;
+    if (chargedWeight <= basicWeight) {
+      totalForwardCharge = basicCharge;
+    } else {
+      const extraUnits = Math.ceil((chargedWeight - basicWeight) / addWeight);
+      totalForwardCharge = basicCharge + addCharge * extraUnits;
     }
-    // console.log("0000000", ans);
-    return ans;
+
+    // 🧾 COD charge calculation
+    let codCharge = 0;
+    if (cod === "Yes") {
+      const orderValue = Number(valueInINR) || 0;
+      const baseCodCharge = parseFloat(rc.codCharge) || 0;
+      const codPercent = parseFloat(rc.codPercent) || 0;
+      codCharge = Math.max(baseCodCharge, orderValue * (codPercent / 100));
+    }
+
+    // 🧮 GST + Final total
+    const gstAmount = ((totalForwardCharge + codCharge) * gstRate) / 100;
+    const totalFinalCharge = totalForwardCharge + codCharge + gstAmount;
+
+    const rateDetails = {
+      courierServiceName: rc.courierServiceName,
+      cod: codCharge.toFixed(2),
+      forward: {
+        charges: totalForwardCharge.toFixed(2),
+        gst: gstAmount.toFixed(2),
+        finalCharges: totalFinalCharge.toFixed(2),
+      },
+    };
+
+    return [rateDetails];
   } catch (error) {
-    console.error("Error in Calculation:", error);
-    throw new Error("Error in Calculation");
+    console.error("Error in calculateRateForServiceBulk:", error.message);
+    throw new Error("Failed to calculate courier rate");
   }
 }
 

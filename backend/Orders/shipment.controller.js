@@ -107,6 +107,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
 
     // ----------------------- Amazon Shipping -----------------------
     if (service.provider === "Amazon Shipping") {
+      // console.log("Checking Amazon Serviceability",service.provider);
       const local = await checkLocalServiceability();
       if (local.success) return local;
 
@@ -127,6 +128,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
           service.provider,
           payload
         );
+        // console.log("result", result);
         return result;
       }
     }

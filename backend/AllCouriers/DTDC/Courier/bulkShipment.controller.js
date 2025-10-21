@@ -6,6 +6,7 @@ const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
 const { getDTDCAuthToken } = require("../Authorize/saveCourierContoller");
 const { getZone } = require("../../../Rate/zoneManagementController");
+const CourierService = require("../../../models/CourierService.Schema");
 const commodityOptions = require("../../../config/commodityOptions");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 // const router = express.Router();
@@ -32,6 +33,7 @@ const createOrderDTDC = async (
     if (!currentOrder) {
       return { success: false, message: "Order not found" };
     }
+    const service = await CourierService.findOne({ name: serviceDetails.name });
 
     // if (currentOrder.status !== "new") {
     //   return {
@@ -108,7 +110,7 @@ const createOrderDTDC = async (
       consignments: [
         {
           customer_code: "GL9711",
-          service_type_id: serviceDetails.courier,
+          service_type_id: service.courier,
           load_type: "NON-DOCUMENT",
           description: productNames,
           dimension_unit: "cm",

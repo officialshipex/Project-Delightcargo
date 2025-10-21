@@ -1,5 +1,6 @@
 const { getAmazonAccessToken } = require("../Authorize/saveCourierController");
 const axios = require("axios");
+const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
 const User = require("../../../models/User.model");
@@ -11,12 +12,13 @@ const {
 } = require("../../../Channels/WooCommerce/woocommerce.controller");
 
 const createOneClickShipment = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
-    const accessToken = await getAmazonAccessToken();
-    if (!accessToken) {
-      return res.status(401).json({ error: "Access token missing" });
-    }
-    // console.log(req.body)
+    session.startTransaction();
+
+    const accessTokenPromise = getAmazonAccessToken(); // Run early in parallel
+
     const {
       id,
       provider,
@@ -24,37 +26,66 @@ const createOneClickShipment = async (req, res) => {
       courierServiceName,
       estimatedDeliveryDate,
     } = req.body;
-    const currentOrder = await Order.findById(id);
-    if (!currentOrder) {
-      return res.status(404).json({ message: "Order not found" });
-    }
 
-    if (currentOrder.status !== "new") {
+    // Step 1️⃣ Fetch order and lock it
+    const currentOrder = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
+    );
+
+    if (!currentOrder) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
-        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
+        message: `Shipment cannot be created because order is already processed or not in 'new' status.`,
       });
     }
 
-    const zone = await getZone(
-      currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode
-      // res
-    );
+    // Step 2️⃣ Parallel async calls
+    const [accessToken, zone, user] = await Promise.all([
+      accessTokenPromise,
+      getZone(
+        currentOrder.pickupAddress.pinCode,
+        currentOrder.receiverAddress.pinCode
+      ),
+      User.findById(currentOrder.userId).session(session),
+    ]);
+
+    if (!accessToken) {
+      await Order.findByIdAndUpdate(id, { status: "new" }, { session });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(401).json({ error: "Access token missing" });
+    }
+
     if (!zone) {
+      await Order.findByIdAndUpdate(id, { status: "new" }, { session });
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: "Pincode not serviceable" });
     }
-    const user = await User.findById(currentOrder.userId);
+
     if (!user) {
+      await Order.findByIdAndUpdate(id, { status: "new" }, { session });
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
     }
-    const currentWallet = await Wallet.findById(user.Wallet);
+
+    // Step 3️⃣ Fetch wallet
+    const currentWallet = await Wallet.findById(user.Wallet).session(session);
     if (!currentWallet) {
+      await Order.findByIdAndUpdate(id, { status: "new" }, { session });
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: "Wallet not found" });
     }
 
+    // Step 4️⃣ Prepare payload (keep as-is)
     const weight = currentOrder.packageDetails?.applicableWeight * 1000;
     const payload = {
       origin: currentOrder.pickupAddress,
@@ -68,12 +99,10 @@ const createOneClickShipment = async (req, res) => {
       productDetails: currentOrder.productDetails,
       orderId: currentOrder.orderId,
     };
+
+    // Step 5️⃣ Serviceability check
     const { rate, requestToken, valueAddedServiceIds } =
       await checkAmazonServiceability("Amazon", payload);
-
-    console.log("Extracted VAS IDs from rate:", valueAddedServiceIds);
-
-    // const { id, requestToken, rateId } = req.body;
 
     const isCOD = payload.payment_type === "COD";
 
@@ -82,128 +111,143 @@ const createOneClickShipment = async (req, res) => {
       rateId: rate,
       requestedDocumentSpecification: {
         format: "PDF",
-        size: {
-          width: 4.0,
-          length: 6.0,
-          unit: "INCH",
-        },
+        size: { width: 4.0, length: 6.0, unit: "INCH" },
         dpi: 300,
         pageLayout: "DEFAULT",
         needFileJoining: false,
         requestedDocumentTypes: ["LABEL"],
       },
-      // Use requestedValueAddedServices
       requestedValueAddedServices: [
         ...(isCOD ? [{ id: "CollectOnDelivery" }] : []),
       ],
     };
 
-    // console.log("shipment data", shipmentData);
-    let response;
-    const walletHoldAmount = currentWallet?.holdAmount || 0;
+    // Step 6️⃣ Wallet check
+    const walletHoldAmount = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    if (currentWallet.balance >= finalCharges) {
-      response = await axios.post(
-        "https://sellingpartnerapi-eu.amazon.com/shipping/v2/shipments",
-        shipmentData,
-        {
-          headers: {
-            // Authorization: `Bearer ${accessToken}`,
-            "x-amz-access-token": accessToken,
-            "x-amzn-shipping-business-id": "AmazonShipping_IN",
-            "Content-Type": "application/json",
-          },
-        }
-      );
-    } else {
+    const balanceToBeDeducted =
+      finalCharges === "N/A" ? 0 : parseInt(finalCharges);
+
+    if (currentWallet.balance < balanceToBeDeducted) {
+      await Order.findByIdAndUpdate(id, { status: "new" }, { session });
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(400)
         .json({ success: false, message: "Insufficient Wallet Balance" });
     }
 
-    if (response?.data?.payload) {
-      const result = response.data.payload;
-      const base64Label =
-        result.packageDocumentDetails[0].packageDocuments[0].contents;
-      const labelBuffer = Buffer.from(base64Label, "base64");
-      const labelKey = `labels/${Date.now()}_${
-        currentOrder.orderId || "label"
-      }.pdf`;
-
-      const uploadCommand = new PutObjectCommand({
-        Bucket: process.env.AWS_BUCKET_NAME,
-        Key: labelKey,
-        Body: labelBuffer,
-        ContentType: "application/pdf",
-      });
-
-      await s3.send(uploadCommand);
-
-      const labelUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${labelKey}`;
-
-      currentOrder.status = "Booked";
-      currentOrder.cancelledAtStage = null;
-      currentOrder.awb_number = result.packageDocumentDetails[0].trackingId;
-      currentOrder.shipment_id = `${result.shipmentId}`;
-      currentOrder.provider = provider;
-      currentOrder.totalFreightCharges =
-        finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-      currentOrder.courierServiceName = courierServiceName;
-      currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.label = labelUrl;
-      currentOrder.zone = zone.zone;
-      currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
-      currentOrder.tracking.push({
-        status: "Booked",
-        StatusLocation: currentOrder.pickupAddress?.city || "N/A",
-        StatusDateTime: new Date(),
-        Instructions: "Order booked successfully",
-      });
-      let savedOrder = await currentOrder.save();
-      let balanceToBeDeducted =
-        finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-      await currentWallet.updateOne({
-        $inc: { balance: -balanceToBeDeducted },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId || null,
-            category: "debit",
-            amount: balanceToBeDeducted,
-            balanceAfterTransaction:
-              currentWallet.balance - balanceToBeDeducted,
-            date: new Date(),
-            awb_number: result.packageDocumentDetails[0].trackingId || "",
-            description: "Freight Charges Applied",
-          },
+    // Step 7️⃣ Amazon Shipment API call (keep as-is)
+    const response = await axios.post(
+      "https://sellingpartnerapi-eu.amazon.com/shipping/v2/shipments",
+      shipmentData,
+      {
+        headers: {
+          "x-amz-access-token": accessToken,
+          "x-amzn-shipping-business-id": "AmazonShipping_IN",
+          "Content-Type": "application/json",
         },
-      });
-      // if (currentOrder.channel?.toLowerCase() === "woocommerce") {
-      //   await markWooOrderAsSihpped(
-      //     currentOrder.storeUrl,
-      //     currentOrder.channelId,
-      //     currentOrder.awb_number,
-      //     currentOrder.provider
-      //   );
-      // }
-    } else {
-      console.log("eror", response.data);
-      return res.status(400).json({ message: "Error creating shipment" });
+        timeout: 10000,
+      }
+    );
+
+    if (!response?.data?.payload) {
+      await Order.findByIdAndUpdate(id, { status: "new" }, { session });
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({ message: "Error creating shipment", details: response.data });
     }
 
-    console.log("✅ Shipment Created:", response.data);
+    const result = response.data.payload;
+    const trackingId = result.packageDocumentDetails[0].trackingId;
+    const base64Label =
+      result.packageDocumentDetails[0].packageDocuments[0].contents;
+    const labelBuffer = Buffer.from(base64Label, "base64");
+    const labelKey = `labels/${Date.now()}_${
+      currentOrder.orderId || "label"
+    }.pdf`;
+
+    const labelUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${labelKey}`;
+
+    // Step 8️⃣ Update DB atomically (session)
+    currentOrder.set({
+      status: "Booked",
+      cancelledAtStage: null,
+      awb_number: trackingId,
+      shipment_id: result.shipmentId,
+      provider,
+      totalFreightCharges: balanceToBeDeducted,
+      courierServiceName,
+      shipmentCreatedAt: new Date(),
+      label: labelUrl,
+      zone: zone.zone,
+      estimatedDeliveryDate,
+      tracking: [
+        ...currentOrder.tracking,
+        {
+          status: "Booked",
+          StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+          StatusDateTime: new Date(),
+          Instructions: "Order booked successfully",
+        },
+      ],
+    });
+
+    await Promise.all([
+      currentOrder.save({ session }),
+      currentWallet.updateOne(
+        {
+          $inc: { balance: -balanceToBeDeducted },
+          $push: {
+            transactions: {
+              channelOrderId: currentOrder.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction: effectiveBalance - balanceToBeDeducted,
+              date: new Date(),
+              awb_number: trackingId,
+              description: "Freight Charges Applied",
+            },
+          },
+        },
+        { session }
+      ),
+      s3.send(
+        new PutObjectCommand({
+          Bucket: process.env.AWS_BUCKET_NAME,
+          Key: labelKey,
+          Body: labelBuffer,
+          ContentType: "application/pdf",
+        })
+      ),
+    ]);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // ✅ Final response
     return res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
-      shipment: response.data,
+      data: {
+        orderId: currentOrder.orderId,
+        waybill: trackingId,
+        labelUrl,
+      },
     });
   } catch (error) {
+    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
+    await session.abortTransaction();
+    session.endSession();
     console.error(
       "❌ Error creating shipment:",
       error.response?.data || error.message
     );
     return res.status(500).json({
       success: false,
-      error: "Error creating shipment",
+      message: "Error creating shipment",
       details: error.response?.data || error.message,
     });
   }
@@ -299,7 +343,7 @@ const getShipmentTracking = async (trackingId) => {
         },
       }
     );
-    console.log("response", response.data.payload);
+    // console.log("response", response.data.payload);
     // console.log(
     //   "Tracking Information:",
     //   response.data.payload.eventHistory[

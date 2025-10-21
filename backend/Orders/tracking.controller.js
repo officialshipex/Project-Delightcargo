@@ -33,7 +33,7 @@ const {
   trackOrderZipypost,
 } = require("../AllCouriers/Zipypost/Couriers/couriers.controller");
 const Bottleneck = require("bottleneck");
-const orderSchemaModel = require("../models/orderSchema.model");
+
 const statusMap = require("../statusMap/StatusMap.model");
 
 const limiter = new Bottleneck({
@@ -46,7 +46,7 @@ const limiter = new Bottleneck({
 
 const trackSingleOrder = async (order) => {
   try {
-    console.log("Tracking order:", order.awb_number);
+    // console.log("Tracking order:", order.awb_number);
     const { provider, awb_number, shipment_id, partner } = order;
     if (!provider || !awb_number) return;
 
@@ -94,7 +94,7 @@ const trackSingleOrder = async (order) => {
       [latestTrackingEvent],
       partner === "ZipyPost" ? partner : provider
     );
-    console.log("normalized", normalizedData);
+    // console.log("normalized", normalizedData);
 
     if (!normalizedData) {
       console.warn(`Failed to map tracking data for AWB: ${awb_number}`);
@@ -110,7 +110,7 @@ const trackSingleOrder = async (order) => {
       if (ecomExpressStatusMapping[instruction] === "Out for Delivery") {
         order.ndrStatus = "Out for Delivery";
       }
-      console.log("status", normalizedData.Status, normalizedData.Instructions);
+      // console.log("status", normalizedData.Status, normalizedData.Instructions);
 
       if (order.status === "RTO In-transit" && result.rto_awb) {
         order.awb_number = result.rto_awb;
@@ -121,7 +121,7 @@ const trackSingleOrder = async (order) => {
         normalizedData.Status === "Returned" &&
         normalizedData.Instructions === "Undelivered"
       ) {
-        console.log("rto", order.awb_number);
+        // console.log("rto", order.awb_number);
         order.status = "RTO In-transit";
         order.ndrStatus = "RTO In-transit";
       }
@@ -203,7 +203,7 @@ const trackSingleOrder = async (order) => {
         const dbMapping = statusDoc.data.find(
           (d) => d.code?.toLowerCase() === normalizedData.Status?.toLowerCase()
         );
-        console.log("db mapping dtdc", dbMapping);
+        // console.log("db mapping dtdc", dbMapping);
         if (dbMapping) {
           console.log("maped dtdc status",dbMapping.sy_status)
           order.status = dbMapping.sy_status;
@@ -311,7 +311,7 @@ const trackSingleOrder = async (order) => {
       }
     }
     if (provider === "Amazon Shipping" || provider === "Amazon") {
-      console.log("normaliz", normalizedData);
+      // console.log("normaliz", normalizedData);
       if (normalizedData.ShipmentType === "FORWARD") {
         if (normalizedData.Instructions === "ReadyForReceive") {
           order.status = "Ready To Ship";
@@ -511,7 +511,7 @@ const trackSingleOrder = async (order) => {
           order.ndrHistory.push(newHistoryEntry);
         }
       }
-      console.log("norma", normalizedData);
+      // console.log("norma", normalizedData);
       if (
         normalizedData.Status === "RTO Delivered To Shipper" &&
         normalizedData.Instructions === "SHIPMENT DELIVERED"
@@ -757,7 +757,7 @@ const trackSingleOrder = async (order) => {
         console.log(dbMapping?.sy_status);
 
         if (dbMapping) {
-          console.log("maped delhivery status", dbMapping.sy_status);
+          // console.log("maped delhivery status", dbMapping.sy_status);
           order.status = dbMapping.sy_status; // fallback if not mapped
           // order.ndrStatus=dbMapping.sy_status
           // Only set ndrStatus for actual NDR-related states
@@ -944,7 +944,7 @@ const trackSingleOrder = async (order) => {
         order.status = "Cancelled";
       }
 
-      console.log("ZipyPost normalizedData:", normalizedData);
+      // console.log("ZipyPost normalizedData:", normalizedData);
     }
 
     if (Array.isArray(result.data) && result.data.length > 0) {
@@ -1072,8 +1072,8 @@ const startTrackingLoop = async () => {
         istDate.toLocaleTimeString("en-IN")
       );
       await trackOrders();
-      console.log("✅ Tracking completed. Next run after 1 hour...");
-      setTimeout(startTrackingLoop, 60 * 60 * 1000); // 1 hour
+      console.log("✅ Tracking completed. Next run after 2 hour...");
+      setTimeout(startTrackingLoop, 2 * 60 * 60 * 1000); // 2 hour
     } else {
       console.log(
         "🌙 Outside tracking window, will retry in 1 hour:",
@@ -1083,7 +1083,7 @@ const startTrackingLoop = async () => {
     }
   } catch (error) {
     console.error("❌ Error in tracking loop:", error);
-    setTimeout(startTrackingLoop, 15 * 60 * 1000); // retry after 15 min
+    // setTimeout(startTrackingLoop, 15 * 60 * 1000); // retry after 15 min
   }
 };
 
@@ -1131,7 +1131,7 @@ const mapTrackingResponse = (data, provider, remark) => {
     // console.log("ZipyPost data", data);
     const scanArray = data || []; // array of scans
     const latestScan = scanArray?.[0]; // take the most recent scan
-    console.log("last", scanArray[0]);
+    // console.log("last", scanArray[0]);
     return {
       Status: latestScan[0]?.scan || "N/A",
       scanCode: latestScan[0]?.scan_code ?? null,
@@ -1141,7 +1141,7 @@ const mapTrackingResponse = (data, provider, remark) => {
       Instructions: latestScan[0]?.remark || "N/A",
     };
   }
-  console.log(data, provider);
+  // console.log(data, provider);
   const providerMappings = {
     EcomExpress: {
       Status: data.rts_system_delivery_status || "N/A",

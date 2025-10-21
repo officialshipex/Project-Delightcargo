@@ -425,38 +425,61 @@ const getUserById = async (req, res) => {
 
 const getUserDetails = async (req, res) => {
   try {
-    const existingUser = await User.findById(req.user._id)
-      .populate("wareHouse")
-      .populate({ path: "orders", populate: { path: "service_details" } })
-      .populate("Wallet")
-      .populate("plan");
+    const userId = req.user._id;
 
-    // Default: use the actual user's balance and holdAmount
+    // Populate only necessary fields (faster)
+    const existingUser = await User.findById(userId)
+      // .populate("wareHouse", "name address")
+      .populate("Wallet", "balance holdAmount")
+      // .populate("plan", "name expiryDate rateCard");
+
+    if (!existingUser)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+
     let balance = existingUser?.Wallet?.balance || 0;
     let holdAmount = existingUser?.Wallet?.holdAmount || 0;
 
-    // If admin with adminTab, sum all
+    // If admin with adminTab, compute using aggregation
     if (existingUser?.isAdmin && existingUser?.adminTab) {
-      const allUsers = await User.find({}).populate("Wallet");
-      balance = allUsers.reduce((total, u) => {
-        return total + (u.Wallet?.balance || 0);
-      }, 0);
-      holdAmount = allUsers.reduce((total, u) => {
-        return total + (u.Wallet?.holdAmount || 0);
-      }, 0);
+      const totals = await User.aggregate([
+        {
+          $lookup: {
+            from: "wallets", // collection name must match your Wallet model
+            localField: "Wallet",
+            foreignField: "_id",
+            as: "wallet",
+          },
+        },
+        { $unwind: "$wallet" },
+        {
+          $group: {
+            _id: null,
+            totalBalance: { $sum: "$wallet.balance" },
+            totalHoldAmount: { $sum: "$wallet.holdAmount" },
+          },
+        },
+      ]);
 
-      // Patch into user object for response
+      if (totals.length > 0) {
+        balance = totals[0].totalBalance;
+        holdAmount = totals[0].totalHoldAmount;
+      }
+
+      // Inject totals into user response
       if (existingUser.Wallet) {
         existingUser.Wallet.balance = balance;
         existingUser.Wallet.holdAmount = holdAmount;
       }
     }
 
-    res.status(201).json({
+    return res.status(200).json({
       success: true,
       user: existingUser,
     });
   } catch (error) {
+    console.error("Error in getUserDetails:", error);
     res.status(500).json({
       success: false,
       message: "Server error",

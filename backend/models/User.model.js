@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const Plan = require("../models/Plan.model");
 const Warehouse = require("../models/wareHouse.model");
-const Order = require("../models/orderSchema.model");
+const Order = require("../models/newOrder.model");
 const Wallet = require("./wallet");
 const CodPlan = require("../COD/codPan.model");
 const usersSchema = new mongoose.Schema(

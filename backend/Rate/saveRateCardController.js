@@ -1,5 +1,5 @@
 const RateCard = require("../models/rateCards");
-const CourierServiceSecond = require("../models/courierServiceSecond.model");
+// const CourierServiceSecond = require("../models/courierServiceSecond.model");
 const Plan = require("../models/Plan.model");
 const multer = require("multer");
 const xlsx = require("xlsx");

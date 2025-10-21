@@ -12,7 +12,7 @@ const weightDispreancy = require("./WeightDispreancy/weightDispreancy.route");
 // const orderRouter = require("./routes/orders.router");
 
 const userController = require("./routes/getUsers.router");
-const servicesController = require("./routes/getServices.router");
+// const servicesController = require("./routes/getServices.router");
 const calculateRouter = require("./routes/calculateRate.router");
 
 const saveRateRouter = require("./routes/saveRate.router");
@@ -33,7 +33,7 @@ const AmazonRouter = require("./AllCouriersRoutes/amazon.router");
 const Ekart = require("./AllCouriersRoutes/ekart.router");
 const Vamaship=require("./AllCouriersRoutes/vamaship.router")
 const LabelRouter = require("./label/label.router");
-const couriersB2CRoutes = require("./routes/couriersB2C.router");
+// const couriersB2CRoutes = require("./routes/couriersB2C.router");
 // const courierServicesRoutes=require('./routes/courierServiceB2C.router');
 // const rtoCharges=require("./RTO/rtoRouter")
 // router.use("/Rto",isAuthorized,rtoCharges)
@@ -54,7 +54,8 @@ const LabelSettings = require("./label/label.router");
 const statusMap=require("./statusMap/StatusMap.router")
 const EDDMap=require("./routes/EDDMap.router")
 const ZipyPostRouter=require("./AllCouriersRoutes/zipypost.router")
-
+const CourierRouter=require("./routes/courier.router")
+router.use("/courier",CourierRouter);
 router.use("/statusMap",statusMap);
 router.use("/EDD",EDDMap)
 
@@ -106,7 +107,7 @@ router.use("/dashboard", isAuthorized, dashboard);
 
 router.use("/users", userController);
 router.use("/calculateRate", calculateRouter);
-router.use("/getServices", servicesController);
+// router.use("/getServices", servicesController);
 
 router.use("/saveRate", saveRateRouter);
 router.use("/getBaseRate", getBaseRateController);
@@ -135,7 +136,7 @@ router.use("/printlabel", PrintLabelRoute);
 router.use("/printinvoice", PrintInvoice);
 router.use("/manifest", PrintManifest);
 
-router.use("/B2Ccouries", couriersB2CRoutes);
+// router.use("/B2Ccouries", couriersB2CRoutes);
 
 router.use("/getKyc", isAuthorized, getKyc);
 // app.use("/v1/courierServices", courierServicesRoutes);

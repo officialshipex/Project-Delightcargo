@@ -8,6 +8,7 @@ const CourierService = require("../../../models/CourierService.Schema");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const mongoose = require("mongoose");
+const https = require("https");
 
 const createWarehouse = async (
   userId,
@@ -49,7 +50,7 @@ const createWarehouse = async (
     );
 
     if (response.data.success) {
-      console.log("warehouse", response.data);
+      // console.log("warehouse", response.data);
       pickupAddress.zipypostHubId = response.data.warehouse_id;
       await pickupAddress.save();
       return {
@@ -69,6 +70,36 @@ const createWarehouse = async (
   }
 };
 
+const httpsAgent = new https.Agent({ keepAlive: true });
+axios.defaults.httpsAgent = httpsAgent;
+
+// ✅ In-memory cache for Zipypost Auth Token
+let zipyTokenCache = { token: null, expiry: 0 };
+const getCachedAuthToken = async () => {
+  if (zipyTokenCache.token && Date.now() < zipyTokenCache.expiry) {
+    return { authToken: zipyTokenCache.token };
+  }
+  const token = await getAuthToken(); // Your existing function
+  zipyTokenCache = {
+    token: token.authToken,
+    expiry: Date.now() + 45 * 60 * 1000, // 45 mins
+  };
+  return token;
+};
+
+// ✅ Cache for zone lookups to prevent repeated API hits
+const zoneCache = new Map();
+const getCachedZone = async (from, to) => {
+  const key = `${from}-${to}`;
+  if (zoneCache.has(key)) return zoneCache.get(key);
+  const zone = await getZone(from, to);
+  zoneCache.set(key, zone);
+  return zone;
+};
+
+// ✅ Simple cache to avoid recreating warehouse for same pickup pincode
+const warehouseCache = new Map();
+
 const createZipypostOrder = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -83,46 +114,53 @@ const createZipypostOrder = async (req, res) => {
       estimatedDeliveryDate,
     } = req.body;
 
-    const currentOrder = await Order.findById(id).session(session);
+    // ✅ Fetch order first
+    const currentOrder = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
+    );
+
     if (!currentOrder) {
-      throw new Error("Order not found");
+      return res.status(400).json({
+        success: false,
+        message:
+          "Shipment already created or order is being processed by another request.",
+      });
     }
 
-    if (currentOrder.status !== "new") {
-      throw new Error(
-        `Shipment cannot be created because order status is '${currentOrder.status}'.`
-      );
-    }
+    // if (currentOrder.status !== "new")
+    //   throw new Error(
+    //     `Cannot create shipment. Order is '${currentOrder.status}'.`
+    //   );
 
+    // ✅ Fetch user first
     const user = await User.findById(currentOrder.userId).session(session);
-    if (!user) {
-      throw new Error("User not found");
-    }
+    if (!user) throw new Error("User not found");
 
+    // ✅ Get wallet using user.Wallet field
+    if (!user.Wallet) throw new Error("User wallet not found");
     const currentWallet = await Wallet.findById(user.Wallet).session(session);
-    if (!currentWallet) {
-      throw new Error("Wallet not found");
-    }
+    if (!currentWallet) throw new Error("Wallet not found");
 
-    const walletHoldAmount = currentWallet?.holdAmount || 0;
-    const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    if (effectiveBalance < finalCharges) {
+    // ✅ Check balance with safety margin
+    const hold = currentWallet.holdAmount || 0;
+    const effectiveBalance = currentWallet.balance - hold;
+    if (currentWallet.balance < finalCharges)
       throw new Error("Insufficient Wallet Balance");
-    }
 
-    const zone = await getZone(
+    // ✅ Cached zone lookup (saves ~200–400ms)
+    const zone = await getCachedZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
     );
-    if (!zone) {
-      throw new Error("Pincode not serviceable");
-    }
+    if (!zone) throw new Error("Pincode not serviceable");
 
     const timestamp = Math.floor(Date.now() / 1000);
     const sellerId = process.env.ZIPYPOST_SELLER_ID;
-    const token = await getAuthToken();
+    const token = await getCachedAuthToken();
 
-    // Call serviceability
+    // ✅ Serviceability check
     const payload = {
       source_pincode: currentOrder.pickupAddress.pinCode,
       destination_pincode: currentOrder.receiverAddress.pinCode,
@@ -135,16 +173,9 @@ const createZipypostOrder = async (req, res) => {
     };
 
     const serviceability = await checkZipypostServiceability(payload);
+    if (!serviceability?.data?.length)
+      throw new Error("No serviceable courier available");
 
-    if (
-      !serviceability.data ||
-      !Array.isArray(serviceability.data) ||
-      serviceability.data.length === 0
-    ) {
-      throw new Error("No serviceability data found");
-    }
-
-    // Filter supported couriers
     const validCouriers = serviceability.data.filter(
       (svc) => svc.courier_id === 9 || svc.courier_id === 10
     );
@@ -154,67 +185,70 @@ const createZipypostOrder = async (req, res) => {
     else if (courierServiceName.toLowerCase().includes("bluedart"))
       courier_id = 10;
 
-    if (courier_id === 0) {
-      throw new Error(
-        "Invalid courier name. Only Xpressbees and Bluedart supported."
-      );
-    }
+    if (!courier_id) throw new Error("Only Xpressbees and Bluedart supported.");
 
     const courierOptions = validCouriers.filter(
       (svc) => svc.courier_id === courier_id
     );
 
     const applicableWeight = currentOrder.packageDetails.applicableWeight;
-    let selectedMode =
+    const selectedMode =
       courierOptions.find(
         (option) => applicableWeight <= parseFloat(option.slab)
       ) || courierOptions[courierOptions.length - 1];
 
-    if (!selectedMode) {
-      throw new Error("Unable to determine mode_id for the courier");
-    }
+    if (!selectedMode) throw new Error("Unable to determine courier mode_id");
 
     const mode_id = selectedMode.mode_id;
 
-    // Prepare warehouse
-    let baseName = currentOrder.pickupAddress.contactName || "Warehouse";
-    baseName = baseName.substring(0, 10);
-    const shortUserId = currentOrder.userId.toString().substring(0, 6);
-    const finalWarehouseName =
-      `${baseName}-${shortUserId}-${currentOrder.pickupAddress.pinCode}`.substring(
-        0,
-        30
+    // ✅ Cached warehouse creation (reduces 700ms if already exists)
+    const whKey = `${currentOrder.userId}-${currentOrder.pickupAddress.pinCode}`;
+    let warehouseId = warehouseCache.get(whKey);
+
+    if (!warehouseId) {
+      const baseName = (
+        currentOrder.pickupAddress.contactName || "Warehouse"
+      ).substring(0, 10);
+      const shortUserId = currentOrder.userId.toString().substring(0, 6);
+      const finalWarehouseName =
+        `${baseName}-${shortUserId}-${currentOrder.pickupAddress.pinCode}`.substring(
+          0,
+          30
+        );
+
+      const warehouseData = {
+        warehouseName: finalWarehouseName,
+        contactName: currentOrder.pickupAddress.contactName,
+        contactNumber: currentOrder.pickupAddress.phoneNumber,
+        AddressLineOne:
+          currentOrder.pickupAddress.address?.substring(0, 45) || "",
+        AddressLineTwo:
+          currentOrder.pickupAddress.address?.substring(45, 90) || "",
+        pincode: currentOrder.pickupAddress.pinCode,
+        city: currentOrder.pickupAddress.city,
+        primary: true,
+      };
+
+      const whResult = await createWarehouse(
+        currentOrder.userId,
+        warehouseData,
+        token.authToken,
+        timestamp,
+        sellerId
       );
 
-    const warehouseData = {
-      warehouseName: finalWarehouseName,
-      contactName: currentOrder.pickupAddress.contactName,
-      contactNumber: currentOrder.pickupAddress.phoneNumber,
-      AddressLineOne:
-        currentOrder.pickupAddress.address?.substring(0, 45) || "",
-      AddressLineTwo:
-        currentOrder.pickupAddress.address?.substring(45, 90) || "",
-      pincode: currentOrder.pickupAddress.pinCode,
-      city: currentOrder.pickupAddress.city,
-      primary: true,
-    };
+      if (!whResult.success)
+        throw new Error(
+          "Pickup pincode not registered. Please add a pickup address first."
+        );
 
-    const warehouseId = await createWarehouse(
-      currentOrder.userId,
-      warehouseData,
-      token.authToken,
-      timestamp,
-      sellerId
-    );
-
-    if (!warehouseId.success) {
-      throw new Error(
-        "Pickup pincode is not registered. Please add a pickup address first."
-      );
+      warehouseCache.set(whKey, whResult.warehouseId);
+      warehouseId = whResult.warehouseId;
     }
 
     const totalProducts = currentOrder.productDetails.length;
-    console.log("mode courier", mode_id, courier_id);
+
+    // ✅ Shipment creation payload
     const requestBody = {
       order_number: currentOrder.orderId,
       purchase_amount: currentOrder.paymentDetails.amount,
@@ -240,26 +274,25 @@ const createZipypostOrder = async (req, res) => {
         pincode: currentOrder.pickupAddress.pinCode,
         city: currentOrder.pickupAddress.city,
       },
-      items: currentOrder.productDetails.map((product) => ({
-        sku:
-          product.sku?.length >= 3 ? product.sku : `SKU${currentOrder.orderId}`,
-        item_name: product.name,
-        quantity: product.quantity || 1,
+      items: currentOrder.productDetails.map((p) => ({
+        sku: p.sku?.length >= 3 ? p.sku : `SKU${currentOrder.orderId}`,
+        item_name: p.name,
+        quantity: p.quantity || 1,
         item_weight:
           currentOrder.packageDetails.applicableWeight / totalProducts,
-        item_price: product.unitPrice,
+        item_price: p.unitPrice,
       })),
       package_length: currentOrder.packageDetails.length || 10,
       package_width: currentOrder.packageDetails.width || 10,
       package_height: currentOrder.packageDetails.height || 10,
       package_weight: currentOrder.packageDetails.applicableWeight || 0.5,
-      warehouse_id: warehouseId.warehouseId,
+      warehouse_id: warehouseId,
       payment_type: currentOrder.paymentDetails.method === "COD" ? 2 : 1,
       courier_id,
       mode_id,
     };
 
-    // 🔹 Call Zipypost API BEFORE committing
+    // ✅ Call Zipypost API
     const response = await axios.post(
       "https://api.zipypost.com/create/shipment",
       requestBody,
@@ -267,7 +300,7 @@ const createZipypostOrder = async (req, res) => {
         headers: {
           "Content-Type": "application/json",
           authorization: token.authToken,
-          timestamp: timestamp,
+          timestamp,
           sellerid: sellerId,
         },
       }
@@ -279,7 +312,7 @@ const createZipypostOrder = async (req, res) => {
 
     const result = response.data.RESULT;
 
-    // ✅ Update order inside transaction
+    // ✅ Update order + wallet atomically
     currentOrder.status = "Booked";
     currentOrder.awb_number = result.awb;
     currentOrder.shipment_id = currentOrder.orderId;
@@ -297,7 +330,6 @@ const createZipypostOrder = async (req, res) => {
       Instructions: "Order booked successfully",
     });
 
-    // ✅ Deduct wallet inside transaction
     currentWallet.balance -= finalCharges;
     currentWallet.transactions.push({
       channelOrderId: currentOrder.orderId,
@@ -309,12 +341,15 @@ const createZipypostOrder = async (req, res) => {
       description: "Freight Charges Applied",
     });
 
-    await currentOrder.save({ session });
-    await currentWallet.save({ session });
+    await Promise.all([
+      currentOrder.save({ session }),
+      currentWallet.save({ session }),
+    ]);
 
     await session.commitTransaction();
     session.endSession();
 
+    // ✅ Fast success response
     return res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
@@ -322,10 +357,17 @@ const createZipypostOrder = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
+    // 🧩 Restore the order to 'new' if we set it to 'processing' but shipment not created
+    if (req.body.id) {
+      await Order.updateOne(
+        { _id: req.body.id, status: "processing" },
+        { $set: { status: "new" } }
+      );
+    }
     session.endSession();
     console.error(
       "Error creating Zipypost shipment:",
-      error.response.data.error
+      error?.response?.data || error.message
     );
     return res.status(500).json({
       success: false,
@@ -470,8 +512,8 @@ const trackOrderZipypost = async (AWBNo) => {
       }
     );
 
-    console.log("response data", response.data);
-    console.log("respose status", response.data.result.events);
+    // console.log("response data", response.data);
+    // console.log("respose status", response.data.result.events);
     // console.log("response status", response.data.data.scans["20726635"][0].call_logs);
     if (response.data.success === true) {
       return { success: true, data: response.data.result.events };

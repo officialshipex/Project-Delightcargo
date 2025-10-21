@@ -2,7 +2,7 @@ if(process.env.NODE_ENV!="production"){
   require('dotenv').config();
   }
 const axios = require("axios");
-const Courier = require("../../../models/courierSecond");
+
 const AllCourier = require("../../../models/AllCourierSchema");
 const BASE_URL=process.env.SHIPROCKET_URL;
 

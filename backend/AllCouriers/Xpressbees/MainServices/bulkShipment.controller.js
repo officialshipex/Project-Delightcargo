@@ -3,7 +3,7 @@ if (process.env.NODE_ENV != "production") {
 }
 
 const axios = require("axios");
-const Order = require("../../../models/orderSchema.model");
+
 const { getAuthToken } = require("../Authorize/XpressbeesAuthorize.controller");
 const Wallet = require("../../../models/wallet");
 const BASE_URL = process.env.XpreesbeesUrl;

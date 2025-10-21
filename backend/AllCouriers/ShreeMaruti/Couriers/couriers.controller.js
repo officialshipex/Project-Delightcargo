@@ -3,7 +3,7 @@ if (process.env.NODE_ENV != "production") {
 }
 const axios = require("axios");
 const { getToken } = require("../Authorize/shreeMaruti.controller");
-const Courier = require("../../../models/courierSecond");
+const mongoose = require("mongoose");
 const Services = require("../../../models/CourierService.Schema");
 const Order = require("../../../models/newOrder.model");
 const { getUniqueId } = require("../../getUniqueId");
@@ -82,9 +82,10 @@ const addService = async (req, res) => {
 // Create Order
 const createOrder = async (req, res) => {
   const API_URL = `${BASE_URL}/fulfillment/public/seller/order/ecomm/push-order`;
+  const MANIFEST_API = `${BASE_URL}/fulfillment/public/seller/order/create-manifest`;
   const token = await getToken();
+  const session = await mongoose.startSession();
 
-  // console.log("bodyyyyy", req.body);
   try {
     const {
       courierServiceName,
@@ -93,21 +94,48 @@ const createOrder = async (req, res) => {
       finalCharges,
       estimatedDeliveryDate,
     } = req.body;
-    const services = await Services.findOne({ name: courierServiceName });
-    const currentOrder = await Order.findById(id);
-    const users = await user.findById({ _id: currentOrder.userId });
-    // console.log("currentOrder",currentOrder)
 
-    const currentWallet = await Wallet.findById({ _id: users.Wallet });
+    session.startTransaction();
+
+    const services = await Services.findOne({
+      name: courierServiceName,
+    }).session(session);
+
+    // Atomically lock order in transaction
+    let currentOrder = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
+    );
+
+    if (!currentOrder) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Order is already being processed or not in 'new' status.",
+      });
+    }
+
+    const users = await user
+      .findById({ _id: currentOrder.userId })
+      .session(session);
+    const currentWallet = await Wallet.findById({ _id: users.Wallet }).session(
+      session
+    );
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
     );
-    if (currentOrder.status !== "new") {
-      return res.status(400).json({
-        success: false,
-        message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
-      });
+
+    // Check wallet balance
+    if (currentWallet.balance < finalCharges) {
+      await session.abortTransaction();
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      session.endSession();
+      return res
+        .status(400)
+        .json({ success: false, message: "Insufficient Wallet Balance" });
     }
 
     const lineItems = Array.from(
@@ -208,22 +236,33 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "Insufficient Wallet Balance" });
     }
 
+    // --- Call Shipment API ---
     let response;
-    if (currentWallet.balance >= finalCharges) {
+    try {
       response = await axios.post(API_URL, payload, {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
       });
-      console.log("ressssssssssponse", response.data);
-    } else {
-      return res.status(401).json({ success: false, message: "Low Balance" });
+    } catch (shipmentErr) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      console.error(
+        "Shipment API failed:",
+        shipmentErr.response?.data || shipmentErr.message
+      );
+      return res.status(500).json({
+        error: "Shipment creation failed",
+        details: shipmentErr.response?.data || shipmentErr.message,
+      });
     }
 
     if (response.status == 200) {
       const result = response.data.data;
-      console.log(result);
+
+      // Update order and wallet inside transaction
       currentOrder.status = "Booked";
       currentOrder.cancelledAtStage = null;
       currentOrder.awb_number = result.awbNumber;
@@ -240,40 +279,38 @@ const createOrder = async (req, res) => {
         StatusDateTime: new Date(),
         Instructions: "Order booked successfully",
       });
-      //   currentOrder.service_details = selectedServiceDetails._id;
-      //   currentOrder.freightCharges =
-      //     req.body.finalCharges === "N/A" ? 0 : parseInt(req.body.finalCharges);
-      //   currentOrder.tracking = [];
-      //   currentOrder.tracking.push({
-      //     stage: "Order Booked",
-      //   });
-      await currentOrder.save();
-      let balanceToBeDeducted =
-        finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-      //   let currentBalance = currentWallet.balance - balanceToBeDeducted;
-      await currentWallet.updateOne({
-        $inc: { balance: -balanceToBeDeducted },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId || null, // Include if available
-            category: "debit",
-            amount: balanceToBeDeducted, // Fixing incorrect reference
-            balanceAfterTransaction:
-              currentWallet.balance - balanceToBeDeducted,
-            date: new Date().toISOString().slice(0, 16).replace("T", " "),
-            awb_number: result.awbNumber || "", // Ensuring it follows the schema
-            description: `Freight Charges Applied`,
+
+      await currentOrder.save({ session });
+
+      const balanceToBeDeducted = parseInt(finalCharges);
+      await currentWallet.updateOne(
+        {
+          $inc: { balance: -balanceToBeDeducted },
+          $push: {
+            transactions: {
+              channelOrderId: currentOrder.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction:
+                currentWallet.balance - balanceToBeDeducted,
+              date: new Date().toISOString().slice(0, 16).replace("T", " "),
+              awb_number: result.awbNumber || "",
+              description: `Freight Charges Applied`,
+            },
           },
         },
-      });
+        { session }
+      );
 
-      // --- Call Manifest API ---
+      await session.commitTransaction();
+      session.endSession();
+
+      // Call Manifest API outside transaction
       try {
         const manifestResponse = await axios.post(
-          `${BASE_URL}/fulfillment/public/seller/order/create-manifest`,
+          MANIFEST_API,
           {
-            awbNumber: [result.awbNumber], // Order AWB
-            // cAwbNumber: result.cAwbNumber || "", // Courier AWB (if available)
+            awbNumber: [result.awbNumber],
           },
           {
             headers: {
@@ -282,27 +319,30 @@ const createOrder = async (req, res) => {
             },
           }
         );
-
         console.log("Manifest Created:", manifestResponse.data);
       } catch (manifestErr) {
         console.error(
           "Error creating manifest:",
           manifestErr.response?.data || manifestErr.message
         );
-        // You can decide whether to fail here or just log and continue
       }
 
       return res
         .status(201)
         .json({ message: "Shipment & Manifest Created Successfully" });
     } else {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(400)
         .json({ error: "Error creating shipment", details: response.data });
     }
   } catch (error) {
-    console.log("errrororororo", error.response.data);
-    // console.error("Error in creating shipment:", error.message);
+    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Error:", error.response?.data || error.message);
     return res
       .status(500)
       .json({ error: "Internal Server Error", message: error.message });
@@ -481,7 +521,7 @@ const checkServiceabilityShreeMaruti = async (payload) => {
         "Missing required fields: fromPincode, toPincode, isCodOrder, and deliveryMode are mandatory.",
     };
   }
-// console.log("payload")
+  // console.log("payload")
   try {
     const token = await getToken();
     const response = await axios.post(
