@@ -145,9 +145,19 @@ const filterOrdersForEmployee = async (req, res) => {
     // Pagination & fetch
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const totalCount = await Order.countDocuments(filter);
-
+    // Conditional sorting logic
+    let sortOption = { updatedAt: -1 };
+    if (
+      filter.status &&
+      filter.status.$in &&
+      filter.status.$in.includes("new")
+    ) {
+      sortOption = { createdAt: -1 };
+    } else if (filter.status === "new") {
+      sortOption = { createdAt: -1 };
+    }
     const orders = await Order.find(filter)
-      .sort({ createdAt: -1 })
+      .sort(sortOption)
       .populate("userId", "fullname email phoneNumber company userId")
       .skip(skip)
       .limit(parseInt(limit))

@@ -578,6 +578,7 @@ const AllDiscrepancyBasedId = async (req, res) => {
           updatedAt: 1,
           text: 1,
           imageUrl: 1,
+          discrepancyDeclinedReason:1
         },
       },
       { $sort: { createdAt: -1 } },
@@ -1059,6 +1060,47 @@ const declineDiscrepancy = async (req, res) => {
   }
 };
 
+const bulkDeclineDiscrepancy = async (req, res) => {
+  try {
+    const { awbNumbers, text } = req.body;
+
+    // Validate input
+    if (!awbNumbers || !Array.isArray(awbNumbers) || awbNumbers.length === 0 || !text) {
+      return res.status(400).json({
+        message: "AWB numbers (array) and reason are required",
+      });
+    }
+
+    console.log(`Processing bulk decline for AWBs: ${awbNumbers.join(", ")}`);
+
+    // Perform bulk update
+    const result = await WeightDiscrepancy.updateMany(
+      { awbNumber: { $in: awbNumbers } }, // filter multiple documents
+      {
+        $set: {
+          status: "new",
+          adminStatus: "Discrepancy Declined",
+          clientStatus: "Discrepancy Declined",
+          discrepancyDeclinedReason: text,
+          discrepancyDeclinedAt: new Date(),
+        },
+      }
+    );
+
+    // Result contains matchedCount and modifiedCount
+    res.status(200).json({
+      message: `Bulk decline successful. ${result.modifiedCount} discrepancies updated.`,
+      result,
+    });
+  } catch (error) {
+    console.error("Error in bulkDeclineDiscrepancy:", error);
+    res.status(500).json({
+      message: "An error occurred while processing bulk discrepancy decline",
+      error: error.message,
+    });
+  }
+};
+
 const exportWeightDiscrepancy = async (req, res) => {
   try {
     const { disputeId } = req.body;
@@ -1194,5 +1236,6 @@ module.exports = {
   raiseDiscrepancies,
   adminAcceptDiscrepancy,
   declineDiscrepancy,
+  bulkDeclineDiscrepancy,
   exportWeightDiscrepancy,
 };

@@ -754,7 +754,7 @@ const trackSingleOrder = async (order) => {
               normalizeString(normalizedData?.Instructions)
         );
 
-        console.log(dbMapping?.sy_status);
+        // console.log(dbMapping?.sy_status);
 
         if (dbMapping) {
           // console.log("maped delhivery status", dbMapping.sy_status);
@@ -1038,8 +1038,8 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      // provider: "Dtdc",
-      // awb_number: "7X105009552",
+      // provider: "DTDC",
+      // awb_number: "7D113288193",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1252,7 +1252,7 @@ const formatAmazonDate = (isoDateStr) => {
     const d = new Date(isoDateStr);
     return d.toISOString(); // already UTC, just standardize
   } catch (err) {
-    console.warn("Invalid Amazon date:", isoDateStr);
+    // console.warn("Invalid Amazon date:", isoDateStr);
     return null;
   }
 };

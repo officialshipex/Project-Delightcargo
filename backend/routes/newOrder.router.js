@@ -25,7 +25,8 @@ const {
   deletePickupAddress,
   getShippingOrders,
   bulkCancelOrder,
-  checkBulkPickup
+  checkBulkPickup,
+  bulkCloneOrders
   // calculateRTOCharges
   
 } = require("../Orders/newOrder.controller"); // Adjust path to your controller
@@ -38,6 +39,7 @@ router.get("/orders", getOrders);
 router.get("/shippingOrders",getShippingOrders)
 router.get("/ndr",getOrdersByNdrStatus);
 router.post("/clone",updatedStatusOrders)
+router.post("/bulkClone",bulkCloneOrders)
 router.get("/getOrderById/:id",getOrdersById)
 router.get("/pickupAddress", getpickupAddress);
 router.get("/receiverAddress", getreceiverAddress);
