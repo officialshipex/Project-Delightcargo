@@ -16,6 +16,7 @@ const {
   raiseDiscrepancies,
   adminAcceptDiscrepancy,
   declineDiscrepancy,
+  bulkDeclineDiscrepancy,
   exportWeightDiscrepancy
 } = require("./weightDispreancy.controller");
 
@@ -30,6 +31,7 @@ router.post("/acceptAllDiscrepancies", AcceptAllDiscrepancies);
 router.post("/raiseDiscrepancies", uploads.single("image"), raiseDiscrepancies);
 router.post("/adminAcceptDiscrepancy", adminAcceptDiscrepancy);
 router.post("/declineDiscrepancy", declineDiscrepancy);
+router.post("/bulkDeclineDiscrepancy", bulkDeclineDiscrepancy);
 router.post("/exportWeightDiscrepancy", exportWeightDiscrepancy);
 // router.get("/all", getAllPosts);
 
