@@ -490,7 +490,7 @@ const getShippingOrders = async (req, res) => {
 
     // ✅ Exclude "New" and "Cancelled" orders
     andConditions.push({
-      status: { $nin: ["new", "Cancelled"] },
+      status: { $nin: ["new"] },
     });
 
     // If specific statuses are requested, combine with exclusion rule

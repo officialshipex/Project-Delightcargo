@@ -7,6 +7,7 @@ const Role = require("../models/roles.modal");
 const RateCard = require("../models/rateCards");
 const Plan = require("../models/Plan.model");
 const bcrypt = require("bcryptjs");
+const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const { sendWelcomeEmail } = require("../notification/welcomeNotification");
 const FRONTEND_URL =
@@ -25,8 +26,8 @@ const register = async (req, res) => {
       password,
       confirmedPassword,
       checked,
+      referralCode: referralCodeFromUrl,
     } = req.body;
-    console.log(req.body);
 
     if (
       !fullname ||
@@ -55,50 +56,58 @@ const register = async (req, res) => {
     };
 
     const validateFields = validateForm(userData);
-
     if (Object.keys(validateFields).length) {
       return res.status(400).json({
         success: false,
         message: validateFields,
       });
     }
+
+    // ✅ Generate unique 5-digit userId
     let userId;
     let isUnique = false;
 
     while (!isUnique) {
-      userId = Math.floor(10000 + Math.random() * 90000); // Generates a random five-digit number
+      userId = Math.floor(10000 + Math.random() * 90000);
       const existingUser = await User.findOne({ userId });
-
-      if (!existingUser) {
-        isUnique = true;
-      }
+      if (!existingUser) isUnique = true;
     }
+
+    // Check duplicates
     const userEmail = await User.findOne({ email });
     const userPhoneNumber = await User.findOne({ phoneNumber });
     const userCompany = await User.findOne({ company });
 
-    if (userPhoneNumber) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone Number already exists",
-      });
-    }
-
-    if (userEmail) {
-      return res.status(400).json({
-        success: false,
-        message: "Email or User already exists",
-      });
-    }
-    if (userCompany) {
-      return res.status(400).json({
-        success: false,
-        message: "Company already exists",
-      });
-    }
+    if (userPhoneNumber)
+      return res
+        .status(400)
+        .json({ success: false, message: "Phone number already exists" });
+    if (userEmail)
+      return res
+        .status(400)
+        .json({ success: false, message: "Email already exists" });
+    if (userCompany)
+      return res
+        .status(400)
+        .json({ success: false, message: "Company already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // ✅ Generate unique 7-digit referral code for the new user
+    let uniqueReferralCode;
+    let isCodeUnique = false;
+
+    while (!isCodeUnique) {
+      uniqueReferralCode = Math.floor(
+        1000000 + Math.random() * 9000000
+      ).toString();
+      const codeExists = await User.findOne({
+        referralCode: uniqueReferralCode,
+      });
+      if (!codeExists) isCodeUnique = true;
+    }
+
+    // ✅ Create new user
     const newUser = new User({
       fullname,
       email,
@@ -107,14 +116,31 @@ const register = async (req, res) => {
       monthlyOrders,
       password: hashedPassword,
       userId,
+      referralCode: uniqueReferralCode, // new field
     });
 
+    // ✅ Referral Handling
+    if (referralCodeFromUrl) {
+      const referrer = await User.findOne({
+        referralCode: referralCodeFromUrl,
+      });
+      if (referrer) {
+        newUser.referredBy = referrer._id;
+
+        // Add this new userId to referrer's subUserId array
+        if (!Array.isArray(referrer.subUserId)) {
+          referrer.subUserId = [];
+        }
+        referrer.subUserId.push(newUser._id);
+        await referrer.save();
+      }
+    }
+
     await newUser.save();
-    await sendWelcomeEmail(email, fullname,password);
+    await sendWelcomeEmail(email, fullname, password);
 
-    // Fetch the "Bronze" rate card
+    // Assign "Bronze" rate card
     const bronzeRateCard = await RateCard.find({ plan: "Bronze" });
-
     if (!bronzeRateCard) {
       return res.status(500).json({
         success: false,
@@ -122,12 +148,11 @@ const register = async (req, res) => {
       });
     }
 
-    // Assign the "Bronze" rate card to the new user
     const newPlan = new Plan({
       userId: newUser._id,
       userName: fullname,
       planName: "Bronze",
-      rateCard: bronzeRateCard, // Assigning the fetched rate card
+      rateCard: bronzeRateCard,
     });
 
     await newPlan.save();
@@ -143,7 +168,6 @@ const register = async (req, res) => {
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn: "1d",
     });
-    //welcome email
 
     return res.status(200).json({
       success: true,
@@ -151,7 +175,7 @@ const register = async (req, res) => {
       data: token,
     });
   } catch (error) {
-    console.log("error", error);
+    console.log("Registration error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -197,7 +221,13 @@ const login = async (req, res) => {
         message: "Password is incorrect",
       });
     }
-
+    if (user.isBlocked) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Your account has been temporarily blocked. Please contact support.",
+      });
+    }
     // 🔹 Save last login date & time
     user.lastLogin = new Date();
     await user.save();
@@ -389,6 +419,41 @@ const forgetPassword = async (req, res) => {
     res.status(500).json({ message: "Error updating password", error });
   }
 };
+
+const generateReferralCodes = async () => {
+  try {
+    const users = await User.find({});
+    let updatedCount = 0;
+
+    for (const user of users) {
+      if (!user.referralCode) {
+        let uniqueCode;
+        let exists = true;
+
+        // Generate a unique 7-digit numeric code
+        while (exists) {
+          uniqueCode = Math.floor(1000000 + Math.random() * 9000000).toString();
+          const check = await User.findOne({ referralCode: uniqueCode });
+          if (!check) exists = false;
+        }
+
+        user.referralCode = uniqueCode;
+        await user.save();
+        updatedCount++;
+      }
+    }
+
+    console.log(`✅ Referral code generation completed.`);
+    console.log(`Total users: ${users.length}`);
+    console.log(`Updated users: ${updatedCount}`);
+  } catch (error) {
+    console.error("❌ Error generating referral codes:", error.message);
+  } finally {
+    mongoose.connection.close();
+  }
+};
+
+// generateReferralCodes()
 
 module.exports = {
   register,

@@ -1038,8 +1038,8 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      // provider: "DTDC",
-      // awb_number: "7D113288193",
+      // provider: "Dtdc",
+      // awb_number: "7D113288320",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
