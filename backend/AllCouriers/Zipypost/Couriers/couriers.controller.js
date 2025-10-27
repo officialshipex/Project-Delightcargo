@@ -219,7 +219,9 @@ const createZipypostOrder = async (req, res) => {
       const warehouseData = {
         warehouseName: finalWarehouseName,
         contactName: currentOrder.pickupAddress.contactName,
-        contactNumber: currentOrder.pickupAddress.phoneNumber,
+        contactNumber: currentOrder.pickupAddress.phoneNumber
+          ? currentOrder.pickupAddress.phoneNumber.replace(/^0+/, "")
+          : "",
         AddressLineOne:
           currentOrder.pickupAddress.address?.substring(0, 45) || "",
         AddressLineTwo:
@@ -256,7 +258,9 @@ const createZipypostOrder = async (req, res) => {
       billing_details_same_as_shipping: true,
       shipping_details: {
         full_name: currentOrder.receiverAddress.contactName,
-        contact_number: currentOrder.receiverAddress.phoneNumber,
+        contact_number: currentOrder.receiverAddress.phoneNumber
+          ? currentOrder.receiverAddress.phoneNumber.replace(/^0+/, "")
+          : "",
         customer_email:
           currentOrder.receiverAddress.email || "example@email.com",
         address_line_one: currentOrder.receiverAddress.address,
@@ -266,7 +270,10 @@ const createZipypostOrder = async (req, res) => {
       },
       billing_details: {
         full_name: currentOrder.pickupAddress.contactName,
-        contact_number: currentOrder.pickupAddress.phoneNumber,
+        contact_number: currentOrder.pickupAddress.phoneNumber
+          ? currentOrder.pickupAddress.phoneNumber.replace(/^0+/, "")
+          : "",
+
         address_line_one:
           currentOrder.pickupAddress.address?.substring(0, 45) || "",
         address_line_two:
@@ -305,6 +312,7 @@ const createZipypostOrder = async (req, res) => {
         },
       }
     );
+    console.log("Zipypost Shipment Response:", response.data);
 
     if (!response.data.success || !response.data.booking) {
       throw new Error(response.data.message || "Failed to create shipment");

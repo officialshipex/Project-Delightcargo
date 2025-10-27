@@ -70,10 +70,10 @@ const trackSingleOrder = async (order) => {
       ZipyPost: trackOrderZipypost,
     };
 
-    if (!trackingFunctions[provider]) {
-      console.warn(`Unknown provider: ${provider} for Order ID: ${order._id}`);
-      return;
-    }
+    // if (!trackingFunctions[provider]) {
+    //   console.warn(`Unknown provider: ${provider} for Order ID: ${order._id}`);
+    //   return;
+    // }
     let result;
     // let normalizedData;
     if (partner && partner === "ZipyPost") {
@@ -81,7 +81,9 @@ const trackSingleOrder = async (order) => {
     } else if (provider && trackingFunctions[provider]) {
       result = await trackingFunctions[provider](awb_number, shipment_id);
     } else {
-      console.warn(`No tracking function found for provider: ${provider}`);
+      console.warn(
+        `Unknown provider/partner: provider=${provider}, partner=${partner} for Order ID: ${order._id}`
+      );
       return;
     }
     if (!result || !result.success || !result.data) return;
@@ -963,6 +965,25 @@ const trackSingleOrder = async (order) => {
         };
       });
 
+      // Compare last tracking event with previous one
+      const newLast = newTrackingArray[newTrackingArray.length - 1];
+      const oldLast = order.tracking?.[order.tracking.length - 1];
+
+      // Check if both last events are same
+      const isSameAsPrevious =
+        oldLast &&
+        newLast &&
+        oldLast.Instructions === newLast.Instructions &&
+        new Date(oldLast.StatusDateTime).getTime() ===
+          new Date(newLast.StatusDateTime).getTime();
+
+      if (isSameAsPrevious) {
+        console.log(
+          `🟡 Skipping ${order.awb_number} — tracking unchanged (same Instructions & StatusDateTime)`
+        );
+        return; // 🔥 skip further processing and DB writes
+      }
+
       // Replace entire tracking array
       order.tracking = newTrackingArray;
       await order.save();
@@ -1038,8 +1059,8 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      // provider: "Dtdc",
-      // awb_number: "7D113288320",
+      partner: "ZipyPost",
+      awb_number: "78065759800",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1093,7 +1114,6 @@ const startTrackingLoop = async () => {
 if (process.env.NODE_ENV === "production") {
   startTrackingLoop();
 }
-
 
 const mapTrackingResponse = (data, provider, remark) => {
   // console.log("Mapping data for provider:", data);
