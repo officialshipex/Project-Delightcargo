@@ -396,7 +396,7 @@ const trackOrderDTDC = async (AWBNo) => {
         "x-access-token": access_key,
       },
     });
-    console.log(response.data);
+    // console.log(response.data);
     return { success: true, data: response.data.trackDetails };
   } catch (error) {
     // console.error(
