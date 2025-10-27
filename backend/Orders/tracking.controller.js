@@ -1059,8 +1059,8 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      partner: "ZipyPost",
-      awb_number: "78065759800",
+      // partner: "ZipyPost",
+      // awb_number: "78065759800",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
