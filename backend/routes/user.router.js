@@ -13,6 +13,7 @@ router.get('/getUsers',isAuthorized,userController.getUsers);
 router.get('/getAllPlans',isAuthorized,userController.getAllPlans);
 router.get('/getAllUsers',isAuthorized, getAllUsers);
 router.get("/getUserById",isAuthorized,userController.getUserById)
+router.post('/updateBlockStatus',isAuthorized,userController.updateBlockStatus);
 router.get('/AssignPlan/:userId/:planId',isAuthorized,userController.assignPlan);
 router.post('/update-profile',isAuthorized,uploads.single("profileImage"),userController.updateProfile);
 

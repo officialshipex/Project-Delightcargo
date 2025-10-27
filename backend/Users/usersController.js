@@ -168,7 +168,7 @@ const getAllUsers = async (req, res) => {
     const users = await User.find(query)
       .populate("Wallet", "balance") // Ensure 'wallet' is correct in schema
       .select(
-        "userId fullname email phoneNumber company kycDone creditLimit createdAt lastLogin"
+        "userId fullname email phoneNumber company kycDone creditLimit createdAt lastLogin isBlocked"
       )
       .lean();
 
@@ -250,6 +250,7 @@ const getAllUsers = async (req, res) => {
         userId: user.userId,
         fullname: user.fullname,
         email: user.email,
+        isBlocked: user?.isBlocked,
         lastLogin: user.lastLogin,
         phoneNumber: user.phoneNumber,
         company: user.company,
@@ -372,6 +373,10 @@ const getUserById = async (req, res) => {
       codPlan: codPlan?.planName || "N/A",
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+      isBlocked: user.isBlocked,
+      logo: user.profileImage || "",
+      referralCode: user.referralCode || "",
+      referralCommissionPercentage: user.referralCommissionPercentage || 0,
       accountDetails: account
         ? {
             beneficiaryName: account.nameAtBank,
@@ -418,6 +423,39 @@ const getUserById = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error fetching user by ID",
+      error: error.message,
+    });
+  }
+};
+
+const updateBlockStatus = async (req, res) => {
+  try {
+    const { userId, isBlocked } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Update block status
+    user.isBlocked = isBlocked;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: `User has been ${isBlocked ? "blocked" : "unblocked"} successfully.`,
+      user,
+    });
+  } catch (error) {
+    console.error("Error updating user block status:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while updating user block status.",
       error: error.message,
     });
   }
@@ -688,5 +726,6 @@ module.exports = {
   getAllUsers,
   changeUser,
   getUserById,
+  updateBlockStatus,
   updateProfile,
 };

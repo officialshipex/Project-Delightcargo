@@ -50,7 +50,11 @@ const usersSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
-    apiAccess:{
+    apiAccess: {
+      type: Boolean,
+      default: false,
+    },
+    isBlocked: {
       type: Boolean,
       default: false,
     },
@@ -91,12 +95,25 @@ const usersSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    referralCode: {
+      type: String,
+      unique: true,
+    },
     profileImage: {
       type: String,
       default: "", // This will store the S3 URL
     },
-    lastLogin: { type: Date }
-
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    }, // 👈 who referred this user
+    referralCommissionPercentage:{
+      type: Number,
+      default: 0,
+    },
+    subUserId: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // 👈 list of referred users
+    lastLogin: { type: Date },
   },
   { timestamps: true }
 );

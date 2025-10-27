@@ -26,6 +26,22 @@ resetPassword.post("/resetPassword", async (req, res) => {
       .json({ success: false, message: "Email is required" });
   }
 
+  const user = await User.findOne({ email });
+  if (!user) {
+    return res
+      .status(404)
+      .json({ success: false, message: "User with this email does not exist" });
+  }
+
+  if (user.isBlocked) {
+    return res
+      .status(400)
+      .json({
+        success: false,
+        message: "Your account has been temporarily blocked. Please contact support.",
+      });
+  }
+
   try {
     // Generate a cryptographically strong random token
     const token = crypto.randomBytes(32).toString("hex");
@@ -120,7 +136,6 @@ resetPassword.post("/resetPassword", async (req, res) => {
 });
 
 // Endpoint to verify token and reset password
- 
 
 resetPassword.post("/reset-password", async (req, res) => {
   const { token, newPassword } = req.body;
