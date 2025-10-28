@@ -225,7 +225,7 @@ const createZipypostOrder = async (req, res) => {
         AddressLineOne:
           currentOrder.pickupAddress.address?.substring(0, 45) || "",
         AddressLineTwo:
-          currentOrder.pickupAddress.address?.substring(45, 90) || "",
+          currentOrder.pickupAddress.address?.substring(0, 45) || "",
         pincode: currentOrder.pickupAddress.pinCode,
         city: currentOrder.pickupAddress.city,
         primary: true,
