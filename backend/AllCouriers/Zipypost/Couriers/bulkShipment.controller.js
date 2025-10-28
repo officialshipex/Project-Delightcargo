@@ -180,8 +180,10 @@ const createOrderZipypost = async (
       contactNumber: currentOrder.pickupAddress.phoneNumber
         ? currentOrder.pickupAddress.phoneNumber.replace(/^0+/, "")
         : "",
-      AddressLineOne: currentOrder.pickupAddress.address,
-      AddressLineTwo: currentOrder.pickupAddress.address,
+      AddressLineOne:
+        currentOrder.pickupAddress.address?.substring(0, 45) || "",
+      AddressLineTwo:
+        currentOrder.pickupAddress.address?.substring(0, 45) || "",
       pincode: currentOrder.pickupAddress.pinCode,
       city: currentOrder.pickupAddress.city,
       //   gst: "",
