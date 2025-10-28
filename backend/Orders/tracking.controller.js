@@ -217,6 +217,9 @@ const trackSingleOrder = async (order) => {
           ) {
             order.ndrStatus = dbMapping.sy_status;
           }
+          if (order.status === "RTO Delivered") {
+            order.ndrStatus = "RTO Delivered";
+          }
           if (
             (order.ndrStatus === "Undelivered" ||
               order.ndrStatus === "Out for Delivery" ||
@@ -770,6 +773,9 @@ const trackSingleOrder = async (order) => {
           ) {
             order.ndrStatus = dbMapping.sy_status;
           }
+          if (order.status === "RTO Delivered") {
+            order.ndrStatus = "RTO Delivered";
+          }
         }
       }
 
@@ -977,12 +983,12 @@ const trackSingleOrder = async (order) => {
         new Date(oldLast.StatusDateTime).getTime() ===
           new Date(newLast.StatusDateTime).getTime();
 
-      if (isSameAsPrevious) {
-        console.log(
-          `🟡 Skipping ${order.awb_number} — tracking unchanged (same Instructions & StatusDateTime)`
-        );
-        return; // 🔥 skip further processing and DB writes
-      }
+      // if (isSameAsPrevious) {
+      //   console.log(
+      //     `🟡 Skipping ${order.awb_number} — tracking unchanged (same Instructions & StatusDateTime)`
+      //   );
+      //   return; // 🔥 skip further processing and DB writes
+      // }
 
       // Replace entire tracking array
       order.tracking = newTrackingArray;
@@ -1058,9 +1064,10 @@ const trackOrders = async () => {
     const limit = pLimit(10); // Max 10 concurrent executions
 
     const allOrders = await Order.find({
-      status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
+      status: { $nin: ["new", "Cancelled", "Delivered","RTO Delivered"] },
+      // ndrStatus:"Undelivered"
       // partner: "ZipyPost",
-      // awb_number: "78065759800",
+      // awb_number: "35973710045474",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);

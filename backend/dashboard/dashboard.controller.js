@@ -566,6 +566,44 @@ const getBusinessInsights = async (req, res) => {
           ).toFixed(2)
         : "0.00";
 
+    const startOfYesterday = moment()
+      .subtract(1, "days")
+      .startOf("day")
+      .toDate();
+    const endOfYesterday = moment().subtract(1, "days").endOf("day").toDate();
+
+    const [yesterdayOrders] = await Order.aggregate([
+      {
+        $match: {
+          ...baseMatch,
+          createdAt: { $gte: startOfYesterday, $lte: endOfYesterday },
+        },
+      },
+      { $count: "count" },
+    ]);
+    const [yesterdayOrderValue] = await Order.aggregate([
+      {
+        $match: {
+          ...baseMatch,
+          createdAt: { $gte: startOfYesterday, $lte: endOfYesterday },
+          status: validStatus,
+        },
+      },
+      { $group: { _id: null, orderValue: { $sum: "$paymentDetails.amount" } } },
+    ]);
+
+    const yesterdayCount = yesterdayOrders?.count || 0;
+    const yesterdayValue = yesterdayOrderValue?.orderValue || 0;
+
+    const calculateGrowth = (today, yesterday) => {
+      if (yesterday === 0 && today === 0) return "0.00"; // No change
+      if (yesterday === 0 && today > 0) return "100.00"; // Fully positive growth
+      return (((today - yesterday) / yesterday) * 100).toFixed(2);
+    };
+
+    const todayGrowthOrders = calculateGrowth(todayOrderCount, yesterdayCount);
+    const todayGrowthValue = calculateGrowth(todayOrderValue, yesterdayValue);
+
     // === Response ===
     return res.status(200).json({
       success: true,
@@ -576,6 +614,8 @@ const getBusinessInsights = async (req, res) => {
         avgOrderValue,
         growthOrders,
         growthValue,
+        todayGrowthOrders,
+        todayGrowthValue,
         statsBreakdown: {
           weekCount,
           weekGrowth,
