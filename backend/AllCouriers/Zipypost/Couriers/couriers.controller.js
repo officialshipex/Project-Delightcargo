@@ -179,6 +179,7 @@ const createZipypostOrder = async (req, res) => {
     const validCouriers = serviceability.data.filter(
       (svc) => svc.courier_id === 9 || svc.courier_id === 10
     );
+    // console.log("validCouriers", validCouriers);
 
     let courier_id = 0;
     if (courierServiceName.toLowerCase().includes("xpressbees")) courier_id = 9;
@@ -299,6 +300,8 @@ const createZipypostOrder = async (req, res) => {
       mode_id,
     };
 
+    console.log("request body",requestBody)
+
     // ✅ Call Zipypost API
     const response = await axios.post(
       "https://api.zipypost.com/create/shipment",
@@ -379,7 +382,7 @@ const createZipypostOrder = async (req, res) => {
     );
     return res.status(500).json({
       success: false,
-      message: error.message || "Failed to create shipment",
+      message: error?.response?.data?.error?.booking_process_error || "Failed to create shipment",
     });
   }
 };
