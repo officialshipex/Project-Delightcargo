@@ -18,7 +18,7 @@ const razorpay = new Razorpay({
 const createOrder = async (req, res) => {
   try {
     const id = req.user.id;
-    console.log("ie",id)
+    console.log("ie", id);
     const { amount, walletId: walletIdFromBody } = req.body;
 
     const user = await User.findById(id);
@@ -176,13 +176,15 @@ const razorpayWebhook = async (req, res) => {
       };
 
       if (event.event === "payment.captured") {
-        wallet.balance += amount;
+        const newBalance = wallet.balance + amount; // ✅ compute first
+
+        wallet.balance = newBalance;
         wallet.walletHistory.push({ status: "success", paymentDetails });
         // ✅ Add transaction schema entry (for balance impact)
         wallet.transactions.push({
           category: "credit", // since wallet is recharged
           amount,
-          balanceAfterTransaction: wallet.balance,
+          balanceAfterTransaction: newBalance,
           description: `Recharge From Gateway(Razorpay)`,
           channelOrderId: payment.order_id,
         });

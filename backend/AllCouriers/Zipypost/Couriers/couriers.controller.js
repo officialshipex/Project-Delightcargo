@@ -324,7 +324,7 @@ const createZipypostOrder = async (req, res) => {
     currentOrder.status = "Booked";
     currentOrder.awb_number = result.awb;
     currentOrder.shipment_id = currentOrder.orderId;
-    currentOrder.provider = result.courier;
+    currentOrder.provider = result.courier.replace(/\+/g, "").trim();
     currentOrder.partner = "ZipyPost";
     currentOrder.shipmentCreatedAt = new Date();
     currentOrder.totalFreightCharges = finalCharges || 0;

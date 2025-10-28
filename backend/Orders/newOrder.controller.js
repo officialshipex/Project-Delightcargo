@@ -1097,7 +1097,7 @@ const ShipeNowOrder = async (req, res) => {
     // ✅ fetch enabled + active courier services
     const services = await CourierService.find({ status: "Enable" });
     const enabledServices = [];
-
+    const normalize = (str) => str?.toLowerCase().replace(/\s+/g, "").trim();
     for await (const srvc of services) {
       const provider = await Courier.findOne({
         courierProvider: srvc.provider,
@@ -1106,11 +1106,11 @@ const ShipeNowOrder = async (req, res) => {
       // ✅ check both provider & courier service statuses
       if (provider?.status === "Enable" && srvc.status === "Enable") {
         // console.log("plan", plan);
-        const planRateCard = plan.rateCard.find(
+        const planRateCard = plan.rateCard.filter(
           (card) =>
-            card.courierServiceName.trim() === srvc.name.trim() &&
-            card.courierProviderName.trim() === srvc.provider.trim() &&
-            card.status === "Active" // <-- Only Active entries
+            normalize(card.courierServiceName) === normalize(srvc.name) &&
+            normalize(card.courierProviderName) === normalize(srvc.provider) &&
+            card.status === "Active"
         );
         // console.log("planRateCard",planRateCard)
         if (planRateCard) {
@@ -1158,7 +1158,6 @@ const ShipeNowOrder = async (req, res) => {
     let rates = await calculateRateForService(payload);
     // console.log("rate", rates);
     // console.log("filtere", filteredServices);
-    const normalize = (str) => str?.toLowerCase().replace(/\s+/g, "").trim();
 
     // ✅ Build updatedRates only for serviceable couriers
     const updatedRates = filteredServices
@@ -1740,14 +1739,13 @@ const bulkCancelOrder = async (req, res) => {
 
         // ✅ Determine provider (special case for ZipyPost)
         const provider =
-          currentOrder.provider === "ZipyPost" ||
           currentOrder.partner === "ZipyPost"
             ? "ZipyPost"
             : currentOrder.provider;
 
         // --- Cancel order by provider ---
         let cancelResponse;
-        switch (currentOrder.provider) {
+        switch (provider) {
           case "Delhivery":
             cancelResponse = await cancelOrderDelhivery(
               currentOrder.awb_number

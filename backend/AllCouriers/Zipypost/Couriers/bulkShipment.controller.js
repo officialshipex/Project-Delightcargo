@@ -6,9 +6,7 @@ const CourierService = require("../../../models/CourierService.Schema");
 const { getAuthToken } = require("../Authorize/zipyPost.controller");
 const { createWarehouse } = require("./couriers.controller");
 const { getZone } = require("../../../Rate/zoneManagementController");
-const {
-  checkZipypostServiceabilty,
-} = require("../Couriers/couriers.controller");
+const { checkZipypostServiceability } = require("./couriers.controller");
 // const ZipyPostScanCodeMapping = require("../../utils/ZipyPostScanCodeMapping");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 const createOrderZipypost = async (
@@ -179,7 +177,9 @@ const createOrderZipypost = async (
     const warehouseData = {
       warehouseName: warehouseName,
       contactName: currentOrder.pickupAddress.contactName,
-      contactNumber: currentOrder.pickupAddress.phoneNumber,
+      contactNumber: currentOrder.pickupAddress.phoneNumber
+        ? currentOrder.pickupAddress.phoneNumber.replace(/^0+/, "")
+        : "",
       AddressLineOne: currentOrder.pickupAddress.address,
       AddressLineTwo: currentOrder.pickupAddress.address,
       pincode: currentOrder.pickupAddress.pinCode,
@@ -272,7 +272,7 @@ const createOrderZipypost = async (
       currentOrder.status = "Booked";
       currentOrder.awb_number = awb;
       currentOrder.shipment_id = currentOrder.orderId;
-      currentOrder.provider = result.courier;
+      currentOrder.provider = result.courier.replace(/\+/g, "").trim();
       currentOrder.partner = "ZipyPost";
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.totalFreightCharges = charges;
