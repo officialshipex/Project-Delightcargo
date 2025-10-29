@@ -33,9 +33,10 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
     }).lean();
 
     for (const user of parentUsers) {
-      const subUserIds = (user.subUserId || []).map((id) =>
-        mongoose.Types.ObjectId(id)
+      const subUserIds = (user.subUserId || []).map(
+        (id) => new mongoose.Types.ObjectId(id)
       );
+
       if (!subUserIds.length) continue;
 
       // Fetch all "Delivered" orders for sub-users within this month
@@ -60,7 +61,7 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
 
       // Prevent duplication by checking previous recorded orderIds
       const existingOrderIds = await ReferralMonthlyStat.find({
-        userId: user.userId, // use userId instead of _id
+        userId: user._id, // use userId instead of _id
         "perSubUser.orderIds": { $exists: true, $ne: [] },
       }).distinct("perSubUser.orderIds");
 
@@ -104,17 +105,21 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
         .lean();
 
       const commissionRate = Number(user.commission || 2);
-      const totalCommission = (totalShipping * commissionRate) / 100;
+      const totalCommission = Number(
+        ((totalShipping * commissionRate) / 100).toFixed(2)
+      );
 
       // Construct perSubUser array with additional info and date range
       const perSubUser = [];
       for (const [subId, val] of subUserMap.entries()) {
         const subUser = subUsers.find((su) => su._id.toString() === subId);
-        const commissionForSub = (val.totalShipping * commissionRate) / 100;
+        const commissionForSub = Number(
+          ((val.totalShipping * commissionRate) / 100).toFixed(2)
+        );
 
         perSubUser.push({
           subUserId: subId,
-          userId:subUser?.userId,
+          userId: subUser?.userId,
           name: subUser?.name || "N/A",
           email: subUser?.email || "N/A",
           mobile: subUser?.mobile || "N/A",
@@ -155,6 +160,7 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
     session.endSession();
   }
 };
+// generateMonthlyReferralReport()
 
 cron.schedule("59 23 * * *", async () => {
   const now = dayjs();
@@ -178,70 +184,98 @@ cron.schedule("59 23 * * *", async () => {
 
 const getReferralStats = async (req, res) => {
   try {
-    const userId = req.user._id; // assuming middleware adds req.user
+    const userId = req.user._id; // added by auth middleware
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
 
-    // Fetch all monthly stats for this user, sorted by month descending
-    const monthlyStats = await ReferralMonthlyStat.find({ userId })
+    // Extract filters
+    const { month, year } = req.query;
+
+    // Build filter query
+    const query = { userId };
+    if (month && year) {
+      query.month = Number(month);
+      query.year = Number(year);
+    }
+
+    // Fetch monthly stats
+    const monthlyStats = await ReferralMonthlyStat.find(query)
       .sort({ year: -1, month: -1 })
       .lean();
 
-    // Aggregate totals
+    // Initialize totals
     const stats = {
       referredFriends: 0,
       referralOrders: 0,
       totalShipping: 0,
       totalCommission: 0,
-      withdrawn: 0, // add if you track withdrawals separately
-      remaining: 0, // add if you track remaining commission separately
+      withdrawn: 0,
+      remaining: 0,
     };
 
+    // Calculate totals from monthly records
     monthlyStats.forEach((month) => {
       stats.referralOrders += month.totalOrderCount || 0;
       stats.totalShipping += month.totalShipping || 0;
       stats.totalCommission += month.totalCommission || 0;
     });
 
-    // Calculate referredFriends count (from User collection)
-    const parentUser = await User.findById(userId).lean();
-    stats.referredFriends = (parentUser?.subUserId || []).length;
-
-    // Prepare monthlyData array for frontend
+    // Fetch referred friends count
+    const parentUser = await User.findById(
+      userId,
+      "subUserId referralCommissionPercentage"
+    ).lean();
+    stats.referredFriends = parentUser?.subUserId?.length || 0;
+    // console.log("Parent user:", parentUser);
+    // Prepare data for frontend
     const monthlyData = monthlyStats.map((month) => ({
-      month: `${month.month}-${month.year}`,
-      referralOrders: month.totalOrderCount,
-      shippingCharges: month.totalShipping,
-      commission: month.totalCommission,
+      month: `${dayjs()
+        .month(month.month - 1)
+        .format("MMMM")} ${month.year}`,
+      referralOrders: month.totalOrderCount || 0,
+      shippingCharges: month.totalShipping || 0,
+      commission: month.totalCommission || 0,
       fromDate: month.fromDate,
       toDate: month.toDate,
-      date: month.createdAt || new Date(), // fallback to creation date
+      date: month.createdAt || new Date(),
     }));
 
-    return res.status(200).json({ stats, monthlyData });
+    return res.status(200).json({
+      stats,
+      monthlyData,
+      referralCommissionPercentage:
+        parentUser?.referralCommissionPercentage || 0,
+    });
   } catch (err) {
-    console.error("Error fetching referral stats:", err);
+    console.error("❌ Error fetching referral stats:", err);
     return res.status(500).json({ message: "Failed to fetch referral stats" });
   }
 };
 
 const getAllReferralStats = async (req, res) => {
   try {
-    const { month, year, referById, subUserId } = req.query;
+    const { month, year, referById } = req.query;
+    console.log("req.query", req.query);
 
-    // Fetch all monthly referral stats
-    let query = {};
+    const query = {};
     if (month) query.month = parseInt(month);
     if (year) query.year = parseInt(year);
-    if (referById) query.userId = referById;
-    if (subUserId) query.subUserId = subUserId;
+
+    if (referById) {
+      // ✅ Try both string and ObjectId match for compatibility
+      query.$or = [
+        { userId: referById },
+        { userId: new mongoose.Types.ObjectId(referById) },
+      ];
+    }
 
     const referrals = await ReferralMonthlyStat.find(query)
       .sort({ year: -1, month: -1 })
       .lean();
 
-    // Prepare summary
+    console.log("Referral Count Found:", referrals.length);
+
     const summary = {
       totalUsers: 0,
       totalOrders: 0,
@@ -249,31 +283,71 @@ const getAllReferralStats = async (req, res) => {
       totalCommission: 0,
     };
 
-    const userIdsSet = new Set();
-
     referrals.forEach((r) => {
       summary.totalOrders += r.totalOrderCount || 0;
       summary.totalShipping += r.totalShipping || 0;
       summary.totalCommission += r.totalCommission || 0;
-      if (r.userId) userIdsSet.add(r.userId.toString());
     });
 
-    summary.totalUsers = userIdsSet.size;
+    const userFilter = referById
+      ? {
+          $or: [
+            { _id: new mongoose.Types.ObjectId(referById) },
+            { _id: referById },
+          ],
+        }
+      : { subUserId: { $exists: true, $ne: [] } };
 
-    // Optionally populate user/subuser details
-    const userIds = Array.from(userIdsSet);
-    const users = await User.find({ _id: { $in: userIds } })
-      .select("_id fullname email phoneNumber")
-      .lean();
+    const users = await User.find(
+      userFilter,
+      "_id fullname email phoneNumber userId subUserId"
+    ).lean();
 
-    // Map user info into referrals
+    const allSubUserIds = users.flatMap((u) => u.subUserId || []);
+
+    const subUsers = await User.find(
+      { _id: { $in: allSubUserIds } },
+      "_id fullname email phoneNumber userId"
+    ).lean();
+
+    summary.totalUsers = users.reduce(
+      (sum, u) => sum + (Array.isArray(u.subUserId) ? u.subUserId.length : 0),
+      0
+    );
+
     const enrichedReferrals = referrals.map((r) => {
-      const user = users.find((u) => u._id.toString() === r.userId?.toString());
+      const user = users.find(
+        (u) =>
+          u._id.toString() === r.userId?.toString() ||
+          u._id.toString() === r.userId
+      );
+
+      const referredFriendsCount = user?.subUserId?.length || 0;
+
+      const subUsersData = (r.perSubUser || []).map((su) => {
+        const subUserInfo = subUsers.find(
+          (sub) => sub._id.toString() === su.subUserId?.toString()
+        );
+
+        return {
+          userId: subUserInfo?.userId || "-",
+          fullname: subUserInfo?.fullname || "-",
+          email: subUserInfo?.email || "-",
+          mobile: subUserInfo?.phoneNumber || "-",
+          orderCount: su.orderCount || 0,
+          totalShipping: su.totalShipping || 0,
+          commission: su.commission || 0,
+        };
+      });
+
       return {
         ...r,
+        userId: user?.userId || "-",
         userName: user?.fullname || "-",
         email: user?.email || "-",
         mobile: user?.phoneNumber || "-",
+        referredFriends: referredFriendsCount,
+        subUsers: subUsersData,
       };
     });
 
@@ -287,4 +361,8 @@ const getAllReferralStats = async (req, res) => {
   }
 };
 
-module.exports = { generateMonthlyReferralReport, getReferralStats,getAllReferralStats };
+module.exports = {
+  generateMonthlyReferralReport,
+  getReferralStats,
+  getAllReferralStats,
+};

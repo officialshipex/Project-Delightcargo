@@ -15,9 +15,11 @@ const User = require("../../models/User.model");
 const providerMap = {
   // "01": "EcomExpress",
   "02": "Delhivery",
-  "03": "DTDC",
+  "03": "Dtdc",
   "04": "Smartship",
-  "05": "Amazon",
+  "05": "Amazon Shipping",
+  "06": "Shree Maruti",
+  "07": "ZipyPost",
 };
 
 // Validation schema
@@ -158,7 +160,7 @@ const bookOrder = async (req, res) => {
     // ✅ Create shipment by provider
     let shipmentResult;
     switch (provider) {
-      case "Amazon":
+      case "Amazon Shipping":
         shipmentResult = await createAmazonShipment({
           id: order._id,
           provider,
@@ -176,7 +178,7 @@ const bookOrder = async (req, res) => {
         });
         break;
 
-      case "DTDC":
+      case "Dtdc":
         shipmentResult = await createDTDCShipment({
           id: order._id,
           provider,
@@ -188,6 +190,22 @@ const bookOrder = async (req, res) => {
 
       case "Smartship":
         shipmentResult = await createSmartshipShipment({
+          id: order._id,
+          provider,
+          finalCharges,
+          courierServiceName,
+        });
+        break;
+      case "Shree Maruti":
+        shipmentResult = await createShreeMarutiShipment({
+          id: order._id,
+          provider,
+          finalCharges,
+          courierServiceName,
+        });
+        break;
+      case "ZipyPost":
+        shipmentResult = await createZipypostShipment({
           id: order._id,
           provider,
           finalCharges,

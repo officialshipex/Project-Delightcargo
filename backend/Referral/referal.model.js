@@ -19,15 +19,6 @@ const ReferralMonthlyStatSchema = new mongoose.Schema({
   totalCommission: { type: Number, default: 0 },
   perSubUser: [SubUserStatSchema],
   generatedAt: { type: Date, default: Date.now },
-  // keep monthly tracking history if needed
-  trackingHistory: [
-    {
-      date: Date,
-      orderId: { type: mongoose.Schema.Types.ObjectId, ref: "Order" },
-      status: String,
-      statusDateTime: Date,
-    },
-  ],
 });
 
 const ReferralMonthlyStat = mongoose.model("ReferralMonthlyStat", ReferralMonthlyStatSchema);

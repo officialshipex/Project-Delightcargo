@@ -448,7 +448,9 @@ const updateBlockStatus = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `User has been ${isBlocked ? "blocked" : "unblocked"} successfully.`,
+      message: `User has been ${
+        isBlocked ? "blocked" : "unblocked"
+      } successfully.`,
       user,
     });
   } catch (error) {
@@ -468,8 +470,8 @@ const getUserDetails = async (req, res) => {
     // Populate only necessary fields (faster)
     const existingUser = await User.findById(userId)
       // .populate("wareHouse", "name address")
-      .populate("Wallet", "balance holdAmount")
-      // .populate("plan", "name expiryDate rateCard");
+      .populate("Wallet", "balance holdAmount");
+    // .populate("plan", "name expiryDate rateCard");
 
     if (!existingUser)
       return res
@@ -717,6 +719,24 @@ const updateProfile = async (req, res) => {
   }
 };
 
+const updateReferralCommission = async (req, res) => {
+  try {
+    const { userId, referralCommissionPercentage } = req.body;
+    await User.findByIdAndUpdate(userId, { referralCommissionPercentage });
+    res.json({
+      success: true,
+      message: "Referral commission updated successfully",
+    });
+  } catch (err) {
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to update referral commission",
+      });
+  }
+}
+
 module.exports = {
   getUsers,
   getUserDetails,
@@ -728,4 +748,5 @@ module.exports = {
   getUserById,
   updateBlockStatus,
   updateProfile,
+  updateReferralCommission
 };

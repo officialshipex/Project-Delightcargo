@@ -215,8 +215,15 @@ const createOrderZipypost = async (
         contact_number: currentOrder.receiverAddress.phoneNumber,
         customer_email:
           currentOrder.receiverAddress.email || "example@email.com",
-        address_line_one: currentOrder.receiverAddress.address,
-        address_line_two: currentOrder.receiverAddress.address,
+        address_line_one:
+          currentOrder.receiverAddress.address?.length > 104
+            ? currentOrder.receiverAddress.address.slice(0, 104)
+            : currentOrder.receiverAddress.address,
+
+        address_line_two:
+          currentOrder.receiverAddress.address?.length > 104
+            ? currentOrder.receiverAddress.address.slice(0, 104)
+            : currentOrder.receiverAddress.address,
         pincode: currentOrder.receiverAddress.pinCode,
         city: currentOrder.receiverAddress.city,
       },

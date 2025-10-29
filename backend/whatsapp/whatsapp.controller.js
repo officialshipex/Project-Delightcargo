@@ -16,7 +16,7 @@ async function sendWhatsAppMessage({
     if (!to) throw new Error("Recipient phone number (to) is required.");
 
     let payload = {
-      phone_number_id: PHONE_NUMBER_ID,
+      phoneNoId: PHONE_NUMBER_ID,
       to,
       type,
     };
@@ -31,7 +31,7 @@ async function sendWhatsAppMessage({
     // Handle message types
     switch (type) {
       case "text":
-        payload.text = { body: message };
+        payload.text = message ;
         break;
 
       case "media":
@@ -78,7 +78,7 @@ async function sendWhatsAppMessage({
 }
 
 // sendWhatsAppMessage({
-//   to: "919668649450",
+//   to: "9668649450",
 //   type: "text",
 //   message: "Hello from Shipex WhatsApp API!",
 // });

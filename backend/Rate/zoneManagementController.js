@@ -35,7 +35,7 @@ const getpinCodeData = async () => {
 
   return new Promise((resolve, reject) => {
     fs.createReadStream(csvFilePath)
-      .pipe(csvParser())
+      .pipe(csvParser({ separator: "\t" })) // ✅ set tab as separator
       .on("data", (row) => {
         if (row.pincode && row.city && row.state) {
           const pincode = row.pincode.trim();

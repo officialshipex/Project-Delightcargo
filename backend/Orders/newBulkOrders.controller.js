@@ -275,14 +275,14 @@ const createBulkOrder = async (req, res) => {
   let failureCount = 0;
   // console.log("selected", selectedOrders);
   try {
-    const userId = req.user._id;
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    // const userId = req.user._id;
+    // const user = await User.findById(userId);
+    // if (!user) return res.status(404).json({ error: "User not found" });
 
-    const plans = await plan.findOne({ userId });
-    if (!plan) return res.status(404).json({ error: "User plan not found" });
+    // const plans = await plan.findOne({ userId });
+    // if (!plan) return res.status(404).json({ error: "User plan not found" });
 
-    const walletId = user.Wallet;
+    // const walletId = user.Wallet;
     const EDDRates = await EDDMap.find();
     const couriers = await Courier.find({ status: "Enable" });
     const courierServices = await Services.find({ status: "Enable" });
@@ -300,7 +300,15 @@ const createBulkOrder = async (req, res) => {
       try {
         const order = await Order.findById(orderId);
         if (!order) throw new Error("Order details not found");
+        // ✅ Fetch user and plan based on each order’s userId
+        const userId = order.userId;
+        const user = await User.findById(userId);
+        if (!user) throw new Error("User not found for order");
 
+        const plans = await plan.findOne({ userId });
+        if (!plans) throw new Error("User plan not found");
+
+        const walletId = user.Wallet;
         const applicableWeight = order.packageDetails.applicableWeight;
 
         // ✅ Find eligible courier services based on plan.rateCard & weight
