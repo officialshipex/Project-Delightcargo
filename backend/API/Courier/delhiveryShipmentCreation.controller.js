@@ -3,35 +3,88 @@ const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
 const { getZone } = require("../../Rate/zoneManagementController");
-const { createClientWarehouse } = require("../../AllCouriers/Delhivery/Courier/couriers.controller"); // Adjust path as needed
-const { fetchBulkWaybills } = require("../../AllCouriers/Delhivery/Authorize/saveCourierContoller"); // Adjust path as needed
+const {
+  createClientWarehouse,
+} = require("../../AllCouriers/Delhivery/Courier/couriers.controller"); // Adjust path as needed
+const {
+  fetchBulkWaybills,
+} = require("../../AllCouriers/Delhivery/Authorize/saveCourierContoller"); // Adjust path as needed
 const url = process.env.DELHIVERY_URL;
 const API_TOKEN = process.env.DEL_API_TOKEN;
+const estimatedDeliveryDate = require("../../models/EDDMap.model");
 
-const createDelhiveryShipment = async ({ id, provider, finalCharges, courierServiceName }) => {
+const createDelhiveryShipment = async ({
+  id,
+  provider,
+  finalCharges,
+  courierServiceName,
+}) => {
+  const session = await mongoose.startSession();
+
   try {
-    const currentOrder = await Order.findById(id);
+    session.startTransaction();
+
+    // Step 1️⃣ Fetch order & mark as processing
+    const currentOrder = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
+    );
+
     if (!currentOrder) {
-      return { success: false, message: "Order not found" };
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        message:
+          "Shipment cannot be created because order is already processed or not in 'new' status.",
+      };
     }
 
-    const users = await User.findById(currentOrder.userId);
-    if (!users) {
-      return { success: false, message: "User not found" };
+    // Step 2️⃣ Fetch user + wallet in parallel
+    const [users, currentPlan] = await Promise.all([
+      User.findById(currentOrder.userId).populate("Wallet").session(session),
+      plan.findOne({ userId: currentOrder.userId }).session(session),
+    ]);
+
+    if (!users || !users.Wallet) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return { success: false, message: "User or Wallet not found" };
     }
 
-    const currentWallet = await Wallet.findById(users.Wallet);
-    if (!currentWallet) {
-      return { success: false, message: "Wallet not found" };
+    const currentWallet = users.Wallet;
+
+    // Step 3️⃣ Fetch waybills & zone in parallel
+    const [waybills, zone] = await Promise.all([
+      fetchBulkWaybills(1),
+      getZone(
+        currentOrder.pickupAddress.pinCode,
+        currentOrder.receiverAddress.pinCode
+      ),
+    ]);
+
+    if (!waybills.length || !zone) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        message: !waybills.length
+          ? "No Waybill Available"
+          : "Pincode not serviceable",
+      };
     }
 
-    const waybills = await fetchBulkWaybills(1);
-    if (!waybills.length) {
-      return { success: false, message: "No Waybill Available" };
-    }
-
-    const warehouseCreationResult = await createClientWarehouse(currentOrder.pickupAddress);
+    // Step 4️⃣ Create warehouse
+    const warehouseCreationResult = await createClientWarehouse(
+      currentOrder.pickupAddress
+    );
     if (!warehouseCreationResult.success) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return {
         success: false,
         message: "Failed to create or fetch pickup warehouse",
@@ -39,14 +92,39 @@ const createDelhiveryShipment = async ({ id, provider, finalCharges, courierServ
       };
     }
 
-    const zone = await getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode);
-    if (!zone) {
-      return { success: false, message: "Pincode not serviceable" };
+    // Step 5️⃣ Fetch estimated delivery date from DB
+    const eddData = await estimatedDeliveryDate.findOne({
+      courier: "Delhivery",
+      serviceName: courierServiceName.trim(),
+    });
+
+    let estimateDate = null;
+    if (eddData) {
+      let deliveryDays = null;
+      if (
+        eddData.zoneRates &&
+        typeof eddData.zoneRates[zone.zone] === "number"
+      ) {
+        deliveryDays = eddData.zoneRates[zone.zone];
+      } else if (typeof eddData[zone.zone] === "number") {
+        deliveryDays = eddData[zone.zone];
+      }
+      if (deliveryDays) {
+        estimateDate = new Date();
+        estimateDate.setDate(estimateDate.getDate() + deliveryDays);
+      }
     }
 
-    const pickupWarehouseName = warehouseCreationResult.data?.name || currentOrder.pickupAddress.contactName;
+    // Step 6️⃣ Prepare payload
+    const pickupWarehouseName =
+      warehouseCreationResult.data?.name ||
+      currentOrder.pickupAddress.contactName;
+    const payment_type =
+      currentOrder.paymentDetails.method === "COD" ? "COD" : "Pre-paid";
 
-    const payment_type = currentOrder.paymentDetails.method === "COD" ? "COD" : "Pre-paid";
+    const addressLine =
+      currentOrder.receiverAddress.address?.substring(0, 160) ||
+      "Default Warehouse";
 
     const payloadData = {
       pickup_location: {
@@ -60,85 +138,132 @@ const createDelhiveryShipment = async ({ id, provider, finalCharges, courierServ
           pin: currentOrder.receiverAddress.pinCode,
           state: currentOrder.receiverAddress.state,
           order: currentOrder.orderId,
-          add: currentOrder.receiverAddress.address || "Default Warehouse",
+          add: addressLine,
           payment_mode: payment_type,
-          quantity: currentOrder.productDetails.reduce((sum, product) => sum + product.quantity, 0).toString(),
+          shipping_mode: "Surface",
+          quantity: currentOrder.productDetails
+            .reduce((sum, p) => sum + p.quantity, 0)
+            .toString(),
           phone: currentOrder.receiverAddress.phoneNumber,
-          products_desc: currentOrder.productDetails.map(product => product.name).join(", "),
+          products_desc: currentOrder.productDetails
+            .map((p) => p.name)
+            .join(", "),
           total_amount: currentOrder.paymentDetails.amount,
           name: currentOrder.receiverAddress.contactName || "Default Warehouse",
           weight: currentOrder.packageDetails.applicableWeight * 1000,
           shipment_height: currentOrder.packageDetails.volumetricWeight.height,
           shipment_width: currentOrder.packageDetails.volumetricWeight.width,
           shipment_length: currentOrder.packageDetails.volumetricWeight.length,
-          cod_amount: payment_type === "COD" ? `${currentOrder.paymentDetails.amount}` : "0",
+          cod_amount:
+            payment_type === "COD"
+              ? `${currentOrder.paymentDetails.amount}`
+              : "0",
         },
       ],
     };
 
-    const payload = `format=json&data=${encodeURIComponent(JSON.stringify(payloadData))}`;
+    const payload = `format=json&data=${encodeURIComponent(
+      JSON.stringify(payloadData)
+    )}`;
 
-    const walletHoldAmount = currentWallet?.holdAmount || 0;
+    // Step 7️⃣ Wallet check
+    const walletHoldAmount = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
+    const balanceToBeDeducted =
+      finalCharges === "N/A" ? 0 : parseInt(finalCharges);
 
-    if (effectiveBalance < finalCharges) {
+    if (currentWallet.balance < balanceToBeDeducted) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return { success: false, message: "Insufficient Wallet Balance" };
     }
 
+    // Step 8️⃣ Create shipment via API
     const response = await axios.post(`${url}/api/cmu/create.json`, payload, {
       headers: {
         Authorization: `Token ${API_TOKEN}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
+      timeout: 8000,
     });
 
-    if (response.data.success && response.data.packages.length) {
-      const result = response.data.packages[0];
-
-      currentOrder.status = "Ready To Ship";
-      currentOrder.cancelledAtStage = null;
-      currentOrder.awb_number = result.waybill;
-      currentOrder.shipment_id = `${result.refnum}`;
-      currentOrder.provider = provider;
-      currentOrder.totalFreightCharges = finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-      currentOrder.courierServiceName = courierServiceName;
-      currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.zone = zone.zone;
-      await currentOrder.save();
-
-      const balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-
-      await currentWallet.updateOne({
-        $inc: { balance: -balanceToBeDeducted },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId || null,
-            category: "debit",
-            amount: balanceToBeDeducted,
-            balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
-            date: new Date(),
-            awb_number: result.waybill || "",
-            description: `Freight Charges Applied`,
-          },
-        },
-      });
-
-      return {
-        success: true,
-        message: "Shipment Created Successfully",
-        awb_number:result.waybill,
-      };
-    } else {
+    const result = response.data?.packages?.[0];
+    if (!response.data.success || !result) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return {
         success: false,
         message: "Failed to create shipment",
         details: response.data,
       };
     }
+
+    // Step 9️⃣ Update Order & Wallet atomically
+    await Promise.all([
+      Order.findByIdAndUpdate(
+        id,
+        {
+          $set: {
+            status: "Booked",
+            cancelledAtStage: null,
+            awb_number: result.waybill,
+            shipment_id: result.refnum,
+            provider,
+            totalFreightCharges: balanceToBeDeducted,
+            courierServiceName,
+            shipmentCreatedAt: new Date(),
+            zone: zone.zone,
+            estimatedDeliveryDate: estimateDate,
+          },
+          $push: {
+            tracking: {
+              status: "Booked",
+              StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+              StatusDateTime: new Date(),
+              Instructions: "Order booked successfully",
+            },
+          },
+        },
+        { session }
+      ),
+      currentWallet.updateOne(
+        {
+          $inc: { balance: -balanceToBeDeducted },
+          $push: {
+            transactions: {
+              channelOrderId: currentOrder.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+              date: new Date(),
+              awb_number: result.waybill || "",
+              description: "Freight Charges Applied",
+            },
+          },
+        },
+        { session }
+      ),
+    ]);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return {
+      success: true,
+      message: "Shipment Created Successfully",
+      awb_number: result.waybill,
+      orderId: currentOrder.orderId,
+      estimatedDeliveryDate: estimateDate,
+    };
   } catch (error) {
+    await Order.findByIdAndUpdate(id, { status: "new" });
+    await session.abortTransaction();
+    session.endSession();
     return {
       success: false,
-      message: "Failed to create order.",
+      message: "Error creating shipment",
       error: error.message,
     };
   }

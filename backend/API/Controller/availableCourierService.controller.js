@@ -18,14 +18,20 @@ const {
 const {
   checkAmazonServiceability,
 } = require("../../AllCouriers/Amazon/Courier/couriers.controller.js");
+const {
+  checkServiceabilityShreeMaruti,
+} = require("../../AllCouriers/ShreeMaruti/Couriers/couriers.controller.js");
+const { checkZipypostServiceability } = require("../../AllCouriers/Zipypost/Couriers/couriers.controller.js");
 
 // Define courier IDs for each provider
 const courierIds = {
   EcomExpress: "01",
   Delhivery: "02",
-  DTDC: "03",
+  Dtdc: "03",
   Smartship: "04",
-  Amazon: "05",
+  "Amazon Shipping": "05",
+  "Shree Maruti": "06",
+  ZipyPost: "07",
 };
 
 // Input Validation Schema
@@ -98,7 +104,7 @@ const availableCourierService = async (req, res) => {
 
       let serviceable = false;
 
-      if (provider === "Amazon") {
+      if (provider === "Amazon Shipping") {
         const weight = order.packageDetails?.applicableWeight * 1000;
 
         const payload = {
@@ -132,7 +138,7 @@ const availableCourierService = async (req, res) => {
           deliveryPincode,
           order_type
         );
-      } else if (provider === "DTDC") {
+      } else if (provider === "Dtdc") {
         serviceable = await checkServiceabilityDTDC(
           pickUpPincode,
           deliveryPincode
@@ -145,6 +151,26 @@ const availableCourierService = async (req, res) => {
           order_value: declaredValue,
         };
         serviceable = await checkSmartshipHubServiceability(payload);
+      } else if (provider === "Shree Maruti") {
+        const payload = {
+          fromPincode: parseInt(pickUpPincode),
+          toPincode: parseInt(deliveryPincode),
+          isCodOrder: order.paymentDetails.method === "COD" ? true : false,
+          deliveryMode: "SURFACE",
+        };
+        serviceable = await checkServiceabilityShreeMaruti(payload);
+      } else if (provider === "ZipyPost") {
+        const payload = {
+          source_pincode: pickUpPincode,
+          destination_pincode: deliveryPincode,
+          payment_type: order.paymentDetails?.method,
+          order_weight: order.packageDetails?.applicableWeight * 1000,
+          length: order.packageDetails.volumetricWeight?.length || 0,
+          breadth: order.packageDetails.volumetricWeight?.width || 0,
+          height: order.packageDetails.volumetricWeight?.height || 0,
+          order_value: order.paymentDetails?.amount || 0,
+        };
+        serviceable=await checkZipypostServiceability(payload);
       }
 
       if (!serviceable || serviceable.success === false) continue;

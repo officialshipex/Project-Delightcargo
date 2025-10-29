@@ -158,7 +158,8 @@ const createZipypostOrder = async (req, res) => {
 
     const timestamp = Math.floor(Date.now() / 1000);
     const sellerId = process.env.ZIPYPOST_SELLER_ID;
-    const token = await getCachedAuthToken();
+    const token = await getAuthToken();
+    console.log("token", token);
 
     // ✅ Serviceability check
     const payload = {
@@ -236,7 +237,7 @@ const createZipypostOrder = async (req, res) => {
         currentOrder.userId,
         warehouseData,
         token.authToken,
-        timestamp,
+        token.timestamp,
         sellerId
       );
 
@@ -264,8 +265,16 @@ const createZipypostOrder = async (req, res) => {
           : "",
         customer_email:
           currentOrder.receiverAddress.email || "example@email.com",
-        address_line_one: currentOrder.receiverAddress.address,
-        address_line_two: currentOrder.receiverAddress.address,
+        address_line_one:
+          currentOrder.receiverAddress.address?.length > 104
+            ? currentOrder.receiverAddress.address.slice(0, 104)
+            : currentOrder.receiverAddress.address,
+
+        address_line_two:
+          currentOrder.receiverAddress.address?.length > 104
+            ? currentOrder.receiverAddress.address.slice(0, 104)
+            : currentOrder.receiverAddress.address,
+
         pincode: currentOrder.receiverAddress.pinCode,
         city: currentOrder.receiverAddress.city,
       },
@@ -300,7 +309,7 @@ const createZipypostOrder = async (req, res) => {
       mode_id,
     };
 
-    console.log("request body",requestBody)
+    console.log("request body", requestBody);
 
     // ✅ Call Zipypost API
     const response = await axios.post(
@@ -310,7 +319,7 @@ const createZipypostOrder = async (req, res) => {
         headers: {
           "Content-Type": "application/json",
           authorization: token.authToken,
-          timestamp,
+          timestamp: token.timestamp,
           sellerid: sellerId,
         },
       }
@@ -382,7 +391,9 @@ const createZipypostOrder = async (req, res) => {
     );
     return res.status(500).json({
       success: false,
-      message: error?.response?.data?.error?.booking_process_error || "Failed to create shipment",
+      message:
+        error?.response?.data?.error?.booking_process_error ||
+        "Failed to create shipment",
     });
   }
 };
@@ -399,7 +410,7 @@ const checkZipypostServiceability = async (payload) => {
       height: payload.height || 5,
       weight: payload.order_weight || 0.5,
     };
-    const timestamp = Math.floor(Date.now() / 1000);
+    // const timestamp = Math.floor(Date.now() / 1000);
     const sellerId = process.env.ZIPYPOST_SELLER_ID;
     const token = await getAuthToken();
     // console.log("token", token);
@@ -410,7 +421,7 @@ const checkZipypostServiceability = async (payload) => {
         headers: {
           "Content-Type": "application/json",
           authorization: token.authToken,
-          timestamp: timestamp,
+          timestamp: token.timestamp,
           sellerid: sellerId,
         },
       }
@@ -467,7 +478,7 @@ const cancelOrderZipypost = async (AWBNo) => {
       {
         headers: {
           authorization: token.authToken,
-          timestamp: timestamp,
+          timestamp: token.timestamp,
           sellerid: sellerId,
         },
       }
@@ -507,7 +518,7 @@ const cancelOrderZipypost = async (AWBNo) => {
 
 const trackOrderZipypost = async (AWBNo) => {
   const token = await getAuthToken();
-  const timestamp = Math.floor(Date.now() / 1000);
+  // const timestamp = Math.floor(Date.now() / 1000);
   const sellerId = process.env.ZIPYPOST_SELLER_ID;
   // console.log(access_key);
 
@@ -517,7 +528,7 @@ const trackOrderZipypost = async (AWBNo) => {
       {
         headers: {
           authorization: token.authToken,
-          timestamp: timestamp,
+          timestamp: token.timestamp,
           sellerid: sellerId,
         },
       }
@@ -549,4 +560,5 @@ module.exports = {
   checkZipypostServiceability,
   cancelOrderZipypost,
   trackOrderZipypost,
+  getCachedZone
 };

@@ -6,6 +6,8 @@ const { getZone } = require("../../Rate/zoneManagementController");
 const DTDC_API_URL = process.env.DTDC_API_URL;
 const API_KEY = process.env.DTDC_API_KEY;
 const X_ACCESS_TOKEN = process.env.DTDC_X_ACCESS_TOKEN;
+const estimatedDeliveryDate = require("../../models/EDDMap.model");
+const mongoose = require("mongoose");
 
 /**
  * Create shipment order with given parameters
@@ -27,6 +29,8 @@ const createDTDCShipment = async ({
   courierServiceName,
   courier,
 }) => {
+  const session = await mongoose.startSession();
+
   try {
     if (!courier) {
       return {
@@ -35,32 +39,92 @@ const createDTDCShipment = async ({
       };
     }
 
-    const currentOrder = await Order.findById(id);
-    if (!currentOrder) {
-      return { success: false, message: "Order not found" };
-    }
+    session.startTransaction();
 
-    const zone = await getZone(
-      currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode
+    // --- Lock and fetch order atomically ---
+    const currentOrder = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
     );
 
+    if (!currentOrder) {
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        message:
+          "Shipment cannot be created because order is already processed or not in 'new' status.",
+      };
+    }
+
+    // --- Fetch zone & user ---
+    const [zone, user] = await Promise.all([
+      getZone(
+        currentOrder.pickupAddress.pinCode,
+        currentOrder.receiverAddress.pinCode
+      ),
+      User.findById(currentOrder.userId).session(session),
+    ]);
+
     if (!zone) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return { success: false, message: "Pincode not serviceable" };
     }
 
-    const user = await User.findById(currentOrder.userId);
     if (!user) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return { success: false, message: "User not found" };
     }
 
-    const currentWallet = await Wallet.findById(user.Wallet);
+    // Step 5️⃣ Fetch estimated delivery date from DB
+    const eddData = await estimatedDeliveryDate.findOne({
+      courier: "Dtdc",
+      serviceName: courierServiceName.trim(),
+    });
+
+    let estimateDate = null;
+    if (eddData) {
+      let deliveryDays = null;
+      if (
+        eddData.zoneRates &&
+        typeof eddData.zoneRates[zone.zone] === "number"
+      ) {
+        deliveryDays = eddData.zoneRates[zone.zone];
+      } else if (typeof eddData[zone.zone] === "number") {
+        deliveryDays = eddData[zone.zone];
+      }
+      if (deliveryDays) {
+        estimateDate = new Date();
+        estimateDate.setDate(estimateDate.getDate() + deliveryDays);
+      }
+    }
+
+    const currentWallet = await Wallet.findById(user.Wallet).session(session);
     if (!currentWallet) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return { success: false, message: "Wallet not found" };
     }
 
+    // --- Wallet balance check ---
+    const effectiveBalance =
+      currentWallet.balance - (currentWallet.holdAmount || 0);
+    if (currentWallet.balance < finalCharges) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return { success: false, message: "Insufficient Wallet Balance" };
+    }
+
+    // --- Prepare shipment payload ---
     const productNames = currentOrder.productDetails
-      .map((product) => product.name)
+      .map((p) => p.name)
       .join(", ");
 
     const codCollectionMode =
@@ -85,6 +149,7 @@ const createDTDCShipment = async ({
           weight: currentOrder.packageDetails.applicableWeight,
           declared_value: currentOrder.paymentDetails.amount,
           num_pieces: currentOrder.productDetails.length,
+
           origin_details: {
             name: currentOrder.pickupAddress.contactName,
             phone: currentOrder.pickupAddress.phoneNumber,
@@ -93,6 +158,7 @@ const createDTDCShipment = async ({
             city: currentOrder.pickupAddress.city,
             state: currentOrder.pickupAddress.state,
           },
+
           destination_details: {
             name: currentOrder.receiverAddress.contactName,
             phone: currentOrder.receiverAddress.phoneNumber,
@@ -101,91 +167,130 @@ const createDTDCShipment = async ({
             city: currentOrder.receiverAddress.city,
             state: currentOrder.receiverAddress.state,
           },
+
           customer_reference_number: currentOrder.orderId,
           cod_collection_mode: codCollectionMode,
           cod_amount: codAmount,
           ...(courierServiceName === "Dtdc Air" && {
-            commodity_id: "Others", // or use your commodity detection logic if available
+            commodity_id: "Others",
           }),
           reference_number: "",
         },
       ],
     };
 
-    // Check Wallet Balance
-    const walletHoldAmount = currentWallet?.holdAmount || 0;
-    const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    if (effectiveBalance < finalCharges) {
-      return { success: false, message: "Low Balance" };
-    }
-
-    // API call to DTDC
-    const response = await axios.post(
-      `${DTDC_API_URL}/customer/integration/consignment/softdata`,
-      shipmentData,
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "api-key": API_KEY,
-          Authorization: `Bearer ${X_ACCESS_TOKEN}`,
-        },
-      }
-    );
-
-    if (response?.data?.data?.[0]?.success) {
-      const result = response.data.data[0];
-
-      // Update Order
-      currentOrder.status = "Ready To Ship";
-      currentOrder.cancelledAtStage = null;
-      currentOrder.awb_number = result.reference_number;
-      currentOrder.shipment_id = `${result.customer_reference_number}`;
-      currentOrder.provider = provider;
-      currentOrder.totalFreightCharges =
-        finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-      currentOrder.courierServiceName = courierServiceName;
-      currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.zone = zone.zone;
-      await currentOrder.save();
-
-      const balanceToBeDeducted =
-        finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-
-      await Wallet.findOneAndUpdate(
-        { _id: user.Wallet, balance: { $gte: balanceToBeDeducted } },
+    // --- Call DTDC API ---
+    let response;
+    try {
+      response = await axios.post(
+        `${DTDC_API_URL}/customer/integration/consignment/softdata`,
+        shipmentData,
         {
-          $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId || null,
-              category: "debit",
-              amount: balanceToBeDeducted,
-              balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
-              date: new Date(),
-              awb_number: result.reference_number || "",
-              description: `Freight Charges Applied`,
-            },
+          headers: {
+            "Content-Type": "application/json",
+            "api-key": API_KEY,
+            Authorization: `Bearer ${X_ACCESS_TOKEN}`,
           },
         }
       );
-
-      return {
-        success: true,
-        message: "Shipment Created Successfully",
-        awb_number: result.reference_number,
-      };
-    } else {
+    } catch (err) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      console.error("❌ DTDC API failed:", err.response?.data || err.message);
       return {
         success: false,
-        message: "Failed to create shipment",
-        details: response.data,
+        message: err.response?.data?.message || "Shipment API failed",
+        error: err.response?.data || err.message,
       };
     }
+
+    const result = response?.data?.data?.[0];
+    if (!result?.success) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        message: result?.message || "Shipment failed",
+      };
+    }
+
+    // --- Update order ---
+    const balanceToBeDeducted = parseInt(finalCharges) || 0;
+    const estimatedDeliveryDate = currentOrder.estimatedDeliveryDate || "";
+
+    await Order.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: "Booked",
+          cancelledAtStage: null,
+          awb_number: result.reference_number,
+          shipment_id: result.customer_reference_number,
+          provider,
+          totalFreightCharges: balanceToBeDeducted,
+          courierServiceName,
+          shipmentCreatedAt: new Date(),
+          zone: zone.zone,
+          estimatedDeliveryDate:estimateDate || "",
+        },
+        $push: {
+          tracking: {
+            status: "Booked",
+            StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+            StatusDateTime: new Date(),
+            Instructions: "Order booked successfully",
+          },
+        },
+      },
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // --- Return success ---
+    return {
+      success: true,
+      message: "Shipment Created Successfully",
+      awb: result.reference_number,
+    };
+
+    // --- Wallet update in background ---
+    process.nextTick(async () => {
+      try {
+        await Wallet.findOneAndUpdate(
+          { _id: user.Wallet, balance: { $gte: balanceToBeDeducted } },
+          {
+            $inc: { balance: -balanceToBeDeducted },
+            $push: {
+              transactions: {
+                channelOrderId: currentOrder.orderId || null,
+                category: "debit",
+                amount: balanceToBeDeducted,
+                balanceAfterTransaction:
+                  currentWallet.balance - balanceToBeDeducted,
+                date: new Date(),
+                awb_number: result.reference_number || "",
+                description: "Freight Charges Applied",
+              },
+            },
+          }
+        );
+      } catch (err) {
+        console.error("Wallet update error:", err.message);
+      }
+    });
   } catch (error) {
+    await Order.findByIdAndUpdate(id, { status: "new" });
+    await session.abortTransaction();
+    session.endSession();
+    console.error("❌ Error creating DTDC shipment:", error.message);
     return {
       success: false,
       message: "Failed to create shipment",
-      error: error.response?.data || error.message || error.toString(),
+      error: error.message,
     };
   }
 };

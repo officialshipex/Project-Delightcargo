@@ -10,7 +10,7 @@ const Bottleneck = require("bottleneck");
 const cron = require("node-cron");
 const EDDMap = require("../models/EDDMap.model");
 const { getZone } = require("../Rate/zoneManagementController");
-
+const path = require("path");
 const { codToBeRemitted } = require("../COD/cod.controller");
 const {
   cancelShipmentforward,
@@ -1083,11 +1083,13 @@ const getreceiverAddress = async (req, res) => {
 const ShipeNowOrder = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
+    // console.log("order", order);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
 
     const plan = await Plan.findOne({ userId: order.userId });
+    // console.log("plan", plan);
     const users = await user.findOne({ _id: order.userId });
     const userWallet = await Wallet.findOne({ _id: users.Wallet });
 
@@ -1150,7 +1152,7 @@ const ShipeNowOrder = async (req, res) => {
       weight: order.packageDetails.applicableWeight,
       cod: order.paymentDetails.method === "COD" ? "Yes" : "No",
       valueInINR: order.paymentDetails.amount,
-      userID: req.user._id,
+      userID: order.userId,
       filteredServices,
       rateCardType: plan.planName,
     };
@@ -1243,27 +1245,45 @@ const ShipeNowOrder = async (req, res) => {
 };
 
 const pincodeData = [];
-
-fs.createReadStream("data/pincodes.csv")
-  .pipe(csv())
+fs.createReadStream(path.join(__dirname, "../data/pincodes.csv"))
+  .pipe(csv({ separator: "\t" })) // <-- Important fix
   .on("data", (row) => {
-    pincodeData.push(row);
-    // console.log(row)
+    if (row.pincode && row.city && row.state) {
+      pincodeData.push({
+        pincode: row.pincode.trim(),
+        city: row.city.trim(),
+        state: row.state.trim(),
+      });
+    } else {
+      console.log("Invalid CSV row:", row);
+    }
   })
   .on("end", () => {
-    console.log("CSV file successfully loaded.");
+    console.log("✅ CSV file successfully loaded. Total:", pincodeData.length);
+  })
+  .on("error", (err) => {
+    console.error("❌ Error reading CSV file:", err);
   });
 
+// ✅ API Controller
 const getPinCodeDetails = async (req, res) => {
-  const { pincode } = req.params;
-  // console.log(pincode);
-  const foundEntry = pincodeData.find((entry) => entry.pincode === pincode);
-  // console.log(pincodeData)
+  try {
+    const { pincode } = req.params;
+    const foundEntry = pincodeData.find(
+      (entry) => entry.pincode === pincode.trim()
+    );
 
-  if (foundEntry) {
-    res.json({ city: foundEntry.city, state: foundEntry.state });
-  } else {
-    res.status(404).json({ error: "Pincode not found" });
+    if (foundEntry) {
+      res.json({
+        city: foundEntry.city,
+        state: foundEntry.state,
+      });
+    } else {
+      res.status(404).json({ error: "Pincode not found" });
+    }
+  } catch (error) {
+    console.error("❌ Error fetching pincode:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -1676,7 +1696,6 @@ const bulkCancelOrder = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     const { selectedOrders } = req.body;
-    const userId = req.user._id;
 
     if (!Array.isArray(selectedOrders) || selectedOrders.length === 0) {
       return res.status(400).json({
@@ -1692,30 +1711,11 @@ const bulkCancelOrder = async (req, res) => {
         .status(404)
         .json({ success: false, message: "No matching orders found." });
 
-    // Fetch user and wallet
-    const userDoc = await user.findById(userId);
-    if (!userDoc)
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found." });
-
-    const walletId = userDoc.Wallet;
-    if (!walletId)
-      return res
-        .status(404)
-        .json({ success: false, message: "User wallet not found." });
-
-    const walletDoc = await Wallet.findById(walletId);
-    if (!walletDoc)
-      return res
-        .status(404)
-        .json({ success: false, message: "Wallet not found." });
-
     let successCount = 0;
     let failedCount = 0;
     const results = [];
 
-    // Loop through each order separately to ensure isolated transactions
+    // Loop through each order separately
     for (const currentOrder of orders) {
       const orderSession = await mongoose.startSession();
       orderSession.startTransaction();
@@ -1737,7 +1737,50 @@ const bulkCancelOrder = async (req, res) => {
           continue;
         }
 
-        // ✅ Determine provider (special case for ZipyPost)
+        // ✅ Take userId from order itself
+        const userId = currentOrder.userId;
+
+        // --- Fetch user and wallet based on order’s userId ---
+        const userDoc = await user.findById(userId);
+        if (!userDoc) {
+          failedCount++;
+          results.push({
+            orderId: currentOrder._id,
+            status: "failed",
+            reason: "User not found for this order.",
+          });
+          await orderSession.abortTransaction();
+          orderSession.endSession();
+          continue;
+        }
+
+        const walletId = userDoc.Wallet;
+        if (!walletId) {
+          failedCount++;
+          results.push({
+            orderId: currentOrder._id,
+            status: "failed",
+            reason: "User wallet not found.",
+          });
+          await orderSession.abortTransaction();
+          orderSession.endSession();
+          continue;
+        }
+
+        const walletDoc = await Wallet.findById(walletId);
+        if (!walletDoc) {
+          failedCount++;
+          results.push({
+            orderId: currentOrder._id,
+            status: "failed",
+            reason: "Wallet document not found.",
+          });
+          await orderSession.abortTransaction();
+          orderSession.endSession();
+          continue;
+        }
+
+        // ✅ Determine provider
         const provider =
           currentOrder.partner === "ZipyPost"
             ? "ZipyPost"

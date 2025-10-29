@@ -9,7 +9,8 @@ const {
 const {
   getAccessToken,
 } = require("../../AllCouriers/SmartShip/Authorize/smartShip.controller");
-
+const mongoose = require("mongoose");
+const estimatedDeliveryDate = require("../../models/EDDMap.model");
 /**
  * Registers order shipment in one step with Smartship
  *
@@ -26,56 +27,108 @@ const createSmartshipShipment = async ({
   courierServiceName,
   provider,
 }) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-      return { success: false, message: "Access token missing" };
-    }
-
-    const currentOrder = await Order.findById(id);
-    if (!currentOrder) {
-      return { success: false, message: "Order not found" };
-    }
-
-    const zone = await getZone(
-      currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode
+    // 1️⃣ Fetch and lock the order for processing
+    const currentOrder = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
     );
+
+    if (!currentOrder) {
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        message:
+          "Shipment already created or order is being processed by another request.",
+      };
+    }
+
+    // 2️⃣ Parallel fetch (zone, user, token)
+    const [zone, user, accessToken] = await Promise.all([
+      getZone(
+        currentOrder.pickupAddress.pinCode,
+        currentOrder.receiverAddress.pinCode
+      ),
+      User.findById(currentOrder.userId),
+      getAccessToken(),
+    ]);
+
     if (!zone) {
+      await session.abortTransaction();
+      session.endSession();
       return { success: false, message: "Pincode not serviceable" };
     }
 
-    const user = await User.findById(currentOrder.userId);
     if (!user) {
+      await session.abortTransaction();
+      session.endSession();
       return { success: false, message: "User not found" };
     }
 
+    // ✅ Estimate Delivery Date (from DB)
+    const eddData = await estimatedDeliveryDate.findOne({
+      courier: "Smartship",
+      serviceName: courierServiceName.trim(),
+    });
+
+    let estimateDate = null;
+    if (eddData) {
+      let deliveryDays = null;
+      if (
+        eddData.zoneRates &&
+        typeof eddData.zoneRates[zone.zone] === "number"
+      ) {
+        deliveryDays = eddData.zoneRates[zone.zone];
+      } else if (typeof eddData[zone.zone] === "number") {
+        deliveryDays = eddData[zone.zone];
+      }
+
+      if (deliveryDays) {
+        estimateDate = new Date();
+        estimateDate.setDate(estimateDate.getDate() + deliveryDays);
+      }
+    }
+
+    const currentWallet = await Wallet.findById(user.Wallet).session(session);
+    if (!currentWallet) {
+      await session.abortTransaction();
+      session.endSession();
+      return { success: false, message: "Wallet not found" };
+    }
+
+    // 3️⃣ Check wallet balance
+    const effectiveBalance =
+      currentWallet.balance - (currentWallet.holdAmount || 0);
+    if (currentWallet.balance < finalCharges) {
+      await session.abortTransaction();
+      session.endSession();
+      return { success: false, message: "Insufficient Wallet Balance" };
+    }
+
+    // 4️⃣ Register Smartship hub
     const smartshipHub = await registerSmartshipHub(
       user._id,
       currentOrder.pickupAddress.pinCode
     );
 
-    const currentWallet = await Wallet.findById(user.Wallet);
-    if (!currentWallet) {
-      return { success: false, message: "Wallet not found" };
+    if (smartshipHub?.success === false) {
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        message:
+          "Pickup pincode not registered. Please add a pickup address first.",
+      };
     }
 
-    const effectiveBalance =
-      currentWallet.balance - (currentWallet.holdAmount || 0);
-
-    if (effectiveBalance < finalCharges) {
-      return { success: false, message: "Insufficient wallet balance" };
-    }
-
-    const productNames = currentOrder.productDetails
-      .map((p) => p.name)
-      .join(", ");
-
+    // 5️⃣ Prepare Smartship payload
     const payload = {
-      request_info: {
-        client_id: "", // Optional
-        run_type: "create",
-      },
+      request_info: { run_type: "create" },
       orders: [
         {
           client_order_reference_id: currentOrder.orderId,
@@ -96,22 +149,19 @@ const createSmartshipShipment = async ({
           package_order_width:
             currentOrder.packageDetails.volumetricWeight.width.toString(),
           shipper_hub_id: smartshipHub.hubId || "",
-          shipper_gst_no: "",
           order_invoice_date: new Date().toISOString().slice(0, 10),
           order_invoice_number: `INV-${currentOrder.orderId}-${Date.now()}`,
           is_return_qc: "0",
           return_reason_id: "0",
-          order_meta: {
-            preferred_carriers: [279], // use given courier
-          },
-          product_details: currentOrder.productDetails.map((product) => ({
-            client_product_reference_id: product._id.toString(),
-            product_name: product.name,
-            product_category: product.category || "General",
-            product_hsn_code: product.hsn || "0000",
-            product_quantity: product.quantity || 1,
-            product_gst_tax_rate: product.gst || "0",
-            product_invoice_value: product.unitPrice.toString(),
+          order_meta: { preferred_carriers: [279] }, // Modify carrier ID if needed
+          product_details: currentOrder.productDetails.map((p) => ({
+            client_product_reference_id: p._id.toString(),
+            product_name: p.name,
+            product_category: p.category || "General",
+            product_hsn_code: p.hsn || "0000",
+            product_quantity: p.quantity || 1,
+            product_gst_tax_rate: p.gst || "0",
+            product_invoice_value: p.unitPrice.toString(),
           })),
           consignee_details: {
             consignee_name: currentOrder.receiverAddress.contactName,
@@ -125,6 +175,7 @@ const createSmartshipShipment = async ({
       ],
     };
 
+    // 6️⃣ Call Smartship API
     const response = await axios.post(
       "https://api.smartship.in/v2/app/Fulfillmentservice/orderRegistrationOneStep",
       payload,
@@ -136,78 +187,96 @@ const createSmartshipShipment = async ({
       }
     );
 
-    if (response.data.data.errors) {
-      console.error("Smartship API errors:", response.data.data.errors);
-      return {
-        success: false,
-        message: "Error creating Shipment",
-      };
-    }
-
     const respData = response.data?.data;
 
+    if (respData?.errors) {
+      throw new Error("Smartship returned validation errors");
+    }
+
     if (
-      (!respData?.success_order_details ||
-        !respData.success_order_details.orders ||
-        respData.success_order_details.orders.length === 0) &&
+      !respData?.success_order_details?.orders?.length &&
       respData?.duplicate_orders
     ) {
-      console.error("Duplicate orders found:", respData.duplicate_orders);
-      return {
-        success: false,
-        message:
-          "Duplicate orderId is not allowed in courier Bluedart, ship with another courier",
-        errors: respData.errors,
-        duplicate_orders: respData.duplicate_orders,
-      };
+      throw new Error(
+        "Duplicate orderId not allowed for this courier. Try a different courier."
+      );
     }
 
     const result = respData?.success_order_details?.orders?.[0];
+    if (!result?.awb_number) throw new Error("AWB not received from Smartship");
 
-    if (result?.awb_number) {
-      currentOrder.status = "Ready To Ship";
-      currentOrder.awb_number = result.awb_number;
-      currentOrder.shipment_id = result.request_order_id || "";
-      currentOrder.provider = provider;
-      currentOrder.totalFreightCharges = parseInt(finalCharges);
-      currentOrder.courierServiceName = courierServiceName;
-      currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.zone = zone.zone;
-      await currentOrder.save();
+    // 7️⃣ Update order and wallet in transaction
+    await Order.updateOne(
+      { _id: currentOrder._id },
+      {
+        $set: {
+          status: "Booked",
+          awb_number: result.awb_number,
+          shipment_id: result.request_order_id || "",
+          provider,
+          totalFreightCharges: parseInt(finalCharges),
+          courierServiceName,
+          shipmentCreatedAt: new Date(),
+          zone: zone.zone,
+          estimatedDeliveryDate: estimateDate, // ✅ from DB
+        },
+        $push: {
+          tracking: {
+            status: "Booked",
+            StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+            StatusDateTime: new Date(),
+            Instructions: "Order booked successfully",
+          },
+        },
+      },
+      { session }
+    );
 
-      await currentWallet.updateOne({
+    await Wallet.updateOne(
+      { _id: currentWallet._id },
+      {
         $inc: { balance: -parseInt(finalCharges) },
         $push: {
           transactions: {
             channelOrderId: currentOrder.orderId,
             category: "debit",
             amount: parseInt(finalCharges),
-            balanceAfterTransaction: effectiveBalance - parseInt(finalCharges),
+            balanceAfterTransaction: currentWallet.balance - parseInt(finalCharges),
             date: new Date(),
             awb_number: result.awb_number,
             description: `Freight Charges Applied`,
           },
         },
-      });
+      },
+      { session }
+    );
 
-      return {
-        success: true,
-        message: "Shipment Created Successfully",
-        awb_number: respData?.success_order_details?.orders?.[0].awb_number,
-      };
-    }
-    console.error("Shipment creation failed:", respData);
+    await session.commitTransaction();
+    session.endSession();
+
     return {
-      success: false,
-      message: "Failed to create shipment",
-      details: response.data,
+      success: true,
+      message: "Shipment Created Successfully",
+      awb_number: result.awb_number,
     };
   } catch (error) {
-    console.error("Error creating Smartship shipment:", error);
+    console.error("Smartship Shipment Error:", error.message);
+
+    await session.abortTransaction();
+    session.endSession();
+
+    // revert order status if locked
+    if (id) {
+      await Order.updateOne(
+        { _id: id, status: "processing" },
+        { $set: { status: "new" } }
+      );
+    }
+
     return {
       success: false,
-      message: "Failed to register order",
-      error: error?.response?.data || error.message || error.toString(),
+      message: "Failed to register Smartship order",
+      error: error?.response?.data || error.message,
     };
   }
 };

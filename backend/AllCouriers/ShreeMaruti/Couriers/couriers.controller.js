@@ -16,7 +16,7 @@ const BASE_URL = process.env.SHREEMA_PRODUCTION_URL;
 const getCourierList = async (req, res) => {
   try {
     const currCourier = await Courier.findOne({
-      provider: "ShreeMaruti",
+      provider: "Shree Maruti",
     }).populate("services");
     const servicesData = currCourier.services;
 
