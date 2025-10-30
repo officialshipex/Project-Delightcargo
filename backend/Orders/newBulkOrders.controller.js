@@ -420,8 +420,15 @@ const createBulkOrder = async (req, res) => {
             const rates = await calculateRateForServiceBulk(details);
             // console.log("courier",courier)
             const charges = parseFloat(rates?.[0]?.forward?.finalCharges || 0);
-            if (!charges) throw new Error("Invalid charges");
+            // ✅ Skip if charges invalid, NaN, or 0
+            if (!charges || isNaN(charges) || charges <= 0) {
+              console.warn(
+                `⚠️ Skipping order ${orderId}: Invalid or zero charges for courier ${courier.courierServiceName}`
+              );
+              continue;
+            }
             // console.log("charges", charges);
+
             const courierDetails = {
               provider: courier.courierProviderName,
               name: courier.courierServiceName,

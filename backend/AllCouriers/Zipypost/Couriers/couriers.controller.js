@@ -146,20 +146,30 @@ const createZipypostOrder = async (req, res) => {
     // ✅ Check balance with safety margin
     const hold = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - hold;
-    if (currentWallet.balance < finalCharges)
-      throw new Error("Insufficient Wallet Balance");
+    if (currentWallet.balance < finalCharges){
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient Wallet Balance",
+      });
+    }
+      
 
     // ✅ Cached zone lookup (saves ~200–400ms)
     const zone = await getCachedZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
     );
-    if (!zone) throw new Error("Pincode not serviceable");
+    if (!zone) {
+      return res.status(400).json({
+        success: false,
+        message: "Pincode not serviceable",
+      });
+    };
 
     const timestamp = Math.floor(Date.now() / 1000);
     const sellerId = process.env.ZIPYPOST_SELLER_ID;
     const token = await getAuthToken();
-    console.log("token", token);
+    // console.log("token", token);
 
     // ✅ Serviceability check
     const payload = {
@@ -241,10 +251,13 @@ const createZipypostOrder = async (req, res) => {
         sellerId
       );
 
-      if (!whResult.success)
-        throw new Error(
-          "Pickup pincode not registered. Please add a pickup address first."
-        );
+      if (!whResult.success){
+        return res.status(400).json({
+          success: false,
+          message: "pickup address not registered first register pickup address",
+        });
+      }
+        
 
       warehouseCache.set(whKey, whResult.warehouseId);
       warehouseId = whResult.warehouseId;

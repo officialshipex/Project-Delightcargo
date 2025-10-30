@@ -313,7 +313,7 @@ const createOrder = async (req, res) => {
               channelOrderId: currentOrder.orderId || null,
               category: "debit",
               amount: balanceToBeDeducted,
-              balanceAfterTransaction: effectiveBalance - balanceToBeDeducted,
+              balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
               date: new Date(),
               awb_number: result.waybill || "",
               description: `Freight Charges Applied`,
