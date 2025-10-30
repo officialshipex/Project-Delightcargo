@@ -94,8 +94,25 @@ const orderCreationController = async (req, res) => {
       shipmentId
     } = value;
 
-    // Generate unique 6-digit orderId for channelId field
+    const userId = req.user?._id || "external";
 
+    // 🧩 Check if user exists and KYC is completed
+    const currentUser = await User.findById(userId);
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    if (!currentUser.kycDone ) {
+      return res.status(403).json({
+        success: false,
+        message: "KYC not completed. Please verify your KYC before creating an order.",
+      });
+    }
+
+    // Generate unique 6-digit orderId for channelId field
     let orderId;
     let isUnique = false;
     while (!isUnique) {
@@ -104,10 +121,9 @@ const orderCreationController = async (req, res) => {
       if (!exists) isUnique = true;
     }
 
-    const userId = req.user?._id || "external";
     const compositeOrderId = `${userId}-${orderId}`;
 
-    // Check if compositeOrderId already exists (unlikely but safe)
+    // Check if compositeOrderId already exists (extra safety)
     const existingOrder = await Order.findOne({ compositeOrderId });
     if (existingOrder) {
       return res.status(409).json({
@@ -116,7 +132,7 @@ const orderCreationController = async (req, res) => {
       });
     }
 
-    // Create and save shipment/order
+    // 🏗️ Create and save shipment/order
     const shipment = new Order({
       userId,
       orderId,
@@ -128,8 +144,7 @@ const orderCreationController = async (req, res) => {
       compositeOrderId,
       status: "new",
       channel: "api",
-      channelId: shipmentId, 
-      // commodityId,
+      channelId: shipmentId,
       tracking: [
         {
           status: "Created",
@@ -158,5 +173,6 @@ const orderCreationController = async (req, res) => {
     });
   }
 };
+
 
 module.exports = orderCreationController;

@@ -80,6 +80,13 @@ const bookOrder = async (req, res) => {
       });
     }
 
+    if(!user.kycDone ){
+      return res.status(403).json({
+        status: "failure",
+        message: "KYC not completed. Please verify your KYC before booking an order.",
+      });
+    }
+
     // ✅ Fetch wallet
     const wallet = await Wallet.findById(user.Wallet);
     if (!wallet) {
