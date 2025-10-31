@@ -218,7 +218,6 @@ const createDTDCShipment = async ({
 
     // --- Update order ---
     const balanceToBeDeducted = parseInt(finalCharges) || 0;
-    const estimatedDeliveryDate = currentOrder.estimatedDeliveryDate || "";
 
     await Order.findByIdAndUpdate(
       id,
@@ -233,7 +232,7 @@ const createDTDCShipment = async ({
           courierServiceName,
           shipmentCreatedAt: new Date(),
           zone: zone.zone,
-          estimatedDeliveryDate:estimateDate || "",
+          estimatedDeliveryDate: estimateDate || "",
         },
         $push: {
           tracking: {
@@ -250,38 +249,43 @@ const createDTDCShipment = async ({
     await session.commitTransaction();
     session.endSession();
 
+    try {
+      // --- Update wallet immediately ---
+      const updatedWallet = await Wallet.findOneAndUpdate(
+        { _id: user.Wallet, balance: { $gte: balanceToBeDeducted } },
+        {
+          $inc: { balance: -balanceToBeDeducted },
+          $push: {
+            transactions: {
+              channelOrderId: currentOrder.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction:
+                currentWallet.balance - balanceToBeDeducted,
+              date: new Date(),
+              awb_number: result.reference_number || "",
+              description: "Freight Charges Applied",
+            },
+          },
+        },
+        { new: true }
+      );
+
+      if (!updatedWallet) {
+        console.warn(
+          "⚠️ Wallet not updated — insufficient balance or invalid ID"
+        );
+      }
+    } catch (err) {
+      console.error("Wallet update error:", err.message);
+    }
+
     // --- Return success ---
     return {
       success: true,
       message: "Shipment Created Successfully",
-      awb: result.reference_number,
+      awb_number: result.reference_number,
     };
-
-    // --- Wallet update in background ---
-    process.nextTick(async () => {
-      try {
-        await Wallet.findOneAndUpdate(
-          { _id: user.Wallet, balance: { $gte: balanceToBeDeducted } },
-          {
-            $inc: { balance: -balanceToBeDeducted },
-            $push: {
-              transactions: {
-                channelOrderId: currentOrder.orderId || null,
-                category: "debit",
-                amount: balanceToBeDeducted,
-                balanceAfterTransaction:
-                  currentWallet.balance - balanceToBeDeducted,
-                date: new Date(),
-                awb_number: result.reference_number || "",
-                description: "Freight Charges Applied",
-              },
-            },
-          }
-        );
-      } catch (err) {
-        console.error("Wallet update error:", err.message);
-      }
-    });
   } catch (error) {
     await Order.findByIdAndUpdate(id, { status: "new" });
     await session.abortTransaction();

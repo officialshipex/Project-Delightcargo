@@ -17,6 +17,7 @@ const {
 const {
   checkAmazonServiceability,
 } = require("../../AllCouriers/Amazon/Courier/couriers.controller.js");
+const {checkServiceabilityShreeMaruti} = require("../../AllCouriers/ShreeMaruti/Couriers/couriers.controller.js");
 
 // Input Validation Schema
 const serviceabilitySchema = Joi.object({
@@ -29,9 +30,7 @@ const serviceabilitySchema = Joi.object({
     .required()
     .pattern(/^\d{6}$/),
   applicableWeight: Joi.number().positive().max(100).required(),
-  paymentType: Joi.string()
-    .valid("COD", "Prepaid")
-    .required(),
+  paymentType: Joi.string().valid("COD", "Prepaid").required(),
   declaredValue: Joi.number().positive().allow(0).required(),
 });
 
@@ -81,7 +80,7 @@ const pincodeServiceability = async (req, res) => {
         },
       },
       {
-        name: "DTDC",
+        name: "Dtdc",
         check: async () =>
           await checkServiceabilityDTDC(pickUpPincode, deliveryPincode),
       },
@@ -96,7 +95,7 @@ const pincodeServiceability = async (req, res) => {
           }),
       },
       {
-        name: "Amazon",
+        name: "Amazon Shipping",
         check: async () =>
           await checkAmazonServiceability({
             pickUpPincode,
@@ -105,6 +104,34 @@ const pincodeServiceability = async (req, res) => {
             declaredValue,
           }),
       },
+      {
+        name: "Shree Maruti",
+        check: async () => {
+          const payload = {
+            fromPincode: parseInt(pickUpPincode),
+            toPincode: parseInt(deliveryPincode),
+            isCodOrder: paymentType === "COD" ? true : false,
+            deliveryMode: "SURFACE",
+          };
+          return await checkServiceabilityShreeMaruti(payload);
+        },
+      },
+      {
+        name: "ZipyPost",
+        check: async () => {
+          const payload = {
+            source_pincode: pickUpPincode,
+            destination_pincode: deliveryPincode,
+            payment_type: paymentType,
+            order_weight: applicableWeight * 1000,
+            length: 10,
+            breadth: 10,
+            height: 10,
+            order_value: declaredValue,
+          };
+          return await checkServiceabilityZipyPost(payload);
+        }
+      }
     ];
 
     // Sequential check; stop at first serviceable
@@ -143,4 +170,4 @@ const pincodeServiceability = async (req, res) => {
   }
 };
 
-module.exports = pincodeServiceability
+module.exports = pincodeServiceability;

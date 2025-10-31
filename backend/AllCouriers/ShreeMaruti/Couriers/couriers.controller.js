@@ -293,7 +293,7 @@ const createOrder = async (req, res) => {
               amount: balanceToBeDeducted,
               balanceAfterTransaction:
                 currentWallet.balance - balanceToBeDeducted,
-              date: new Date().toISOString().slice(0, 16).replace("T", " "),
+              date: new Date(),
               awb_number: result.awbNumber || "",
               description: `Freight Charges Applied`,
             },
@@ -373,10 +373,10 @@ const cancelOrderShreeMaruti = async (order_Id) => {
     console.log("Response:", response);
 
     if (response.status === 200) {
-      await Order.updateOne(
-        { orderId: order_Id },
-        { $set: { status: "Cancelled" } }
-      );
+      // await Order.updateOne(
+      //   { orderId: order_Id },
+      //   { $set: { status: "Cancelled" } }
+      // );
       // Correct status check
       return {
         success: true,

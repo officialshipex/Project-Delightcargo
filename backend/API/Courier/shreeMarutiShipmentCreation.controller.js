@@ -188,7 +188,7 @@ const createShreeMarutiShipment = async ({
     if (response.status === 200) {
       const result = response.data.data;
 
-      const estimatedDeliveryDate = currentOrder.estimatedDeliveryDate || null;
+      
       const balanceToBeDeducted = parseInt(finalCharges);
 
       currentOrder.status = "Booked";
@@ -220,7 +220,7 @@ const createShreeMarutiShipment = async ({
               amount: balanceToBeDeducted,
               balanceAfterTransaction:
                 currentWallet.balance - balanceToBeDeducted,
-              date: new Date().toISOString().slice(0, 16).replace("T", " "),
+              date: new Date(),
               awb_number: result.awbNumber || "",
               description: `Freight Charges Applied`,
             },
@@ -255,7 +255,7 @@ const createShreeMarutiShipment = async ({
       return {
         success: true,
         message: "Shipment & Manifest Created Successfully",
-        awb: result.awbNumber,
+        awb_number: result.awbNumber,
       };
     } else {
       await Order.findByIdAndUpdate(id, { status: "new" });

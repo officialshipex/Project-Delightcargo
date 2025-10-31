@@ -295,7 +295,7 @@ const createZipypostShipment = async ({
     return {
       success: true,
       message: "Shipment Created Successfully",
-      data: result,
+      awb_number: result.awb,
     };
   } catch (error) {
     await session.abortTransaction();

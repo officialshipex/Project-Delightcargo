@@ -639,10 +639,10 @@ const cancelOrderDelhivery = async (awb_number) => {
     console.log("cancel", response.data);
 
     if (response?.data?.status) {
-      await Order.updateOne(
-        { awb_number: awb_number },
-        { $set: { status: "Cancelled" } }
-      );
+      // await Order.updateOne(
+      //   { awb_number: awb_number },
+      //   { $set: { status: "Cancelled" } }
+      // );
       return { data: response.data, code: 201 };
     } else {
       return {

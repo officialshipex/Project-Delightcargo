@@ -209,6 +209,9 @@ const trackSingleOrder = async (order) => {
         if (dbMapping) {
           console.log("maped dtdc status",dbMapping.sy_status)
           order.status = dbMapping.sy_status;
+          if(order.status==="Cancelled" && order.tracking[order.tracking.length-1].status==="NONDLV"){
+            order.status="RTO";
+          }
           // Only set ndrStatus for actual NDR-related states
           if (
             ["Our for Delivery", "RTO", "Undelivered"].includes(

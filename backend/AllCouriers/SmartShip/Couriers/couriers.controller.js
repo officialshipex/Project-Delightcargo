@@ -444,10 +444,10 @@ const cancelSmartshipOrder = async (client_order_reference_id) => {
       response?.data?.data?.order_cancellation_details;
 
     if (cancellationDetails?.successful) {
-      await Order.updateOne(
-        { orderId: client_order_reference_id },
-        { $set: { status: "Cancelled" } }
-      );
+      // await Order.updateOne(
+      //   { orderId: client_order_reference_id },
+      //   { $set: { status: "Cancelled" } }
+      // );
 
       return {
         // error: true,
