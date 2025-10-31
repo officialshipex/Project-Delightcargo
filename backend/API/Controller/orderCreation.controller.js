@@ -1,5 +1,6 @@
 const Order = require("../../models/newOrder.model");
 const Joi = require("joi");
+const User = require("../../models/User.model");
 
 // Your existing externalOrderSchema with the same validations
 const externalOrderSchema = Joi.object({

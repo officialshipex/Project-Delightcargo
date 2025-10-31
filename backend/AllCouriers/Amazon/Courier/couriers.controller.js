@@ -288,10 +288,10 @@ const cancelShipment = async (shipmentId) => {
       }
     );
 
-    await Order.updateOne(
-      { shipment_id: shipmentId },
-      { $set: { status: "Cancelled" } }
-    );
+    // await Order.updateOne(
+    //   { shipment_id: shipmentId },
+    //   { $set: { status: "Cancelled" } }
+    // );
 
     if (response.data.payload) {
       console.log("Shipment Cancelled Successfully", response);

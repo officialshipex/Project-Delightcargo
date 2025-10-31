@@ -499,10 +499,10 @@ const cancelOrderZipypost = async (AWBNo) => {
 
     console.log("zipypost Cancel Response:", response.data);
     if (response?.data?.success) {
-      await Order.updateOne(
-        { awb_number: AWBNo },
-        { $set: { status: "Cancelled" } }
-      );
+      // await Order.updateOne(
+      //   { awb_number: AWBNo },
+      //   { $set: { status: "Cancelled" } }
+      // );
       return {
         data: response.data,
         code: 201,

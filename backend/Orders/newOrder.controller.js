@@ -1407,6 +1407,7 @@ const cancelOrdersAtBooked = async (req, res) => {
 
     // currentOrder.status = "Not-Shipped";
     // currentOrder.cancelledAtStage = "Booked";
+    currentOrder.status = "Cancelled";
     currentOrder.tracking.push({
       status: "Cancelled",
       StatusLocation: "",
@@ -1445,7 +1446,7 @@ const cancelOrdersAtBooked = async (req, res) => {
         },
         { session }
       );
-
+      await currentOrder.save({ session });
       await session.commitTransaction();
       await currentOrder.save({ session }); // ✅ Save order with updated tracking
       session.endSession();

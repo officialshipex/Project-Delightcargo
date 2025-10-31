@@ -135,6 +135,7 @@ const availableCourierService = async (req, res) => {
         );
       } else if (provider === "Delhivery") {
         serviceable = await checkPincodeServiceabilityDelhivery(
+          pickUpPincode,
           deliveryPincode,
           order_type
         );

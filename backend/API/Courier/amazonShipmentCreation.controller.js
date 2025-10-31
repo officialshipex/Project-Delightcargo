@@ -213,7 +213,7 @@ const createAmazonShipment = async ({
       success: true,
       message: "Shipment created successfully",
       orderId: currentOrder.orderId,
-      waybill: currentOrder.awb_number,
+      awb_number: currentOrder.awb_number,
       shipmentId: result.shipmentId,
       labelUrl,
     };

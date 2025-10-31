@@ -343,10 +343,10 @@ const cancelOrderDTDC = async (AWBNo) => {
       },
     });
 
-    await Order.updateOne(
-      { awb_number: AWBNo },
-      { $set: { status: "Cancelled" } }
-    );
+    // await Order.updateOne(
+    //   { awb_number: AWBNo },
+    //   { $set: { status: "Cancelled" } }
+    // );
 
     console.log("DTDC Cancel Response:", response.data);
     if (response?.data?.success) {
@@ -410,7 +410,7 @@ const trackOrderDTDC = async (AWBNo) => {
     };
   }
 };
-// trackOrderDTDC('7X105009638');
+// trackOrderDTDC('I75009052');
 
 const checkServiceabilityDTDC = async (originPincode, destinationPincode) => {
   try {

@@ -904,9 +904,10 @@ const autoAcceptDiscrepancies = async () => {
 };
 
 // Schedule job to run every day at midnight
-if (process.env.NODE_ENV === "local") {
+if (process.env.NODE_ENV === "production") {
   cron.schedule("0 0 * * *", autoAcceptDiscrepancies);
 }
+
 
 // Raise Discrepancies
 const raiseDiscrepancies = async (req, res) => {
