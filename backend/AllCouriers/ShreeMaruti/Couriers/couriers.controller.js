@@ -236,6 +236,8 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "Insufficient Wallet Balance" });
     }
 
+    // console.log("Payload for Shipment API:", payload);
+
     // --- Call Shipment API ---
     let response;
     try {

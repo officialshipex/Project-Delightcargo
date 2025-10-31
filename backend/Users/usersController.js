@@ -8,6 +8,7 @@ const Gst = require("../models/Gstin.model");
 const CodPlans = require("../COD/codPan.model");
 const AllocateRole = require("../models/allocateRoleSchema");
 const Order = require("../models/newOrder.model");
+const BillingAddress = require("../models/billingInfo.model");
 const { generateKeySync } = require("crypto");
 
 // const getUsers = async (req, res) => {
@@ -90,32 +91,17 @@ const getAllUsers = async (req, res) => {
       userId,
     } = req.query;
 
-    console.log("Request query params:", req.query);
-
     const parsedLimit = limit === "All" || !limit ? null : Number(limit);
     const skip = parsedLimit ? (Number(page) - 1) * parsedLimit : 0;
 
     const query = {};
 
-    // Exact userId match
+    // --- 🔍 Filter Handling ---
     if (id && id.trim() !== "") {
-      // If you want to fetch using MongoDB's ObjectId
       query._id = new mongoose.Types.ObjectId(id.trim());
     } else if (userId && userId.trim() !== "") {
-      // If you want to fetch by userId (6-digit number)
-      query.userId = Number(userId.trim()); // 👈 Cast to Number
+      query.userId = Number(userId.trim());
     } else if (search && search.trim() !== "") {
-      const trimmedSearch = search.trim();
-      query.$or = [
-        { userId: { $regex: trimmedSearch, $options: "i" } }, // Keep this if userId is searchable as a string
-        { fullname: { $regex: trimmedSearch, $options: "i" } },
-        { email: { $regex: trimmedSearch, $options: "i" } },
-        { phoneNumber: { $regex: trimmedSearch, $options: "i" } },
-      ];
-    }
-
-    // Flexible search
-    else if (search && search.trim() !== "") {
       const trimmedSearch = search.trim();
       query.$or = [
         { userId: { $regex: trimmedSearch, $options: "i" } },
@@ -128,24 +114,17 @@ const getAllUsers = async (req, res) => {
     if (kycStatus === "verified") query.kycDone = true;
     if (kycStatus === "pending") query.kycDone = false;
 
-    const hasFilters =
-      (userId && userId.trim() !== "") || (search && search.trim() !== "");
-
-    // console.log(req.employee)
-    // --- User/Employee-based role filtering ---
-    if (req.employee && req.employee.employeeId) {
-      // console.log("EMPLOYEE ID:", req.employee.employeeId);
-
-      const allocations = await AllocateRole.find({
-        employeeId: String(req.employee.employeeId),
-      });
-      // console.log("ALLOCATIONS FOUND:", allocations);
+    // --- 👨‍💼 Role-based filtering ---
+    if (req.employee?.employeeId) {
+      const allocations = await AllocateRole.find(
+        { employeeId: String(req.employee.employeeId) },
+        { sellerMongoId: 1 }
+      ).lean();
 
       const sellerMongoIds = allocations
         .map((a) => a.sellerMongoId)
         .filter(Boolean)
         .map((id) => new mongoose.Types.ObjectId(id));
-      // console.log("ALLOCATED SELLERS:", sellerMongoIds);
 
       if (sellerMongoIds.length > 0) {
         query._id = { $in: sellerMongoIds };
@@ -162,37 +141,100 @@ const getAllUsers = async (req, res) => {
         });
       }
     }
-    // For all other cases (admin or user), show all users (no filter needed)
 
-    // Fetch all users based on constructed query
-    const users = await User.find(query)
-      .populate("Wallet", "balance") // Ensure 'wallet' is correct in schema
-      .select(
-        "userId fullname email phoneNumber company kycDone creditLimit createdAt lastLogin isBlocked"
-      )
-      .lean();
+    // --- 🧠 Optimize with projection ---
+    const projection = {
+      userId: 1,
+      fullname: 1,
+      email: 1,
+      phoneNumber: 1,
+      company: 1,
+      kycDone: 1,
+      creditLimit: 1,
+      createdAt: 1,
+      lastLogin: 1,
+      isBlocked: 1,
+      Wallet: 1,
+    };
 
-    // console.log("Fetched users:", users.length);
+    // --- ⚙️ Parallel fetching of all base data ---
+    const [users, verifiedKycCount, pendingKycCount] = await Promise.all([
+      User.find(query, projection).populate("Wallet", "balance").lean(),
+      User.countDocuments({ ...query, kycDone: true }),
+      User.countDocuments({ ...query, kycDone: false }),
+    ]);
+
+    if (users.length === 0) {
+      return res.status(200).json({
+        success: true,
+        userIds: [],
+        userDetails: [],
+        verifiedKycCount,
+        pendingKycCount,
+        currentPage: Number(page),
+        totalPages: 0,
+        totalCount: 0,
+      });
+    }
 
     const userIds = users.map((u) => u._id);
 
-    const [plans, codPlans, accounts, aadhars, pans, gsts] = await Promise.all([
-      Plan.find({ userId: { $in: userIds } }).lean(),
-      CodPlans.find({ user: { $in: userIds } }).lean(),
-      Account.find({ user: { $in: userIds } }).lean(),
-      Aadhar.find({ user: { $in: userIds } }).lean(),
-      Pan.find({ user: { $in: userIds } }).lean(),
-      Gst.find({ user: { $in: userIds } }).lean(),
-    ]);
+    // --- 🧩 Fetch related data in parallel ---
+    const [plans, codPlans, accounts, aadhars, pans, gsts, orderStats] =
+      await Promise.all([
+        Plan.find(
+          { userId: { $in: userIds } },
+          { userId: 1, planName: 1 }
+        ).lean(),
+        CodPlans.find(
+          { user: { $in: userIds } },
+          { user: 1, planName: 1 }
+        ).lean(),
+        Account.find(
+          { user: { $in: userIds } },
+          {
+            user: 1,
+            nameAtBank: 1,
+            accountNumber: 1,
+            ifsc: 1,
+            bank: 1,
+            branch: 1,
+          }
+        ).lean(),
+        Aadhar.find(
+          { user: { $in: userIds } },
+          { user: 1, aadhaarNumber: 1, name: 1, state: 1, address: 1 }
+        ).lean(),
+        Pan.find(
+          { user: { $in: userIds } },
+          { user: 1, panNumber: 1, nameProvided: 1, pan: 1, panRefId: 1 }
+        ).lean(),
+        Gst.find(
+          { user: { $in: userIds } },
+          { user: 1, gstin: 1, address: 1, pincode: 1, state: 1, city: 1 }
+        ).lean(),
+        Order.aggregate([
+          { $match: { userId: { $in: userIds } } },
+          {
+            $group: {
+              _id: "$userId",
+              orderCount: { $sum: 1 },
+              lastOrderDate: { $max: "$createdAt" },
+            },
+          },
+        ]),
+      ]);
 
+    // --- 🗺️ Build maps for quick access ---
     const planMap = new Map(plans.map((p) => [String(p.userId), p]));
     const codMap = new Map(codPlans.map((p) => [String(p.user), p]));
     const accountMap = new Map(accounts.map((a) => [String(a.user), a]));
     const aadharMap = new Map(aadhars.map((a) => [String(a.user), a]));
     const panMap = new Map(pans.map((p) => [String(p.user), p]));
     const gstMap = new Map(gsts.map((g) => [String(g.user), g]));
+    const orderStatsMap = new Map(orderStats.map((s) => [String(s._id), s]));
 
-    // Filter by wallet balance & rate card if applied
+    // --- ⚡ Filter + Paginate efficiently ---
     const filteredUsers = users.filter((user) => {
       const walletBalance = user.Wallet?.balance || 0;
 
@@ -212,45 +254,23 @@ const getAllUsers = async (req, res) => {
 
     const totalCount = filteredUsers.length;
     const totalPages = parsedLimit ? Math.ceil(totalCount / parsedLimit) : 1;
-
     const paginatedUsers = parsedLimit
       ? filteredUsers.slice(skip, skip + parsedLimit)
       : filteredUsers;
-    // console.log("userIds:", userIds);
-    // Step 1: Aggregate order count and last order date for all fetched user IDs
-    const orderStats = await Order.aggregate([
-      {
-        $match: {
-          userId: { $in: userIds },
-        },
-      },
-      {
-        $group: {
-          _id: "$userId",
-          orderCount: { $sum: 1 },
-          lastOrderDate: { $max: "$createdAt" },
-        },
-      },
-    ]);
-    // console.log("Order stats:", orderStats);
 
-    // Step 2: Map it by userId for quick access
-    const orderStatsMap = new Map(
-      orderStats.map((stat) => [String(stat._id), stat])
-    );
-    // console.log("Order stats map:", orderStatsMap);
-
+    // --- 🧾 Construct final response ---
     const userDetails = paginatedUsers.map((user) => {
+      const uid = String(user._id);
       const walletBalance = user.Wallet?.balance || 0;
-      const plan = planMap.get(String(user._id));
-      const stats = orderStatsMap.get(String(user._id));
+      const plan = planMap.get(uid);
+      const stats = orderStatsMap.get(uid);
 
       return {
         id: user._id,
         userId: user.userId,
         fullname: user.fullname,
         email: user.email,
-        isBlocked: user?.isBlocked,
+        isBlocked: user.isBlocked,
         lastLogin: user.lastLogin,
         phoneNumber: user.phoneNumber,
         company: user.company,
@@ -258,12 +278,12 @@ const getAllUsers = async (req, res) => {
         walletAmount: walletBalance,
         creditLimit: user.creditLimit || 0,
         rateCard: plan?.planName || "N/A",
-        codPlan: codMap.get(String(user._id))?.planName || "N/A",
+        codPlan: codMap.get(uid)?.planName || "N/A",
         createdAt: user.createdAt,
         orderCount: stats?.orderCount || 0,
         lastOrderDate: stats?.lastOrderDate || null,
         accountDetails: (() => {
-          const acc = accountMap.get(String(user._id));
+          const acc = accountMap.get(uid);
           if (!acc) return null;
           return {
             beneficiaryName: acc.nameAtBank,
@@ -274,7 +294,7 @@ const getAllUsers = async (req, res) => {
           };
         })(),
         aadharDetails: (() => {
-          const a = aadharMap.get(String(user._id));
+          const a = aadharMap.get(uid);
           if (!a) return null;
           return {
             aadharNumber: a.aadhaarNumber,
@@ -284,7 +304,7 @@ const getAllUsers = async (req, res) => {
           };
         })(),
         panDetails: (() => {
-          const p = panMap.get(String(user._id));
+          const p = panMap.get(uid);
           if (!p) return null;
           return {
             panNumber: p.panNumber,
@@ -294,7 +314,7 @@ const getAllUsers = async (req, res) => {
           };
         })(),
         gstDetails: (() => {
-          const g = gstMap.get(String(user._id));
+          const g = gstMap.get(uid);
           if (!g) return null;
           return {
             gstNumber: g.gstin,
@@ -306,13 +326,14 @@ const getAllUsers = async (req, res) => {
         })(),
       };
     });
-    // console.log("user",userDetails)
+
+    // ✅ Same response format as before
     return res.status(200).json({
       success: true,
       userIds: userDetails.map((u) => u.userId),
       userDetails,
-      verifiedKycCount: await User.countDocuments({ ...query, kycDone: true }),
-      pendingKycCount: await User.countDocuments({ ...query, kycDone: false }),
+      verifiedKycCount,
+      pendingKycCount,
       currentPage: Number(page),
       totalPages,
       totalCount,
@@ -338,7 +359,7 @@ const getUserById = async (req, res) => {
     }
 
     const user = await User.findById(id)
-      .populate("Wallet", "balance")
+      .populate("Wallet", "balance holdAmount")
       // .select("userId fullname email phoneNumber company kycDone creditLimit createdAt")
       .lean();
     console.log("user", user);
@@ -348,16 +369,19 @@ const getUserById = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
-    const [plan, codPlan, account, aadhar, pan, gst] = await Promise.all([
-      Plan.findOne({ userId: user._id }).lean(),
-      CodPlans.findOne({ user: user._id }).lean(),
-      Account.findOne({ user: user._id }).lean(),
-      Aadhar.findOne({ user: user._id }).lean(),
-      Pan.findOne({ user: user._id }).lean(),
-      Gst.findOne({ user: user._id }).lean(),
-    ]);
+    const [plan, codPlan, account, aadhar, pan, gst, billingAddress] =
+      await Promise.all([
+        Plan.findOne({ userId: user._id }).lean(),
+        CodPlans.findOne({ user: user._id }).lean(),
+        Account.findOne({ user: user._id }).lean(),
+        Aadhar.findOne({ user: user._id }).lean(),
+        Pan.findOne({ user: user._id }).lean(),
+        Gst.findOne({ user: user._id }).lean(),
+        BillingAddress.findOne({ user: user._id }).lean(),
+      ]);
 
     const walletBalance = user.Wallet?.balance || 0;
+    const holdAmount = user.Wallet?.holdAmount;
 
     const userDetails = {
       id: user._id,
@@ -368,6 +392,7 @@ const getUserById = async (req, res) => {
       company: user.company,
       kycStatus: user.kycDone,
       walletAmount: walletBalance,
+      holdAmount: holdAmount,
       creditLimit: user.creditLimit || 0,
       rateCard: plan?.planName || "N/A",
       codPlan: codPlan?.planName || "N/A",
@@ -376,6 +401,7 @@ const getUserById = async (req, res) => {
       isBlocked: user.isBlocked,
       logo: user.profileImage || "",
       referralCode: user.referralCode || "",
+      lastLogin: user.lastLogin,
       referralCommissionPercentage: user.referralCommissionPercentage || 0,
       accountDetails: account
         ? {
@@ -411,6 +437,7 @@ const getUserById = async (req, res) => {
             city: gst.city,
           }
         : null,
+      billingAddress: billingAddress,
     };
     console.log(userDetails);
 
@@ -728,14 +755,12 @@ const updateReferralCommission = async (req, res) => {
       message: "Referral commission updated successfully",
     });
   } catch (err) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to update referral commission",
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to update referral commission",
+    });
   }
-}
+};
 
 module.exports = {
   getUsers,
@@ -748,5 +773,5 @@ module.exports = {
   getUserById,
   updateBlockStatus,
   updateProfile,
-  updateReferralCommission
+  updateReferralCommission,
 };
