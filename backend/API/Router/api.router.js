@@ -10,6 +10,7 @@ const bookOrder= require("../Controller/bookOrder.controller");
 const cancelOrdersAtBooked = require("../Controller/cancelledOrder.controller");
 const trackOrder = require("../Controller/trackOrder.controller");
 const { exceptionList,ndrCreate } = require("../Controller/NDR.controller");
+const createPickupAddress=require("../Controller/warehouseCreation.controller")
 
 // Route to create a new order
 router.post("/external/createOrder", isAuthorized, orderCreationController);
@@ -21,5 +22,6 @@ router.post("/external/cancelledOrder/:awb_number", isAuthorized, cancelOrdersAt
 router.get("/external/trackOrder/:awb", isAuthorized, trackOrder);
 router.get("/external/exceptionList",isAuthorized,exceptionList)
 router.post("/external/ndr/create",isAuthorized,ndrCreate);
+router.post("/external/createPickupAddress",isAuthorized,createPickupAddress)
 
 module.exports = router;
