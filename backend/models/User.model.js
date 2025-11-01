@@ -114,6 +114,14 @@ const usersSchema = new mongoose.Schema(
     },
     subUserId: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // 👈 list of referred users
     lastLogin: { type: Date },
+    isPhoneVerified: {
+      type: Boolean,
+      default: false,
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

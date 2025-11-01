@@ -3,6 +3,8 @@ const express = require("express");
 const OTPs = {}; // Store OTPs temporarily
 const emailOtpRouter = express.Router();
 const axios = require("axios");
+const User = require("../models/User.model");
+const { isAuthorized } = require("../middleware/auth.middleware");
 emailOtpRouter.post("/send-email-otp", async (req, res) => {
   const { email } = req.body;
   console.log("kkkk", email);
@@ -73,15 +75,47 @@ emailOtpRouter.post("/send-email-otp", async (req, res) => {
   }
 });
 
-emailOtpRouter.post("/verify-email-otp", (req, res) => {
-  const { email, otp } = req.body;
+emailOtpRouter.post("/verify-email-otp", isAuthorized, async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    const id = req.user._id;
 
-  if (!OTPs[email] || OTPs[email] != otp) {
-    return res.status(400).json({ success: false, message: "Invalid OTP" });
+    console.log("Verifying:", email, otp, id);
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and OTP are required",
+      });
+    }
+
+    // Convert both to string before comparison
+    if (!OTPs[email] || String(OTPs[email]) !== String(otp)) {
+      console.log("Stored OTP:", OTPs[email], "Received OTP:", otp);
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
+    }
+
+    // Find the user
+    const user = await User.findById(id);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    // Update email and verification status
+    user.email = email;
+    user.isEmailVerified = true;
+    await user.save();
+
+    // Remove OTP after successful verification
+    delete OTPs[email];
+
+    res.json({ success: true, message: "Email verified successfully", user });
+  } catch (error) {
+    console.error("Error verifying email OTP:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
-
-  delete OTPs[email]; // Remove OTP after verification
-  res.json({ success: true, message: "Email verified successfully" });
 });
 
 module.exports = emailOtpRouter;
