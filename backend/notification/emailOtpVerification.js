@@ -7,17 +7,28 @@ const User = require("../models/User.model");
 const { isAuthorized } = require("../middleware/auth.middleware");
 emailOtpRouter.post("/send-email-otp", async (req, res) => {
   const { email } = req.body;
-  console.log("kkkk", email);
+
+  // console.log("kkkk", email);
   if (!email) {
     return res
       .status(400)
       .json({ success: false, message: "Email is required" });
   }
 
+  // Check if email already exists and is verified
+  const existingUser = await User.findOne({ email });
+
+  if (existingUser && existingUser.isEmailVerified === true) {
+    return res.status(400).json({
+      success: false,
+      message: "Email ID already exists",
+    });
+  }
+
   // Generate 6-digit OTP
   const otp = Math.floor(100000 + Math.random() * 900000);
   OTPs[email] = otp; // Store OTP temporarily
-  console.log("9999", otp);
+  // console.log("9999", otp);
   // Email Content
   const validTime = "10 minutes"; // example expiry, replace with actual expiration time
 
@@ -117,5 +128,27 @@ emailOtpRouter.post("/verify-email-otp", isAuthorized, async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
+const updateAllUsersVerificationStatus = async () => {
+  try {
+    // Update all users' verification fields
+    const result = await User.updateMany(
+      {},
+      {
+        $set: {
+          isPhoneVerified: true,
+          isEmailVerified: true,
+        },
+      }
+    );
+
+    console.log(`✅ Updated verification status for ${result.modifiedCount} users successfully.`);
+  } catch (error) {
+    console.error("❌ Error updating verification status:", error);
+  }
+};
+
+
+
 
 module.exports = emailOtpRouter;

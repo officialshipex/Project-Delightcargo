@@ -2,7 +2,7 @@ const express = require("express");
 const axios = require("axios");
 const otpRouter = express.Router();
 const User = require("../models/User.model");
-const {isAuthorized}=require("../middleware/auth.middleware")
+const { isAuthorized } = require("../middleware/auth.middleware");
 
 // Store OTPs temporarily (in-memory for simplicity)
 const otpStore = {};
@@ -19,6 +19,16 @@ otpRouter.post("/send-otp", async (req, res) => {
     return res
       .status(400)
       .json({ success: false, message: "Phone number required" });
+  }
+
+  // Check if email already exists and is verified
+  const existingUser = await User.findOne({ phoneNumber });
+
+  if (existingUser && existingUser.isPhoneVerified === true) {
+    return res.status(400).json({
+      success: false,
+      message: "Phone No already exists",
+    });
   }
 
   const otp = generateOtp();
@@ -75,7 +85,7 @@ otpRouter.post("/send-otp", async (req, res) => {
 });
 
 // Verify OTP
-otpRouter.post("/verify-otp",isAuthorized, async (req, res) => {
+otpRouter.post("/verify-otp", isAuthorized, async (req, res) => {
   try {
     const { phoneNumber, otp } = req.body;
     const id = req.user._id;

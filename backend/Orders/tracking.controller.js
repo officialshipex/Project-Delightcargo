@@ -6,6 +6,7 @@ const SmartShipStatusMapping = require("../statusMap/SmartShipStatusMapping");
 const DelhiveryStatusMapping = require("../statusMap/DelhiveryStatusMapping");
 const AmazonStatusMapping = require("../statusMap/AmazonStatusMapping");
 const ecomExpressStatusMapping = require("../statusMap/EcomStatusMapping");
+const ZipyPostScanCodeMapping=require("../statusMap/ZipypostStatusMapping")
 
 const cron = require("node-cron");
 const {
@@ -209,8 +210,11 @@ const trackSingleOrder = async (order) => {
         if (dbMapping) {
           // console.log("maped dtdc status",dbMapping.sy_status)
           order.status = dbMapping.sy_status;
-          if(order.status==="Cancelled" && order.tracking[order.tracking.length-1].status==="NONDLV"){
-            order.status="RTO";
+          if (
+            order.status === "Cancelled" &&
+            order.tracking[order.tracking.length - 1].status === "NONDLV"
+          ) {
+            order.status = "RTO";
           }
           // Only set ndrStatus for actual NDR-related states
           if (
@@ -854,11 +858,11 @@ const trackSingleOrder = async (order) => {
         }
       }
     }
-    if (provider === "ZipyPost") {
-      const scanCode = normalizedData.ScanCode;
+    if (partner === "ZipyPost") {
+      const scanCode = normalizedData.scanCode;
       const instruction = normalizedData.Instructions?.toLowerCase();
       const statusText = normalizedData.Status?.toLowerCase();
-
+      // console.log("ZipyPost scanCode", scanCode, instruction, statusText);
       // Map status using ZipyPostScanCodeMapping
       order.status = ZipyPostScanCodeMapping[scanCode];
 
@@ -1067,10 +1071,10 @@ const trackOrders = async () => {
     const limit = pLimit(10); // Max 10 concurrent executions
 
     const allOrders = await Order.find({
-      status: { $nin: ["new", "Cancelled", "Delivered","RTO Delivered"] },
+      status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       // ndrStatus:"Undelivered"
       // partner: "ZipyPost",
-      // awb_number: "35973710045474",
+      // awb_number: "78068439820",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1163,12 +1167,12 @@ const mapTrackingResponse = (data, provider, remark) => {
     const latestScan = scanArray?.[0]; // take the most recent scan
     // console.log("last", scanArray[0]);
     return {
-      Status: latestScan[0]?.scan || "N/A",
-      scanCode: latestScan[0]?.scan_code ?? null,
+      Status: latestScan?.scan || "N/A",
+      scanCode: latestScan?.scan_code ?? null,
       // StrRemarks: latestScan?.remark || "N/A",
-      StatusLocation: latestScan[0]?.location || "Unknown",
-      StatusDateTime: latestScan[0]?.scan_time || null,
-      Instructions: latestScan[0]?.remark || "N/A",
+      StatusLocation: latestScan?.location || "Unknown",
+      StatusDateTime: latestScan?.scan_time || null,
+      Instructions: latestScan?.remark || "N/A",
     };
   }
   // console.log(data, provider);
