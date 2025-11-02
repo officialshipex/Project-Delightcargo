@@ -1,6 +1,8 @@
 const express = require("express");
 const axios = require("axios");
 const otpRouter = express.Router();
+const User = require("../models/User.model");
+const { isAuthorized } = require("../middleware/auth.middleware");
 
 // Store OTPs temporarily (in-memory for simplicity)
 const otpStore = {};
@@ -17,6 +19,16 @@ otpRouter.post("/send-otp", async (req, res) => {
     return res
       .status(400)
       .json({ success: false, message: "Phone number required" });
+  }
+
+  // Check if email already exists and is verified
+  const existingUser = await User.findOne({ phoneNumber });
+
+  if (existingUser && existingUser.isPhoneVerified === true) {
+    return res.status(400).json({
+      success: false,
+      message: "Phone No already exists",
+    });
   }
 
   const otp = generateOtp();
@@ -73,20 +85,48 @@ otpRouter.post("/send-otp", async (req, res) => {
 });
 
 // Verify OTP
-otpRouter.post("/verify-otp", (req, res) => {
-  const { phoneNumber, otp } = req.body;
+otpRouter.post("/verify-otp", isAuthorized, async (req, res) => {
+  try {
+    const { phoneNumber, otp } = req.body;
+    const id = req.user._id;
 
-  if (!phoneNumber || !otp) {
-    return res
-      .status(400)
-      .json({ success: false, message: "phoneNumber or otp is missing" });
+    // Validate input
+    if (!phoneNumber || !otp) {
+      return res
+        .status(400)
+        .json({ success: false, message: "phoneNumber and otp are required" });
+    }
+
+    // Check OTP validity
+    if (!otpStore[phoneNumber] || otpStore[phoneNumber] !== otp) {
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
+    }
+
+    // Find user
+    const user = await User.findById(id);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    // Update user's phone and verification status
+    user.phoneNumber = phoneNumber;
+    user.isPhoneVerified = true;
+    await user.save();
+
+    // Remove OTP after verification
+    delete otpStore[phoneNumber];
+
+    res.status(200).json({
+      success: true,
+      message: "Phone number verified successfully",
+      user,
+    });
+  } catch (error) {
+    console.error("Error verifying phone OTP:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
-  if (otpStore[phoneNumber] === otp) {
-    console.log(otpStore[phoneNumber]);
-    delete otpStore[phoneNumber]; // Remove OTP after verification
-    return res.status(200).json({ success: true, message: "OTP verified" });
-  }
-  res.status(400).json({ success: false, message: "Invalid OTP" });
 });
 
 module.exports = otpRouter; // Export the OTP routes

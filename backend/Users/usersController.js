@@ -392,6 +392,8 @@ const getUserById = async (req, res) => {
       company: user.company,
       kycStatus: user.kycDone,
       walletAmount: walletBalance,
+      isEmailVerified: user.isEmailVerified,
+      isPhoneVerified: user.isPhoneVerified,
       holdAmount: holdAmount,
       creditLimit: user.creditLimit || 0,
       rateCard: plan?.planName || "N/A",
