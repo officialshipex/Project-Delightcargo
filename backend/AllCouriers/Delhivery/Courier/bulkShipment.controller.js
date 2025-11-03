@@ -138,7 +138,7 @@ const createShipmentFunctionDelhivery = async (
         currentOrder.shipment_id = `${result.refnum}`;
         currentOrder.provider = selectedServiceDetails.provider;
         currentOrder.totalFreightCharges =
-          finalCharges === "N/A" ? 0 : parseInt(finalCharges);
+          finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
         currentOrder.courierServiceName = selectedServiceDetails.name;
         currentOrder.shipmentCreatedAt = new Date();
         currentOrder.estimatedDeliveryDate = estimateDate;
@@ -162,9 +162,9 @@ const createShipmentFunctionDelhivery = async (
         };
 
         const updatedWallet = await Wallet.findOneAndUpdate(
-          { _id: walletId, balance: { $gte: finalCharges } },
+          { _id: walletId, balance: { $gte: parseFloat(finalCharges) } },
           {
-            $inc: { balance: -finalCharges },
+            $inc: { balance: -parseFloat(finalCharges) },
             $push: { transactions: transaction },
           },
           { new: true }

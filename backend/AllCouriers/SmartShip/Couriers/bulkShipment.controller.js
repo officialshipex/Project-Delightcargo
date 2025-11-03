@@ -184,7 +184,7 @@ const orderRegistrationOneStep = async (
       currentOrder.awb_number = result.awb_number;
       currentOrder.shipment_id = result.request_order_id || "";
       currentOrder.provider = serviceDetails.provider;
-      currentOrder.totalFreightCharges = charges;
+      currentOrder.totalFreightCharges = parseFloat(charges);
       currentOrder.courierServiceName = serviceDetails.name;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.zone = zone.zone;
@@ -198,11 +198,11 @@ const orderRegistrationOneStep = async (
       await currentOrder.save();
 
       const updatedWallet = await Wallet.findOneAndUpdate(
-        { _id: walletId, balance: { $gte: charges } },
+        { _id: walletId, balance: { $gte: parseFloat(charges) } },
         [
           {
             $set: {
-              balance: { $subtract: ["$balance", charges] },
+              balance: { $subtract: ["$balance", parseFloat(charges)] },
               transactions: {
                 $concatArrays: [
                   "$transactions",
@@ -210,9 +210,9 @@ const orderRegistrationOneStep = async (
                     {
                       channelOrderId: currentOrder.orderId,
                       category: "debit",
-                      amount: charges,
+                      amount: parseFloat(charges),
                       balanceAfterTransaction: {
-                        $subtract: ["$balance", charges],
+                        $subtract: ["$balance", parseFloat(charges)],
                       },
                       date: new Date(),
                       awb_number: result.awb_number,

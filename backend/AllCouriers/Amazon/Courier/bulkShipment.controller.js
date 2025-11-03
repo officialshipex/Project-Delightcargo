@@ -170,7 +170,7 @@ const createShipmentAmazon = async (
     currentOrder.awb_number = result.packageDocumentDetails[0].trackingId;
     currentOrder.shipment_id = `${result.shipmentId}`;
     currentOrder.provider = "Amazon Shipping";
-    currentOrder.totalFreightCharges = charges;
+    currentOrder.totalFreightCharges = parseFloat(charges);
     currentOrder.courierServiceName = serviceDetails.name.trim();
     currentOrder.shipmentCreatedAt = new Date();
     currentOrder.label = labelUrl;
@@ -195,9 +195,9 @@ const createShipmentAmazon = async (
     };
 
     const updatedWallet = await Wallet.findOneAndUpdate(
-      { _id: walletId, balance: { $gte: charges } },
+      { _id: walletId, balance: { $gte: parseFloat(charges) } },
       {
-        $inc: { balance: -charges },
+        $inc: { balance: -parseFloat(charges) },
         $push: { transactions: transaction },
       },
       { new: true }

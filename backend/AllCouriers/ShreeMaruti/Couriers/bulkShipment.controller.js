@@ -185,7 +185,7 @@ const createShipmentFunctionShreeMaruti = async (
       currentOrder.awb_number = result.awbNumber;
       currentOrder.shipment_id = `${result.shipperOrderId}`;
       currentOrder.provider = selectedServiceDetails.provider;
-      currentOrder.totalFreightCharges = finalCharges;
+      currentOrder.totalFreightCharges = parseFloat(finalCharges);
       currentOrder.courierServiceName = selectedServiceDetails.name;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.zone = zone.zone;
@@ -199,15 +199,15 @@ const createShipmentFunctionShreeMaruti = async (
       await currentOrder.save();
 
       const updatedWallet = await Wallet.findOneAndUpdate(
-        { _id: walletId, balance: { $gte: finalCharges } }, // Ensure sufficient balance
+        { _id: walletId, balance: { $gte: parseFloat(finalCharges) } }, // Ensure sufficient balance
         {
-          $inc: { balance: -finalCharges },
+          $inc: { balance: -parseFloat(finalCharges) },
           $push: {
             transactions: {
               channelOrderId: currentOrder.orderId,
               category: "debit",
               amount: finalCharges,
-              balanceAfterTransaction: currentWallet.balance - finalCharges,
+              balanceAfterTransaction: currentWallet.balance - parseFloat(finalCharges),
               date: new Date(),
               awb_number: result.awbNumber,
               description: "Freight Charges Applied",

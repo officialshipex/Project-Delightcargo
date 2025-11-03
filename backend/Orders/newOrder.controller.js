@@ -1444,7 +1444,7 @@ const cancelOrdersAtBooked = async (req, res) => {
     let balanceTobeAdded =
       allOrders.totalFreightCharges == "N/A"
         ? 0
-        : parseInt(allOrders.totalFreightCharges);
+        : parseFloat(allOrders.totalFreightCharges);
     const session = await mongoose.startSession();
     session.startTransaction();
 

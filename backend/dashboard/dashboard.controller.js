@@ -701,7 +701,7 @@ const getDashboardOverview = async (req, res) => {
           todaysRevenue: [
             {
               $match: {
-                status: "In-transit",
+                status: { $in: ["In-transit", "Out for Delivery", "Delivered"] },
                 lastTrackingDate: { $gte: today },
               },
             },
