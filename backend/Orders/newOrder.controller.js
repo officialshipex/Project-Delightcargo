@@ -194,16 +194,22 @@ const updatePackageDetails = async (req, res) => {
 
 const newPickupAddress = async (req, res) => {
   try {
-    console.log(req.body); // To log the incoming request body
+    // console.log(req.body); // To log the incoming request body
+    const userId =
+      req.query.userId &&
+      req.query.userId !== "undefined" &&
+      req.query.userId.trim() !== ""
+        ? req.query.userId.trim()
+        : req.user?._id?.toString();
 
     // Create a new shipment instance, where pickupAddress is a sub-document
     const shipment = new pickAddress({
-      userId: req.user._id, // Assuming req.user._id is populated via authentication middleware
+      userId: userId, // ✅ Prefer userId from query if provided
       pickupAddress: {
         contactName: req.body.contactName,
         email: req.body.email,
         phoneNumber: req.body.phoneNumber,
-        address: req.body.address || "", // Default to empty string if not provided
+        address: req.body.address || "",
         pinCode: req.body.pinCode,
         city: req.body.city,
         state: req.body.state,
@@ -1048,7 +1054,27 @@ const bulkCloneOrders = async (req, res) => {
 
 const getpickupAddress = async (req, res) => {
   try {
-    const pickupAddresses = await pickAddress.find({ userId: req.user._id });
+    // console.log("req.query.userId:", req.query.userId);
+    // console.log("req.user._id:", req.user?._id);
+
+    // ✅ Proper fallback handling (covers undefined, null, empty, and string "undefined")
+    const userId =
+      req.query.userId &&
+      req.query.userId !== "undefined" &&
+      req.query.userId.trim() !== ""
+        ? req.query.userId.trim()
+        : req.user?._id?.toString();
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is missing or invalid",
+      });
+    }
+
+    // console.log("✅ Final userId used:", userId);
+
+    const pickupAddresses = await pickAddress.find({ userId });
 
     if (!pickupAddresses.length) {
       return res.status(404).json({ message: "No pickup addresses found" });
@@ -1972,6 +1998,56 @@ const checkBulkPickup = async (req, res) => {
   }
 };
 
+const checkBulkUser = async (req, res) => {
+  try {
+    const { orderIds } = req.query;
+
+    // ✅ Check if orderId param is valid
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing order IDs",
+      });
+    }
+
+    // ✅ Fetch all orders by IDs
+    const orders = await Order.find({ _id: { $in: orderIds } }).select(
+      "userId"
+    );
+
+    if (!orders || orders.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No orders found for given IDs",
+      });
+    }
+
+    // ✅ Extract all unique userIds
+    const uniqueUsers = [...new Set(orders.map((o) => o.userId.toString()))];
+
+    if (uniqueUsers.length === 1) {
+      // ✅ All belong to same user
+      return res.status(200).json({
+        success: true,
+        userId: uniqueUsers[0],
+      });
+    } else {
+      // ❌ Different users found
+      return res.status(400).json({
+        success: false,
+        message: "Selected orders belong to multiple users",
+      });
+    }
+  } catch (error) {
+    console.error("Error checking bulk user:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while checking orders",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   newOrder,
   getOrders,
@@ -2000,4 +2076,5 @@ module.exports = {
   getShippingOrders,
   bulkCancelOrder,
   checkBulkPickup,
+  checkBulkUser,
 };

@@ -26,7 +26,8 @@ const {
   getShippingOrders,
   bulkCancelOrder,
   checkBulkPickup,
-  bulkCloneOrders
+  bulkCloneOrders,
+  checkBulkUser,
   // calculateRTOCharges
   
 } = require("../Orders/newOrder.controller"); // Adjust path to your controller
@@ -61,5 +62,6 @@ router.patch("/pickupAddress/setPrimary/:id",setPrimaryPickupAddress)
 router.delete("/pickupAddress/:id",deletePickupAddress)
 router.post("/bulkCancelOrder",bulkCancelOrder);
 router.get("/checkBulkPickup",checkBulkPickup)
+router.get("/checkBulkUser",checkBulkUser)
 // router.post("/calculateRTOCharges",calculateRTOCharges)
 module.exports = router;
