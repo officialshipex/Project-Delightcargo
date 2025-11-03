@@ -270,7 +270,7 @@ const createOrder = async (req, res) => {
       currentOrder.awb_number = result.awbNumber;
       currentOrder.shipment_id = `${result.shipperOrderId}`;
       currentOrder.provider = provider;
-      currentOrder.totalFreightCharges = finalCharges;
+      currentOrder.totalFreightCharges = parseFloat(finalCharges);
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.courierServiceName = courierServiceName;
       currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
@@ -284,7 +284,7 @@ const createOrder = async (req, res) => {
 
       await currentOrder.save({ session });
 
-      const balanceToBeDeducted = parseInt(finalCharges);
+      const balanceToBeDeducted = parseFloat(finalCharges);
       await currentWallet.updateOne(
         {
           $inc: { balance: -balanceToBeDeducted },

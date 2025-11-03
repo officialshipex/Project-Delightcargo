@@ -352,7 +352,7 @@ const createZipypostOrder = async (req, res) => {
     currentOrder.provider = result.courier.replace(/\+/g, "").trim();
     currentOrder.partner = "ZipyPost";
     currentOrder.shipmentCreatedAt = new Date();
-    currentOrder.totalFreightCharges = finalCharges || 0;
+    currentOrder.totalFreightCharges = parseFloat(finalCharges) || 0;
     currentOrder.courierServiceName = courierServiceName;
     currentOrder.zone = zone.zone;
     currentOrder.estimatedDeliveryDate = estimatedDeliveryDate || "";

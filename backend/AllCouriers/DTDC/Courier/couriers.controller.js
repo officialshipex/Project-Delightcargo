@@ -222,7 +222,7 @@ const createOrder = async (req, res) => {
     }
 
     // --- Update Order inside transaction ---
-    const balanceToBeDeducted = parseInt(finalCharges) || 0;
+    const balanceToBeDeducted = parseFloat(finalCharges) || 0;
 
     await Order.findByIdAndUpdate(
       id,

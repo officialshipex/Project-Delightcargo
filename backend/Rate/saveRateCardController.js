@@ -575,36 +575,31 @@ const uploadRatecard = async (req, res) => {
     const normalize = (str = "") =>
       str
         .trim()
-        .replace(/\s+/g, " ") // collapse multiple spaces
-        .replace(/\u00A0/g, " ") // replace non-breaking spaces
+        .replace(/\s+/g, " ")
+        .replace(/\u00A0/g, " ")
         .toLowerCase();
-    // console.log("plans", plans);
+
     const providerSet = new Set(
       providers.map((p) => normalize(p.courierProvider))
     );
     const serviceSet = new Set(services.map((s) => normalize(s.name)));
     const planSet = new Set(plans.map((p) => normalize(p.name)));
 
-    // console.log("planSet",planSet)
     const errors = [];
     const savedRatecards = [];
+    const updatedRatecards = [];
     const toFixedNum = (num) => Number(parseFloat(num || 0).toFixed(2));
+
     // Group rows by (plan, provider, service)
     const grouped = {};
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNum = i + 2;
-      // console.log(row["Plan Name"])
-      // console.log(row["Courier Provider Name"])
-      // console.log(row["Courier Service Name"])
+
       const plan = normalize(row["Plan Name"]);
       const provider = normalize(row["Courier Provider Name"]);
       const service = normalize(row["Courier Service Name"]);
 
-      // console.log("plan", plan);
-      // console.log("provider", provider);
-      console.log("sercvice", service);
-      // Validation
       if (!planSet.has(plan)) {
         errors.push(`Row ${rowNum}: Invalid Plan`);
         continue;
@@ -614,11 +609,6 @@ const uploadRatecard = async (req, res) => {
         continue;
       }
       if (!serviceSet.has(service)) {
-        console.log("❌ Missing service:", JSON.stringify(service));
-        console.log(
-          "Closest match:",
-          [...serviceSet].find((s) => s.includes("bluedart"))
-        );
         errors.push(`Row ${rowNum}: Invalid Service (${service})`);
         continue;
       }
@@ -645,9 +635,7 @@ const uploadRatecard = async (req, res) => {
         zoneE: toFixedNum(row["zoneE"]),
       };
 
-      // console.log("weight", weightObj);
-
-      const type = (row["Type"] || "").toLowerCase().trim();
+      const type = String(row["Type"] || "").toLowerCase().trim();
       if (type === "basic" || type === "1") {
         grouped[key].weightPriceBasic.push(weightObj);
       } else if (type === "additional" || type === "2") {
@@ -659,15 +647,15 @@ const uploadRatecard = async (req, res) => {
       }
     }
 
-    // Save grouped ratecards
+    // Save or update grouped ratecards
     for (const key in grouped) {
       const g = grouped[key];
-
       const mode = services.find(
         (s) => normalize(s.name) === normalize(g.courierServiceName)
       )?.courierType;
 
-      const rateCardDoc = new RateCard({
+      // Common data structure
+      const rateCardData = {
         plan: (g.plan || "").trim(),
         mode: mode || "",
         courierProviderName: (g.courierProviderName || "").trim(),
@@ -679,26 +667,64 @@ const uploadRatecard = async (req, res) => {
         status: "Active",
         shipmentType: "Forward",
         defaultRate: true,
+      };
+
+      // 🔍 Check for existing rate card
+      const existing = await RateCard.findOne({
+        plan: rateCardData.plan,
+        courierProviderName: rateCardData.courierProviderName,
+        courierServiceName: rateCardData.courierServiceName,
+        shipmentType: "Forward",
       });
 
-      await rateCardDoc.save();
-      savedRatecards.push(rateCardDoc);
+      if (existing) {
+        // 🟢 Update existing rate card
+        Object.assign(existing, rateCardData);
+        await existing.save();
+        updatedRatecards.push(existing);
 
-      // Update Plan collection with trimmed plan name
-      await Plan.updateMany(
-        { planName: (g.plan || "").trim() },
-        { $push: { rateCard: rateCardDoc } }
-      );
+        // ✅ Update the Plan with the updated rateCard object
+        const planName = rateCardData.plan;
+
+        // If Plan already contains that courier service, replace it
+        await Plan.updateMany(
+          {
+            planName,
+            "rateCard.courierServiceName": rateCardData.courierServiceName,
+          },
+          { $set: { "rateCard.$": existing.toObject() } }
+        );
+
+        // If Plan doesn't contain it yet, push it as a new one
+        await Plan.updateMany(
+          {
+            planName,
+            "rateCard.courierServiceName": {
+              $ne: rateCardData.courierServiceName,
+            },
+          },
+          { $push: { rateCard: existing.toObject() } }
+        );
+      } else {
+        // 🆕 Create new rate card
+        const rateCardDoc = new RateCard(rateCardData);
+        await rateCardDoc.save();
+        savedRatecards.push(rateCardDoc);
+
+        // ✅ Push this new rateCard into Plan
+        await Plan.updateMany(
+          { planName: rateCardData.plan },
+          { $push: { rateCard: rateCardDoc.toObject() } }
+        );
+      }
     }
 
-    console.log("errr", errors);
     return res.status(200).json({
-      message: errors.length
-        ? "Some rows skipped due to errors or duplicates"
-        : "All rows saved successfully",
+      message: `Ratecard upload complete. ${savedRatecards.length} new, ${updatedRatecards.length} updated.`,
       savedCount: savedRatecards.length,
+      updatedCount: updatedRatecards.length,
       errors,
-      data: savedRatecards,
+      data: [...savedRatecards, ...updatedRatecards],
     });
   } catch (err) {
     console.error("Upload ratecard error:", err);

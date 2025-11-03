@@ -326,7 +326,7 @@ const submitNdrToAmazon = async (
   }
 };
 
-async function handleDelhiveryNdrAction(awb_number, action,comments) {
+async function handleDelhiveryNdrAction(awb_number, action, comments) {
   if (!awb_number || !action) {
     return {
       success: false,
@@ -738,6 +738,144 @@ const callSmartshipNdrApi = async (
   }
 };
 
+const submitNdrToZipypost = async (awb, payload) => {
+  try {
+    const {
+      action,
+      seller_remark,
+      contact_number,
+      customer_name,
+      address1,
+      address2,
+      provider
+    } = payload;
+
+    // ✅ Basic validation
+    if (!awb || !action || !seller_remark) {
+      return {
+        status: 400,
+        success: false,
+        error: "Missing required fields (awb, action, or seller_remark)",
+      };
+    }
+
+    // Validate specific fields based on action type
+    if (action === "Change Contact" && !/^[6-9]\d{9}$/.test(contact_number)) {
+      return {
+        status: 400,
+        success: false,
+        error:
+          "Valid 10-digit contact_number (starting with 6/7/8/9) is required for Change Contact action",
+      };
+    }
+
+    if (
+      action === "Change Address" &&
+      (!customer_name || !address1 || !address2)
+    ) {
+      return {
+        status: 400,
+        success: false,
+        error:
+          "customer_name, address1, and address2 are required for Change Address action",
+      };
+    }
+
+    // ✅ Build API URL & payload
+    const url = `https://api.zipypost.com/ndr/${awb}`;
+    const requestBody = {
+      action,
+      seller_remark,
+      ...(contact_number ? { contact_number } : {}),
+      ...(customer_name ? { customer_name } : {}),
+      ...(address1 ? { address1 } : {}),
+      ...(address2 ? { address2 } : {}),
+    };
+
+    console.log("📦 Sending NDR to ZipyPost:", requestBody);
+
+    // ✅ Send POST request
+    const response = await axios.post(url, requestBody, {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.ZIPYPOST_API_KEY}`, // replace with actual key/token
+      },
+    });
+
+    console.log("✅ ZipyPost NDR Response:", response.data);
+
+    // --- Update Order in DB (like submitNdrToDtdc) ---
+    const orderInDb = await Order.findOne({ awb_number: awb });
+
+    if (!orderInDb) {
+      return {
+        status: 404,
+        success: false,
+        error: "Order not found in database",
+        zipyResponse: response.data,
+      };
+    }
+
+    // --- Create history entry ---
+    const entry = {
+      action:
+        action.toUpperCase() === "RE-ATTEMPT"
+          ? "RE-ATTEMPT"
+          : action.toUpperCase() === "RTO"
+          ? "RTO"
+          : action,
+      actionBy: "ShipexIndia",
+      remark: seller_remark || "NDR Action Requested",
+      source: provider || "ZipyPost",
+      date: new Date(),
+    };
+
+    // --- Ensure ndrHistory exists and push action ---
+    if (!Array.isArray(orderInDb.ndrHistory)) {
+      orderInDb.ndrHistory = [];
+    }
+
+    // If latest history exists, append action
+    const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
+    if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
+      latest.actions.push(entry);
+    } else {
+      // Otherwise, add new ndrHistory record
+      orderInDb.ndrHistory.push({ actions: [entry] });
+    }
+
+    // --- Update status fields ---
+    orderInDb.ndrStatus = "Action_Requested";
+    orderInDb.status = "Undelivered";
+
+    await orderInDb.save();
+
+    console.log("✅ Order updated after ZipyPost NDR:", orderInDb.awb_number);
+
+    // ✅ Return success response
+    return {
+      status: 200,
+      success: true,
+      message: `${provider} NDR submitted successfully`,
+      zipyResponse: response.data,
+    };
+  } catch (error) {
+    console.error(
+      "❌ ZipyPost NDR Submission Error:",
+      error?.response?.data || error.message
+    );
+
+    return {
+      status: error?.response?.status || 500,
+      success: false,
+      error:
+        error?.response?.data?.message ||
+        "Error occurred while submitting NDR to ZipyPost",
+      details: error?.response?.data || error.message,
+    };
+  }
+};
+
 module.exports = {
   getOrderDetails,
   callShiprocketNdrApi,
@@ -747,4 +885,5 @@ module.exports = {
   submitNdrToDtdc,
   submitNdrToAmazon,
   callSmartshipNdrApi,
+  submitNdrToZipypost,
 };

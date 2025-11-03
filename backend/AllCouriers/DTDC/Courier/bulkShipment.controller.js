@@ -179,7 +179,7 @@ const createOrderDTDC = async (
       currentOrder.awb_number = result.reference_number;
       currentOrder.shipment_id = `${result.customer_reference_number}`;
       currentOrder.provider = serviceDetails.provider;
-      currentOrder.totalFreightCharges = charges;
+      currentOrder.totalFreightCharges = parseFloat(charges);
       currentOrder.courierServiceName = serviceDetails.name;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.estimatedDeliveryDate = estimateDate;
@@ -195,7 +195,7 @@ const createOrderDTDC = async (
       // console.log("sjakjska",balanceToBeDeducted)
       // Deduct wallet balance using atomic operation and update transaction
       const updatedWallet = await Wallet.findOneAndUpdate(
-        { _id: walletId, balance: { $gte: charges } }, // Ensure sufficient balance
+        { _id: walletId, balance: { $gte: parseFloat(charges) } }, // Ensure sufficient balance
         {
           $inc: { balance: -charges }, // Deduct balance
           $push: {
@@ -203,7 +203,7 @@ const createOrderDTDC = async (
               channelOrderId: currentOrder.orderId,
               category: "debit",
               amount: charges,
-              balanceAfterTransaction: currentWallet.balance - charges,
+              balanceAfterTransaction: currentWallet.balance - parseFloat(charges),
               date: new Date(),
               awb_number: result.reference_number,
               description: "Freight Charges Applied",

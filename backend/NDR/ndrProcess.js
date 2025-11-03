@@ -7,6 +7,7 @@ const {
   handleDelhiveryNdrAction,
   submitNdrToDtdc,
   submitNdrToAmazon,
+  submitNdrToZipypost
 } = require("../services/ndrService");
 const Order = require("../models/newOrder.model");
 
@@ -28,7 +29,7 @@ const ndrProcessController = async (req, res) => {
 
   // console.log("awb",awb_number)
   const orderDetails = await Order.findOne({ awb_number: awb_number });
-  console.log("dtdc", req.body);
+  // console.log("dtdc", req.body);
   // const orderDetails = getOrderDetails(orderId);
 
   if (!orderDetails) {
@@ -53,23 +54,23 @@ const ndrProcessController = async (req, res) => {
       );
     } else if (orderDetails.provider === "Delhivery") {
       response = await handleDelhiveryNdrAction(awb_number, action,comments);
-    } else if (orderDetails.provider === "DTDC") {
+    } else if (orderDetails.provider === "Dtdc") {
       response = await submitNdrToDtdc(
         awb_number,
         customer_code,
         rtoAction,
         remarks
       );
-    } else if (orderDetails.provider === "Amazon") {
+    } else if (orderDetails.provider === "Amazon Shipping") {
       response = await submitNdrToAmazon(
         awb_number,
         action,
         comments,
         scheduled_delivery_date
       );
-      console.log("re", response);
+      // console.log("re", response);
     } else if (orderDetails.provider === "Smartship") {
-      console.log("smartship");
+      // console.log("smartship");
       response = await callSmartshipNdrApi(
         awb_number,
         action,
@@ -77,7 +78,11 @@ const ndrProcessController = async (req, res) => {
         next_attempt_date,
         phone
       );
-    } else {
+    } else if(orderDetails.platform==="ZipyPost"){
+      // Implement ZipyPost NDR API call here
+      console.log("zipypost",req.body);
+    }
+     else {
       return res.status(400).json({ error: "Unsupported platform" });
     }
     console.log("resererer", response);

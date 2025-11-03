@@ -284,7 +284,7 @@ const createOrderZipypost = async (
       currentOrder.provider = result.courier.replace(/\+/g, "").trim();
       currentOrder.partner = "ZipyPost";
       currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.totalFreightCharges = charges;
+      currentOrder.totalFreightCharges = parseFloat(charges);
       currentOrder.courierServiceName = serviceDetails.name;
       currentOrder.zone = zone.zone;
       currentOrder.estimatedDeliveryDate = estimateDate;
@@ -300,15 +300,15 @@ const createOrderZipypost = async (
 
       // Deduct wallet balance
       await Wallet.findOneAndUpdate(
-        { _id: walletId, balance: { $gte: charges } },
+        { _id: walletId, balance: { $gte: parseFloat(charges) } },
         {
-          $inc: { balance: -charges },
+          $inc: { balance: -parseFloat(charges) },
           $push: {
             transactions: {
               channelOrderId: currentOrder.orderId,
               category: "debit",
-              amount: charges,
-              balanceAfterTransaction: currentWallet.balance - charges,
+              amount: parseFloat(charges),
+              balanceAfterTransaction: currentWallet.balance - parseFloat(charges),
               date: new Date(),
               awb_number: awb,
               description: "Freight Charges Applied",
