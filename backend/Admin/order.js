@@ -146,7 +146,7 @@ const filterOrdersForEmployee = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const totalCount = await Order.countDocuments(filter);
     // Conditional sorting logic
-    let sortOption = { updatedAt: -1 };
+    let sortOption = { shipmentCreatedAt: -1 };
     if (
       filter.status &&
       filter.status.$in &&
@@ -252,7 +252,7 @@ const filterNdrOrdersForEmployee = async (req, res) => {
       page = 1,
       limit = 20,
     } = req.query;
-    console.log("Query Params:", req.query);
+    // console.log("Query Params:", req.query);
     const filter = {};
 
     // Order ID

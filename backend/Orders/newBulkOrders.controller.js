@@ -34,6 +34,7 @@ const {
 const {
   createOrderZipypost,
 } = require("../AllCouriers/Zipypost/Couriers/bulkShipment.controller");
+
 const updatePickup = async (req, res) => {
   try {
     // console.log(req.body)
