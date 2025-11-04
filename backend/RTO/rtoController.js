@@ -6,7 +6,7 @@ const wallet = require("../models/wallet");
 const cron = require("node-cron");
 const zoneManagementController = require("../Rate/zoneManagementController");
 const getZone = zoneManagementController.getZone;
-
+const mongoose = require("mongoose");
 // Helper sleep function for delay
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -15,6 +15,7 @@ function sleep(ms) {
 const rtoCharges = async () => {
   try {
     const gstRate = 18;
+
     const orders = await Order.find({
       status: "RTO Delivered",
       RTOCharges: { $exists: false },
@@ -23,167 +24,251 @@ const rtoCharges = async () => {
     console.log("Total RTO Orders Found:", orders.length);
 
     for (const item of orders) {
-      try {
-        console.log("Processing AWB:", item.awb_number || "No AWB");
+      const session = await mongoose.startSession();
+      session.startTransaction();
 
-        const result = await getZone(
+      try {
+        console.log(`🚚 Processing AWB: ${item.awb_number}`);
+
+        // 1️⃣ Zone + Plan + Rate Card
+        const zoneRes = await getZone(
           item.pickupAddress.pinCode,
           item.receiverAddress.pinCode
         );
-        const currentZone = result.zone;
-        // console.log("courierServiceName",item.courierServiceName);
-        const plans = await Plan.findOne({ userId: item.userId });
-        // console.log("plans", plans.planName);
-        const ratecards = await rateCards.findOne({
-          plan: plans.planName,
-          courierServiceName: item.courierServiceName,
-        });
+        const currentZone = zoneRes.zone;
+        const planData = await Plan.findOne({ userId: item.userId }).session(
+          session
+        );
+        const rateCard = await rateCards
+          .findOne({
+            plan: planData?.planName,
+            courierServiceName: item.courierServiceName,
+          })
+          .session(session);
 
-        // console.log("ratecards", ratecards);
+        if (!rateCard) {
+          console.warn(
+            `No rate card for courier ${item.courierServiceName}, skipping AWB ${item.awb_number}`
+          );
+          await session.abortTransaction();
+          session.endSession();
+          continue;
+        }
 
+        // 2️⃣ Calculate charges
         const extraWeight =
           item.packageDetails.applicableWeight * 1000 -
-          ratecards.weightPriceBasic[0].weight;
-        const extraWeightCount = Math.ceil(
-          extraWeight / ratecards.weightPriceAdditional[0].weight
+          rateCard.weightPriceBasic[0].weight;
+        const extraWeightCount = Math.max(
+          0,
+          Math.ceil(extraWeight / rateCard.weightPriceAdditional[0].weight)
         );
 
-        let basicChargef = parseFloat(
-          ratecards.weightPriceBasic[0][currentZone]
-        );
-        let charges = basicChargef;
-
-        if (extraWeight !== 0) {
+        let baseCharge =
+          parseFloat(rateCard.weightPriceBasic[0][currentZone]) || 0;
+        let charges = baseCharge;
+        if (extraWeight > 0) {
           charges +=
-            parseFloat(ratecards.weightPriceAdditional[0][currentZone]) *
+            (parseFloat(rateCard.weightPriceAdditional[0][currentZone]) || 0) *
             extraWeightCount;
         }
 
+        const gstAmount = parseFloat(((charges * gstRate) / 100).toFixed(2));
+        const totalChargesReverse = parseFloat(
+          (charges + gstAmount).toFixed(2)
+        );
+
         let codCharges = 0;
-        if (item.paymentDetails.method === "COD") {
+        if (item.paymentDetails?.method === "COD") {
           codCharges = Math.max(
-            ratecards.codCharge,
-            item.paymentDetails.amount * (ratecards.codPercent / 100)
+            rateCard.codCharge || 0,
+            ((item.paymentDetails.amount || 0) * (rateCard.codPercent || 0)) /
+              100
           );
+          codCharges = parseFloat(codCharges.toFixed(2));
         }
 
-        const gstAmountForward = parseFloat(
-          (charges * (gstRate / 100)).toFixed(2)
-        );
-        const totalChargesReverse = charges + gstAmountForward;
+        // 3️⃣ Fetch user & wallet
+        const user = await users.findById(item.userId).session(session);
+        if (!user) {
+          console.warn(`User not found for order ${item._id}`);
+          await session.abortTransaction();
+          session.endSession();
+          continue;
+        }
+
+        // get wallet (with transactions)
+        const userWallet = await wallet.findById(user.Wallet).session(session);
+        if (!userWallet) {
+          console.warn(`Wallet not found for user ${user._id}`);
+          await session.abortTransaction();
+          session.endSession();
+          continue;
+        }
 
         const awb = item.awb_number || "";
+        const now = new Date();
+        const codDate = new Date(now.getTime()); // original
+        const rtoDate = new Date(now.getTime() + 1000); // +1 second ensures correct sort order
         const codDescription = "COD Charges Received";
         const rtoDescription = "RTO Freight Charges Applied";
-        const currentDate = new Date();
 
-        const user = await users.findOne({ _id: item.userId });
-        const Wallet = await wallet.findOne({ _id: user.Wallet });
-
-        // Track live balance during updates
-        let liveBalance = Wallet.balance;
-
-        // Helper: Remove transaction and update balance
-        const removeTransactionAndUpdateBalance = async (
-          walletDoc,
-          awb_number,
-          description
-        ) => {
-          const existingTx = walletDoc.transactions.find(
-            (tx) =>
-              tx.awb_number === awb_number && tx.description === description
-          );
-
-          if (existingTx) {
-            const amount = existingTx.amount;
-            const isCredit = existingTx.category === "credit";
-            // Remove the transaction and adjust live balance
-            await wallet.updateOne(
-              { _id: walletDoc._id },
-              {
-                $pull: {
-                  transactions: {
-                    awb_number,
-                    description,
-                  },
-                },
-                $inc: {
-                  balance: isCredit ? -amount : amount, // Adjust balance
-                },
-              }
-            );
-            liveBalance = isCredit
-              ? liveBalance - amount
-              : liveBalance + amount;
-          }
-        };
-
-        // ❌ Remove duplicates if exist and update balance
-        await removeTransactionAndUpdateBalance(Wallet, awb, codDescription);
-        await removeTransactionAndUpdateBalance(Wallet, awb, rtoDescription);
-
-        // ✅ Update order with RTO charges
-        await Order.updateOne(
-          { _id: item._id },
-          { $set: { RTOCharges: totalChargesReverse.toFixed(2) } }
+        // 4️⃣ If there are existing transactions for this AWB, compute net effect and revert it BEFORE removing them
+        const existingTxs = (userWallet.transactions || []).filter(
+          (t) =>
+            t.awb_number === awb &&
+            (t.description === codDescription ||
+              t.description === rtoDescription)
         );
 
-        // ✅ Add COD credit
-        if (codCharges > 0) {
-          liveBalance += codCharges;
+        if (existingTxs.length > 0) {
+          // compute net amount (credit positive, debit negative)
+          let netAmount = 0;
+          for (const t of existingTxs) {
+            const amt = parseFloat(t.amount) || 0;
+            if (String(t.category).toLowerCase() === "credit") netAmount += amt;
+            else netAmount -= amt; // debit
+          }
+
+          // If there is a net effect, revert it from wallet.balance
+          if (Math.abs(netAmount) > 0.0001) {
+            // revert by applying -(netAmount)
+            const revertInc = -netAmount;
+            const reverted = await wallet
+              .findOneAndUpdate(
+                { _id: userWallet._id },
+                { $inc: { balance: revertInc } },
+                { new: true, session }
+              )
+              .lean();
+
+            console.log(
+              `🔁 Reverted existing TXs for AWB ${awb}: netAmount=${netAmount}, applied revertInc=${revertInc}, newBalance=${reverted.balance}`
+            );
+          } else {
+            console.log(
+              `🔁 Found existing transactions for AWB ${awb} but netAmount is 0 — removing records without balance change.`
+            );
+          }
+
+          // Now remove the old transactions (we already applied balance revert)
           await wallet.updateOne(
-            { _id: Wallet._id },
+            { _id: userWallet._id },
             {
-              $inc: { balance: codCharges },
+              $pull: {
+                transactions: {
+                  awb_number: awb,
+                  description: { $in: [codDescription, rtoDescription] },
+                },
+              },
+            },
+            { session }
+          );
+
+          // Important: refresh userWallet variable to reflect reverted balance for later ops
+          // (we'll re-fetch before applying new increments)
+        }
+
+        // Helper: atomically apply an increment and return new wallet doc
+        const applyIncAndGet = async (walletId, incValue) => {
+          const updated = await wallet
+            .findOneAndUpdate(
+              { _id: walletId },
+              { $inc: { balance: incValue } },
+              { new: true, session }
+            )
+            .lean();
+          return updated;
+        };
+
+        // re-fetch wallet to ensure we have latest balance (after possible revert)
+        const walletBeforeOps = await wallet
+          .findById(userWallet._id)
+          .session(session);
+
+        // 5️⃣ Apply COD credit first (if applicable) — atomic increment then push transaction using returned balance
+        if (codCharges > 0) {
+          const upd = await applyIncAndGet(userWallet._id, codCharges);
+          const balanceAfter = parseFloat((upd.balance || 0).toFixed(2));
+
+          await wallet.updateOne(
+            { _id: userWallet._id },
+            {
               $push: {
                 transactions: {
                   channelOrderId: item.orderId || null,
                   category: "credit",
                   amount: codCharges,
-                  balanceAfterTransaction: liveBalance,
-                  date: currentDate,
+                  balanceAfterTransaction: balanceAfter,
+                  date: codDate,
                   awb_number: awb,
                   description: codDescription,
                 },
               },
-            }
+            },
+            { session }
+          );
+
+          console.log(
+            `➕ COD applied for AWB ${awb}: +${codCharges}, balanceAfter=${balanceAfter}`
           );
         }
 
-        // ✅ Add RTO charge debit
-        liveBalance -= totalChargesReverse;
+        // 6️⃣ Apply RTO debit (atomic decrement and then push tx with returned balance)
+        const updAfterDebit = await applyIncAndGet(
+          userWallet._id,
+          -totalChargesReverse
+        );
+        const balanceAfterDebit = parseFloat(
+          (updAfterDebit.balance || 0).toFixed(2)
+        );
+
         await wallet.updateOne(
-          { _id: Wallet._id },
+          { _id: userWallet._id },
           {
-            $inc: { balance: -totalChargesReverse },
             $push: {
               transactions: {
                 channelOrderId: item.orderId || null,
                 category: "debit",
                 amount: totalChargesReverse,
-                balanceAfterTransaction: liveBalance,
-                date: currentDate,
+                balanceAfterTransaction: balanceAfterDebit,
+                date: rtoDate,
                 awb_number: awb,
                 description: rtoDescription,
               },
             },
-          }
+          },
+          { session }
         );
 
-        // ⏱️ Wait 1 second before the next order
-        await sleep(1000);
-      } catch (innerErr) {
-        console.error(
-          "❌ Error processing order:",
-          item._id,
-          "AWB:",
-          item.awb_number,
-          innerErr
+        // 7️⃣ Save RTO charges on order
+        await Order.updateOne(
+          { _id: item._id },
+          { $set: { RTOCharges: totalChargesReverse } },
+          { session }
         );
+
+        // 8️⃣ commit
+        await session.commitTransaction();
+        console.log(
+          `✅ Processed AWB ${awb}: credit ${codCharges}, debit ${totalChargesReverse}, final balance ${balanceAfterDebit}`
+        );
+      } catch (err) {
+        console.error(`Error processing AWB ${item.awb_number}:`, err);
+        try {
+          await session.abortTransaction();
+        } catch (e) {
+          console.error("Failed abortTransaction:", e);
+        }
+      } finally {
+        session.endSession();
       }
+
+      // small delay to reduce DB contention
+      await sleep(200);
     }
-  } catch (error) {
-    console.error("❌ Error in rtoCharges main block:", error);
+  } catch (err) {
+    console.error("rtoCharges main error:", err);
   }
 };
 

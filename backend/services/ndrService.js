@@ -4,6 +4,7 @@ const DEL_API_TOKEN = process.env.DEL_API_TOKEN;
 const Order = require("../models/newOrder.model");
 const moment = require("moment");
 const FormData = require("form-data");
+const {getAuthToken}=require("../AllCouriers/Zipypost/Authorize/zipyPost.controller")
 const {
   getAccessToken,
 } = require("../AllCouriers/SmartShip/Authorize/smartShip.controller");
@@ -747,9 +748,10 @@ const submitNdrToZipypost = async (awb, payload) => {
       customer_name,
       address1,
       address2,
-      provider
+      provider,
     } = payload;
-
+    const token = await getAuthToken();
+    const sellerId = process.env.ZIPYPOST_SELLER_ID;
     // ✅ Basic validation
     if (!awb || !action || !seller_remark) {
       return {
@@ -798,7 +800,9 @@ const submitNdrToZipypost = async (awb, payload) => {
     const response = await axios.post(url, requestBody, {
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.ZIPYPOST_API_KEY}`, // replace with actual key/token
+        authorization: token.authToken,
+        timestamp:token.timestamp,
+        sellerid:sellerId
       },
     });
 
@@ -869,7 +873,7 @@ const submitNdrToZipypost = async (awb, payload) => {
       status: error?.response?.status || 500,
       success: false,
       error:
-        error?.response?.data?.message ||
+        error?.response?.data?.error ||
         "Error occurred while submitting NDR to ZipyPost",
       details: error?.response?.data || error.message,
     };
