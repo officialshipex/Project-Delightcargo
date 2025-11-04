@@ -237,6 +237,8 @@ const createOrder = async (req, res) => {
       ],
     };
 
+    console.log("payloadData", payloadData.shipments);
+
     const payload = `format=json&data=${encodeURIComponent(
       JSON.stringify(payloadData)
     )}`;

@@ -654,32 +654,41 @@ const getDashboardOverview = async (req, res) => {
   try {
     const userId = req.user._id;
     const searchId = req.query.userId;
-    const userData = await User.findById(userId);
+    let { startDate, endDate } = req.query;
+    // If not provided, take today's date
+    if (!startDate || !endDate) {
+      const today = new Date();
+      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
+      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+    }
+    // console.log("startDate,endDate", startDate, endDate);
 
+    const userData = await User.findById(userId);
     const isAdminView = userData?.isAdmin && userData?.adminTab;
 
-    // Filter by user type
+    // ✅ Define base match conditions
     let baseMatch = {};
+    if (startDate && endDate) {
+      baseMatch.createdAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
     if (!isAdminView) {
       baseMatch.userId = userId;
     } else if (searchId) {
       baseMatch.userId = new mongoose.Types.ObjectId(searchId);
     }
-
-    const today = moment().startOf("day").toDate();
-    const yesterday = moment().subtract(1, "day").startOf("day").toDate();
-    const last30Days = moment().subtract(30, "days").toDate();
-
+    // console.log("base match", baseMatch);
+    // ✅ Aggregate all metrics based on startDate and endDate
     const [result] = await Order.aggregate([
       { $match: baseMatch },
       {
-        // ✅ Extract the last tracking date (for delivered orders)
         $addFields: {
           lastTrackingDate: {
             $let: {
-              vars: {
-                lastItem: { $arrayElemAt: ["$tracking", -1] },
-              },
+              vars: { lastItem: { $arrayElemAt: ["$tracking", -1] } },
               in: "$$lastItem.StatusDateTime",
             },
           },
@@ -687,54 +696,71 @@ const getDashboardOverview = async (req, res) => {
       },
       {
         $facet: {
-          // 🔹 Order counts
+          // 🔹 Orders count
           todaysOrders: [
-            { $match: { createdAt: { $gte: today } } },
+            {
+              $match: {
+                createdAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
+              },
+            },
             { $count: "count" },
           ],
           yesterdaysOrders: [
-            { $match: { createdAt: { $gte: yesterday, $lt: today } } },
+            {
+              $match: {
+                createdAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
+              },
+            },
             { $count: "count" },
           ],
 
-          // 🔹 Today's revenue based on tracking date (not createdAt)
+          // 🔹 Revenue
           todaysRevenue: [
             {
               $match: {
-                status: { $in: ["In-transit", "Out for Delivery", "Delivered"] },
-                lastTrackingDate: { $gte: today },
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
+                totalFreightCharges: { $gt: 0 },
+                status: { $nin: ["new", "Cancelled"] },
               },
             },
             {
-              $group: {
-                _id: null,
-                revenue: { $sum: "$totalFreightCharges" },
-              },
+              $group: { _id: null, revenue: { $sum: "$totalFreightCharges" } },
             },
           ],
-
-          // 🔹 Yesterday's revenue based on tracking date
           yesterdaysRevenue: [
             {
               $match: {
-                status: "Delivered",
-                lastTrackingDate: { $gte: yesterday, $lt: today },
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
+                totalFreightCharges: { $gt: 0 },
               },
             },
             {
-              $group: {
-                _id: null,
-                revenue: { $sum: "$totalFreightCharges" },
-              },
+              $group: { _id: null, revenue: { $sum: "$totalFreightCharges" } },
             },
           ],
 
-          // 🔹 Average shipping cost (last 30 days)
+          // 🔹 Average shipping cost
           avgShipping: [
             {
               $match: {
-                createdAt: { $gte: last30Days },
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
                 totalFreightCharges: { $gt: 0 },
+                status: { $nin: ["new", "Cancelled"] },
               },
             },
             {
@@ -748,14 +774,24 @@ const getDashboardOverview = async (req, res) => {
 
           // 🔹 Shipment stats
           totalShipments: [
-            { $match: { createdAt: { $gte: last30Days } } },
+            {
+              $match: {
+                createdAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
+              },
+            },
             { $count: "count" },
           ],
           readyToShip: [
             {
               $match: {
-                createdAt: { $gte: last30Days },
-                status: "Ready To Ship",
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
+                status: { $in: ["Ready To Ship", "Booked", "Not Picked"] },
               },
             },
             { $count: "count" },
@@ -763,7 +799,10 @@ const getDashboardOverview = async (req, res) => {
           inTransit: [
             {
               $match: {
-                createdAt: { $gte: last30Days },
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
                 status: "In-transit",
               },
             },
@@ -772,7 +811,10 @@ const getDashboardOverview = async (req, res) => {
           outForDelivery: [
             {
               $match: {
-                createdAt: { $gte: last30Days },
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
                 status: "Out for Delivery",
               },
             },
@@ -780,34 +822,37 @@ const getDashboardOverview = async (req, res) => {
           ],
           delivered: [
             {
-              $match: { createdAt: { $gte: last30Days }, status: "Delivered" },
+              $match: {
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
+                status: "Delivered",
+              },
             },
             { $count: "count" },
           ],
           rto: [
             {
               $match: {
-                createdAt: { $gte: last30Days },
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
                 status: "RTO Delivered",
               },
             },
             { $count: "count" },
           ],
 
-          // 🔹 NDR Stats
-          totalNdr: [
-            {
-              $match: {
-                createdAt: { $gte: last30Days },
-                ndrStatus: { $exists: true },
-              },
-            },
-            { $count: "count" },
-          ],
+          // 🔹 NDR stats
           actionRequired: [
             {
               $match: {
-                createdAt: { $gte: last30Days },
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
                 ndrStatus: "Undelivered",
               },
             },
@@ -816,7 +861,10 @@ const getDashboardOverview = async (req, res) => {
           actionRequested: [
             {
               $match: {
-                createdAt: { $gte: last30Days },
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
                 ndrStatus: "Action_Requested",
               },
             },
@@ -825,7 +873,10 @@ const getDashboardOverview = async (req, res) => {
           ndrDelivered: [
             {
               $match: {
-                createdAt: { $gte: last30Days },
+                shipmentCreatedAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
                 ndrStatus: "Delivered",
               },
             },
@@ -835,43 +886,50 @@ const getDashboardOverview = async (req, res) => {
       },
     ]);
 
-    // COD aggregation
+    const codMatch = {};
+    if (searchId) {
+      // Admin is viewing a specific user
+      codMatch.userId = new mongoose.Types.ObjectId(searchId);
+    } else if (!isAdminView) {
+      // Regular user view — only their own data
+      codMatch.userId = new mongoose.Types.ObjectId(userId);
+    }
+
     const codSummary = await Cod.aggregate([
-      { $match: baseMatch },
-      { $unwind: "$remittanceData" },
+      { $match: codMatch }, // filter by user if provided
+
       {
         $group: {
           _id: null,
-          codAvailable: { $sum: "$remittanceData.codAvailable" },
-          codTotal: { $sum: "$remittanceData.amountCreditedToWallet" },
-          codPending: {
+
+          // Total amount available
+          codAvailable: { $sum: { $ifNull: ["$RemittanceInitiated", 0] } },
+
+          // Total COD = CODToBeRemitted + RemittanceInitiated
+          codTotal: {
             $sum: {
-              $cond: [
-                { $eq: ["$remittanceData.status", "Pending"] },
-                "$remittanceData.codAvailable",
-                0,
+              $add: [
+                { $ifNull: ["$CODToBeRemitted", 0] },
+                { $ifNull: ["$RemittanceInitiated", 0] },
               ],
             },
           },
-          lastCODRemitted: {
-            $max: {
-              $cond: [
-                { $eq: ["$remittanceData.status", "Paid"] },
-                "$remittanceData.date",
-                null,
-              ],
-            },
-          },
+
+          // Pending COD (if status not tracked here, set as 0 or handle later)
+          codPending: { $sum: { $ifNull: ["$CODToBeRemitted", 0] } },
+          // Latest/Max COD remitted value
+          lastCODRemitted: { $max: { $ifNull: ["$LastCODRemitted", 0] } },
         },
       },
     ]);
 
+    // ✅ Extract & compute
     const codData = codSummary[0] || {};
+    // console.log("cod", codData);
     const avgShippingData = result.avgShipping[0] || {};
-
     const avgShippingCost =
       avgShippingData.count > 0
-        ? Math.round(avgShippingData.totalFreight / avgShippingData.count)
+        ? avgShippingData.totalFreight / avgShippingData.count
         : 0;
 
     const totalNdr =
@@ -879,20 +937,25 @@ const getDashboardOverview = async (req, res) => {
       (result.actionRequested[0]?.count || 0) +
       (result.ndrDelivered[0]?.count || 0);
 
+    // ✅ Final Response
     return res.status(200).json({
       success: true,
       data: {
         todaysOrders: result.todaysOrders[0]?.count || 0,
         yesterdaysOrders: result.yesterdaysOrders[0]?.count || 0,
-        todaysRevenue: result.todaysRevenue[0]?.revenue || 0,
-        yesterdaysRevenue: result.yesterdaysRevenue[0]?.revenue || 0,
-        avgShippingCost,
+        todaysRevenue: Number(
+          (result.todaysRevenue[0]?.revenue || 0).toFixed(2)
+        ),
+        yesterdaysRevenue: Number(
+          (result.yesterdaysRevenue[0]?.revenue || 0).toFixed(2)
+        ),
+        avgShippingCost: Number(avgShippingCost.toFixed(2)),
 
         codAvailable: codData.codAvailable || 0,
         codTotal: codData.codTotal || 0,
         codPending: codData.codPending || 0,
         lastCODRemitted: codData.codTotal || 0,
-        lastCODRemittedDate: codData.lastCODRemitted || null,
+        lastCODRemitted: codData.lastCODRemitted || null,
 
         shipmentStats: {
           total: result.totalShipments[0]?.count || 0,
@@ -926,7 +989,13 @@ const getOverviewGraphsData = async (req, res) => {
     const userId = req.user._id;
 
     const searchId = req.query.userId;
-
+    let { startDate, endDate } = req.query;
+    // If not provided, take today's date
+    if (!startDate || !endDate) {
+      const today = new Date();
+      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
+      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+    }
     const userData = await User.findById(userId);
     // Check if admin and has adminTab access
     const isAdminView = userData?.isAdmin && userData?.adminTab;
@@ -940,13 +1009,16 @@ const getOverviewGraphsData = async (req, res) => {
       // Admin with a selected user
       baseMatch.userId = new mongoose.Types.ObjectId(searchId);
     }
-    const last30Days = moment().subtract(30, "days").toDate();
+    // const last30Days = moment().subtract(30, "days").toDate();
 
     const [result] = await Order.aggregate([
       {
         $match: {
           ...baseMatch,
-          createdAt: { $gte: last30Days },
+          shipmentCreatedAt: {
+            $gte: new Date(startDate),
+            $lte: new Date(endDate),
+          },
         },
       },
       {
@@ -1016,7 +1088,13 @@ const getOverviewCardData = async (req, res) => {
     const userId = req.user._id;
 
     const searchId = req.query.userId;
-
+    let { startDate, endDate } = req.query;
+    // If not provided, take today's date
+    if (!startDate || !endDate) {
+      const today = new Date();
+      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
+      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+    }
     const userData = await User.findById(userId);
     // Check if admin and has adminTab access
     const isAdminView = userData?.isAdmin && userData?.adminTab;
@@ -1044,7 +1122,10 @@ const getOverviewCardData = async (req, res) => {
           ordersByZone: [
             {
               $match: {
-                createdAt: { $gte: last30Days },
+                createdAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
               },
             },
             {
@@ -1125,7 +1206,10 @@ const getOverviewCardData = async (req, res) => {
             {
               $match: {
                 ...baseMatch,
-                createdAt: { $gte: last30Days },
+                createdAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
               },
             },
             {
@@ -1292,9 +1376,17 @@ const getOrderSummary = async (req, res) => {
         percent: getPercent(statusMap["new"] || 0),
       },
       readyToShip: {
-        count: statusMap["Ready To Ship"] || 0,
-        percent: getPercent(statusMap["Ready To Ship"] || 0),
+        count:
+          (statusMap["Ready To Ship"] || 0) +
+          (statusMap["Booked"] || 0) +
+          (statusMap["Not Picked"] || 0),
+        percent: getPercent(
+          (statusMap["Ready To Ship"] || 0) +
+            (statusMap["Booked"] || 0) +
+            (statusMap["Not Picked"] || 0)
+        ),
       },
+
       inTransit: {
         count: statusMap["In-transit"] || 0,
         percent: getPercent(statusMap["In-transit"] || 0),
@@ -1663,7 +1755,13 @@ const getCourierComparison = async (req, res) => {
   try {
     const userId = req.user._id;
     const searchId = req.query.userId;
-
+    let { startDate, endDate } = req.query;
+    // If not provided, take today's date
+    if (!startDate || !endDate) {
+      const today = new Date();
+      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
+      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+    }
     const userData = await User.findById(userId);
     const isAdminView = userData?.isAdmin && userData?.adminTab;
 
@@ -1673,6 +1771,12 @@ const getCourierComparison = async (req, res) => {
       baseMatch.userId = userId;
     } else if (searchId) {
       baseMatch.userId = new mongoose.Types.ObjectId(searchId);
+    }
+    if (startDate && endDate) {
+      baseMatch.shipmentCreatedAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
     }
 
     const orders = await Order.aggregate([

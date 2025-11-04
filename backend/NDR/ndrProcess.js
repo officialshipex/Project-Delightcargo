@@ -20,11 +20,13 @@ const ndrProcessController = async (req, res) => {
     scheduled_delivery_slot,
     mobile,
     consignee_address,
+    consignee_address2,
     customer_code,
     rtoAction,
     remarks,
     next_attempt_date,
     phone,
+    customer_name
   } = req.body;
 
   // console.log("awb",awb_number)
@@ -78,14 +80,24 @@ const ndrProcessController = async (req, res) => {
         next_attempt_date,
         phone
       );
-    } else if(orderDetails.platform==="ZipyPost"){
+    } else if(orderDetails.partner==="ZipyPost"){
       // Implement ZipyPost NDR API call here
-      console.log("zipypost",req.body);
+      // console.log("zipypost",req.body);
+      const payload={
+        action,
+        seller_remark:remarks,
+        contact_number:phone,
+        customer_name,
+        address1:consignee_address,
+        address2:consignee_address2,
+        provider:orderDetails.provider,
+      }
+      response=await submitNdrToZipypost(awb_number,payload);
     }
      else {
       return res.status(400).json({ error: "Unsupported platform" });
     }
-    console.log("resererer", response);
+    // console.log("resererer", response);
     res.json({ success: response.success, data: response.error });
   } catch (error) {
     console.log(error);
