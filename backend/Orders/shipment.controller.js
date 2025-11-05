@@ -186,7 +186,8 @@ const checkServiceabilityAll = async (service, id, pincode) => {
       if (local.reason === "courier_not_found" || local.reason === "error") {
         const result = await checkServiceabilityDTDC(
           pickupPincode,
-          deliveryPincode
+          deliveryPincode,
+          paymentMethod
         );
         // console.log("result",result)
         return result;

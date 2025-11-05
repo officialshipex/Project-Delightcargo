@@ -369,7 +369,7 @@ verfication.post("/verify-otp", async (req, res) => {
     const userId = req.user._id;
     // const userId = "6711f5f10d7b30f7193c55fd";
     const { otp, refId, aadhaarNo } = req.body;
-// console.log(req.body);
+    // console.log(req.body);
     if (!otp || !refId) {
       return res.status(400).json({
         success: false,
@@ -415,7 +415,7 @@ verfication.post("/verify-otp", async (req, res) => {
       address: response.data.address,
       name: response.data.name,
       state: response.data.split_address.state,
-      city:response.data.split_address.dist,
+      city: response.data.split_address.dist,
     });
 
     await newAadhaar.save();
@@ -445,11 +445,17 @@ verfication.post("/verify-otp", async (req, res) => {
  */
 verfication.post("/bank-account", async (req, res) => {
   try {
-    const userId = req.user._id;
+    // let userId = req.user._id;
+    let userId;
+    if (req.query.id) {
+      userId = req.query.id;
+    } else {
+      userId = req.user._id;
+    }
     // const userId = "6711f5f10d7b30f7193c55fd";
 
     const { accountNo, ifsc } = req.body;
-    console.log(req.body);
+    // console.log(req.body);
 
     if (!accountNo || !ifsc) {
       return res.status(400).json({
@@ -774,6 +780,81 @@ verfication.get("/kyc2", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+    });
+  }
+});
+
+verfication.post("/updateAadhaar", async (req, res) => {
+  try {
+    const {
+      aadhaarNumber,
+      name,
+      address,
+      state,
+      city,
+      status,
+      sonOf,
+      dob,
+      email,
+      gender,
+    } = req.body;
+    const { id } = req.query; // user ID from query
+
+    if (!id || !aadhaarNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID and Aadhaar number are required.",
+      });
+    }
+
+    // Use empty string for missing fields
+    const aadhaarData = {
+      user: id,
+      aadhaarNumber: aadhaarNumber || "",
+      status: status || "",
+      sonOf: sonOf || "",
+      dob: dob || "",
+      email: email || "",
+      gender: gender || "",
+      address: address || "",
+      name: name || "",
+      state: state || "",
+      city: city || "",
+    };
+
+    // Check if Aadhaar already exists for this user
+    let aadhaar = await Aadhaar.findOne({ user: id });
+
+    if (aadhaar) {
+      // Update existing record
+      aadhaar = await Aadhaar.findOneAndUpdate(
+        { user: id },
+        { $set: aadhaarData },
+        { new: true }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Aadhaar details updated successfully.",
+        data: aadhaar,
+      });
+    } else {
+      // Create new record
+      const newAadhaar = new Aadhaar(aadhaarData);
+      await newAadhaar.save();
+
+      return res.status(201).json({
+        success: true,
+        message: "Aadhaar record created successfully.",
+        data: newAadhaar,
+      });
+    }
+  } catch (error) {
+    console.error("Error updating Aadhaar:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while updating Aadhaar details.",
+      error: error.message,
     });
   }
 });

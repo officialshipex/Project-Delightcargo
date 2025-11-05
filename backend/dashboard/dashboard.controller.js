@@ -302,7 +302,7 @@ const getBusinessInsights = async (req, res) => {
         $facet: {
           // === TODAY ===
           todaysOrders: [
-            { $match: { createdAt: { $gte: startOfToday } } },
+            { $match: { createdAt: { $gte: new Date(startOfToday) } } },
             { $count: "count" },
           ],
           todaysOrderValue: [

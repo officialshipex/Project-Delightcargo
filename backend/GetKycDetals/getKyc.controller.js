@@ -8,17 +8,50 @@ const BillingInfo = require("../models/billingInfo.model");
 const kycdata = async (req, res) => {};
 const getAadhaar = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const Aadhaars = await Aadhaar.findOne({ user: userId });
-    if (!Aadhaars) {
-      return res.status(204).json({ message: "pending" });
+    let userId;
+    if (req.query.id) {
+      userId = req.query.id;
+    } else {
+      userId = req.user._id;
     }
-    return res.status(200).json(Aadhaars);
+
+    const aadhaar = await Aadhaar.findOne({ user: userId });
+
+    if (!aadhaar) {
+      // Return example empty object structure
+      const emptyAadhaar = {
+        user: userId,
+        aadhaarNumber: "",
+        status: "",
+        sonOf: "",
+        dob: "",
+        email: "",
+        gender: "",
+        address: "",
+        name: "",
+        state: "",
+        city: "",
+      };
+
+      return res.status(200).json({
+        success: true,
+        message: "Aadhaar details not found, returning empty object.",
+        data: emptyAadhaar,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Aadhaar details fetched successfully.",
+      data: aadhaar,
+    });
   } catch (error) {
     console.error("Error fetching Aadhaar data:", error);
-    return res
-      .status(500)
-      .json({ error: "An error occurred while fetching Aadhaar data" });
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while fetching Aadhaar data.",
+      error: error.message,
+    });
   }
 };
 
@@ -36,7 +69,7 @@ const getBillingInfo = async (req, res) => {
       .status(500)
       .json({ error: "An error occurred while fetching Billing Info" });
   }
-}
+};
 
 const getPan = async (req, res) => {
   try {
@@ -55,9 +88,14 @@ const getPan = async (req, res) => {
 
 const getBankAccount = async (req, res) => {
   try {
-    const userId = req.user._id;
+    let userId;
+    if (req.query.id) {
+      userId = req.query.id;
+    } else {
+      userId = req.user._id;
+    }
     const Bank = await BankAccount.findOne({ user: userId });
-    console.log(Bank);
+    // console.log(Bank);
     if (!Bank) {
       return res.status(204).json({ message: "pending" });
     }
@@ -94,5 +132,5 @@ module.exports = {
   getBankAccount,
   getGST,
   getAddress,
-  getBillingInfo
+  getBillingInfo,
 };

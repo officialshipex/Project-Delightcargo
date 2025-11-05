@@ -412,7 +412,11 @@ const trackOrderDTDC = async (AWBNo) => {
 };
 // trackOrderDTDC('I75009052');
 
-const checkServiceabilityDTDC = async (originPincode, destinationPincode) => {
+const checkServiceabilityDTDC = async (
+  originPincode,
+  destinationPincode,
+  paymentType
+) => {
   try {
     if (!originPincode || !destinationPincode) {
       return {
@@ -427,29 +431,20 @@ const checkServiceabilityDTDC = async (originPincode, destinationPincode) => {
       desPincode: destinationPincode,
     };
 
-    // console.log("Request Body:", requestBody);
-
-    // Make API Call
     const response = await axios.post(
       "http://smarttrack.ctbsplus.dtdc.com/ratecalapi/PincodeApiCall",
       requestBody,
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
+      { headers: { "Content-Type": "application/json" } }
     );
 
-    // console.log("dtdc service",response.data)
-
-    const zipCodeResponse = response.data.ZIPCODE_RESP || [];
-    // console.log("DTDC Response:", response.data);
+    const data = response.data;
+    const zipCodeResponse = data.ZIPCODE_RESP || [];
+    const serviceList = data.SERV_LIST?.[0] || {};
 
     if (zipCodeResponse.length === 0) {
-      return { success: false }; // No data returned
+      return { success: false, error: "No serviceability data found" };
     }
 
-    // Filter responses for origin and destination
     const originResponses = zipCodeResponse.filter(
       (resp) => resp.ORGPIN === originPincode
     );
@@ -457,26 +452,50 @@ const checkServiceabilityDTDC = async (originPincode, destinationPincode) => {
       (resp) => resp.DESTPIN === destinationPincode
     );
 
-    // Ensure every response for origin and destination is SUCCESS and SERVFLAG === "Y"
     const isOriginServiceable =
       originResponses.length > 0 &&
       originResponses.every(
         (resp) => resp.MESSAGE === "SUCCESS" && resp.SERVFLAG === "Y"
       );
+
     const isDestinationServiceable =
       destinationResponses.length > 0 &&
       destinationResponses.every(
         (resp) => resp.MESSAGE === "SUCCESS" && resp.SERVFLAG === "Y"
       );
 
-    // console.log("isOrigin:", isOriginServiceable);
-    // console.log("isDestination:", isDestinationServiceable);
+    // ✅ Check based on payment type
+    let isPaymentTypeServiceable = false;
 
-    // If both origin and destination are fully serviceable, return true
-    return { success: isOriginServiceable && isDestinationServiceable };
+    if (paymentType?.toUpperCase() === "COD") {
+      isPaymentTypeServiceable =
+        serviceList.COD_Serviceable === "YES" ||
+        serviceList.b2C_COD_Serviceable === "YES"
+        // serviceList.b2B_COD_Serviceable === "YES";
+    } else {
+      // prepaid order
+      isPaymentTypeServiceable =
+        serviceList.b2C_SERVICEABLE === "YES"
+        // serviceList.b2B_SERVICEABLE === "YES";
+    }
+
+    const isServiceable =
+      isOriginServiceable &&
+      isDestinationServiceable &&
+      isPaymentTypeServiceable;
+
+    return {
+      success: isServiceable,
+      type: paymentType,
+      details: {
+        originServiceable: isOriginServiceable,
+        destinationServiceable: isDestinationServiceable,
+        paymentTypeServiceable: isPaymentTypeServiceable,
+      },
+    };
   } catch (error) {
-    // console.error("Error checking serviceability:", error.message);
-    return { success: false };
+    console.error("Error checking DTDC serviceability:", error.message);
+    return { success: false, error: "Error checking serviceability" };
   }
 };
 

@@ -119,7 +119,8 @@ const calculateRate = async (req, res) => {
         } else if (provider === "Dtdc") {
           serviceable = await checkServiceabilityDTDC(
             pickUpPincode,
-            deliveryPincode
+            deliveryPincode,
+            paymentType
           );
         } else if (provider === "Smartship") {
           const payload = {
