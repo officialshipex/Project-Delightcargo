@@ -473,7 +473,7 @@ const exportDemoRatecard = async (req, res) => {
     });
 
     // --- Add a blank row for visual separation ---
-    worksheet.addRow({});
+    // worksheet.addRow({});
 
     // --- Second ratecard: Basic and Additional ---
     worksheet.addRow({
