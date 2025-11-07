@@ -13,7 +13,9 @@ const {
 const {
   cancelShipment,
 } = require("../../AllCouriers/Amazon/Courier/couriers.controller");
-const { cancelOrderZipyPost } = require("../../AllCouriers/Zipypost/Couriers/couriers.controller");
+const {
+  cancelOrderZipypost,
+} = require("../../AllCouriers/Zipypost/Couriers/couriers.controller");
 // Assuming other cancel functions are imported similarly
 
 const mongoose = require("mongoose");
@@ -57,12 +59,18 @@ const cancelOrdersAtBooked = async (req, res) => {
         session
       );
       if (!currentWallet) throw new Error("Wallet linked with user not found");
+      // console.log("currentOrder", currentOrder);
+      let provider;
 
-      let provider =
-        currentOrder.partner === "ZipyPost"
-          ? "ZipyPost"
-          : currentOrder.provider;
-
+      if (
+        currentOrder.partner === "ZipyPost" &&
+        currentOrder.provider === "Bluedart"
+      ) {
+        provider = "ZipyPost";
+      } else {
+        provider = currentOrder.provider;
+      }
+      // console.log("provider", provider);
       let result;
       switch (provider) {
         case "Delhivery":
@@ -81,7 +89,7 @@ const cancelOrdersAtBooked = async (req, res) => {
           result = await cancelOrderShreeMaruti(currentOrder.orderId);
           break;
         case "ZipyPost":
-          result = await cancelOrderZipyPost(currentOrder.awb_number);
+          result = await cancelOrderZipypost(currentOrder.awb_number);
           break;
         default:
           throw new Error("Unsupported courier provider");

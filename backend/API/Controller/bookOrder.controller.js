@@ -56,7 +56,7 @@ const bookOrder = async (req, res) => {
 
   const { orderId, courierServiceName, courierId } = value;
   const provider = providerMap[courierId] || null;
-
+  console.log("value", value, provider);
   try {
     // ✅ Fetch order
     const order = await Order.findOne({ orderId });
@@ -83,10 +83,11 @@ const bookOrder = async (req, res) => {
       });
     }
 
-    if(!user.kycDone ){
+    if (!user.kycDone) {
       return res.status(403).json({
         status: "failure",
-        message: "KYC not completed. Please verify your KYC before booking an order.",
+        message:
+          "KYC not completed. Please verify your KYC before booking an order.",
       });
     }
 
@@ -150,9 +151,11 @@ const bookOrder = async (req, res) => {
 
     // ✅ Fetch courier service (for DTDC etc.)
     const courierService = await CourierService.findOne({
-      name: courierServiceName,
-      provider: provider,
+      name: { $regex: `^\\s*${courierServiceName.trim()}\\s*$`, $options: "i" },
+      provider,
     });
+
+    // console.log("courier", courierService);
     if (!courierService) {
       return res.status(400).json({
         status: "failure",

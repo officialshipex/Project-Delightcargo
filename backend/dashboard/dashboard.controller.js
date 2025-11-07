@@ -308,7 +308,7 @@ const getBusinessInsights = async (req, res) => {
           todaysOrderValue: [
             {
               $match: {
-                createdAt: { $gte: startOfToday },
+                createdAt: { $gte: new Date(startOfToday) },
                 status: validStatus,
               },
             },
@@ -849,7 +849,7 @@ const getDashboardOverview = async (req, res) => {
           actionRequired: [
             {
               $match: {
-                shipmentCreatedAt: {
+                "ndrReason.date": {
                   $gte: new Date(startDate),
                   $lte: new Date(endDate),
                 },
@@ -861,7 +861,7 @@ const getDashboardOverview = async (req, res) => {
           actionRequested: [
             {
               $match: {
-                shipmentCreatedAt: {
+                "ndrReason.date": {
                   $gte: new Date(startDate),
                   $lte: new Date(endDate),
                 },
@@ -931,7 +931,7 @@ const getDashboardOverview = async (req, res) => {
       avgShippingData.count > 0
         ? avgShippingData.totalFreight / avgShippingData.count
         : 0;
-
+// console.log("result",result)
     const totalNdr =
       (result.actionRequired[0]?.count || 0) +
       (result.actionRequested[0]?.count || 0) +

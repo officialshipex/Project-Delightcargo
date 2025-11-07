@@ -56,13 +56,16 @@ const EDDMap=require("./routes/EDDMap.router")
 const ZipyPostRouter=require("./AllCouriersRoutes/zipypost.router")
 const CourierRouter=require("./routes/courier.router")
 const referralRoute=require("./Referral/referal.router")
+const Notification=require("./notification/notification.router")
+
+router.use("/notification",Notification);
 
 router.use("/referral",referralRoute);
 router.use("/courier",CourierRouter);
 router.use("/statusMap",statusMap);
 router.use("/EDD",EDDMap)
 
-const whatsappRouter=require("./whatsapp/whatsapp.controller")
+
 
 router.use("/label", LabelSettings);
 

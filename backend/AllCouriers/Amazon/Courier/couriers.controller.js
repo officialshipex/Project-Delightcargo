@@ -254,13 +254,14 @@ const createOneClickShipment = async (req, res) => {
 };
 
 const cancelShipment = async (shipmentId) => {
+  // console.log("shipmet")
   const accessToken = await getAmazonAccessToken();
   // console.log("accessToken",accessToken)
   if (!accessToken) {
     // console.error("Failed to get access token");
     return;
   }
-
+console.log("shipement",shipmentId)
   const isCancelled = await Order.findOne({
     shipment_id: shipmentId,
     status: "Cancelled",
@@ -311,7 +312,7 @@ const cancelShipment = async (shipmentId) => {
     // return response.data; // Amazon returns an empty object on success
   } catch (error) {
     console.error(
-      "Error cancelling shipment:",
+      "Error cancelling shipmentttt:",
       error.response?.data || error.message
     );
     return {
