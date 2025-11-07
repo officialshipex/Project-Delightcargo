@@ -34,6 +34,7 @@ const walletHistorySchema = new mongoose.Schema(
 const walletSchema = new mongoose.Schema(
   {
     balance: { type: Number, default: 0 },
+    creditBalance: { type: Number, default: 0 },
     holdAmount: { type: Number, default: 0 },
     transactions: [transactionSchema],
     walletHistory: [walletHistorySchema], // Only payment details

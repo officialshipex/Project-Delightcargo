@@ -438,6 +438,7 @@ const checkServiceabilityDTDC = async (
     );
 
     const data = response.data;
+    // console.log("data", data);
     const zipCodeResponse = data.ZIPCODE_RESP || [];
     const serviceList = data.SERV_LIST?.[0] || {};
 
@@ -470,13 +471,12 @@ const checkServiceabilityDTDC = async (
     if (paymentType?.toUpperCase() === "COD") {
       isPaymentTypeServiceable =
         serviceList.COD_Serviceable === "YES" ||
-        serviceList.b2C_COD_Serviceable === "YES"
-        // serviceList.b2B_COD_Serviceable === "YES";
+        serviceList.b2C_COD_Serviceable === "YES";
+      // serviceList.b2B_COD_Serviceable === "YES";
     } else {
       // prepaid order
-      isPaymentTypeServiceable =
-        serviceList.b2C_SERVICEABLE === "YES"
-        // serviceList.b2B_SERVICEABLE === "YES";
+      isPaymentTypeServiceable = serviceList.b2C_SERVICEABLE === "YES";
+      // serviceList.b2B_SERVICEABLE === "YES";
     }
 
     const isServiceable =
