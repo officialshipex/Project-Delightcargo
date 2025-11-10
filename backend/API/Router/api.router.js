@@ -9,6 +9,7 @@ const availableCourierService=require("../Controller/availableCourierService.con
 const bookOrder= require("../Controller/bookOrder.controller");
 const cancelOrdersAtBooked = require("../Controller/cancelledOrder.controller");
 const trackOrder = require("../Controller/trackOrder.controller");
+const generateLabel=require("../Controller/labelGeneration.controller")
 const { exceptionList,ndrCreate } = require("../Controller/NDR.controller");
 const createPickupAddress=require("../Controller/warehouseCreation.controller")
 
@@ -20,6 +21,7 @@ router.post("/external/serviceableCourierServices/rate", isAuthorized, available
 router.post("/external/orderBooking",isAuthorized, bookOrder);
 router.post("/external/cancelledOrder/:awb_number", isAuthorized, cancelOrdersAtBooked);
 router.get("/external/trackOrder/:awb", isAuthorized, trackOrder);
+router.get("/external/generateLabel/:awb",isAuthorized,generateLabel);
 router.get("/external/exceptionList",isAuthorized,exceptionList)
 router.post("/external/ndr/create",isAuthorized,ndrCreate);
 router.post("/external/createPickupAddress",isAuthorized,createPickupAddress)
