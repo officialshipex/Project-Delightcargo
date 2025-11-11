@@ -14,6 +14,11 @@ const generateLabel = async (req, res) => {
     if (!orderData) {
       return res.status(404).json({ error: "Order not found" });
     }
+   
+    if (orderData.userId.toString() !== req.user._id.toString()) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
     // console.log("orderData", orderData);
     if (orderData.label) {
       return res.json({
@@ -60,7 +65,6 @@ const generateLabel = async (req, res) => {
       options1
     );
 
-    
     // Draw border
     const pageWidth = doc.page.width;
     const pageHeight = doc.page.height;
