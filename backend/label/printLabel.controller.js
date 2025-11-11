@@ -3,6 +3,7 @@ const PDFDocument = require("pdfkit");
 const bwipjs = require("bwip-js");
 const Order = require("../models/newOrder.model");
 const LabelSettings = require("./labelCustomize.model");
+const { Readable } = require("stream");
 
 const router = express.Router();
 
@@ -393,8 +394,6 @@ router.get("/generate-pdf/:id", async (req, res) => {
     doc.moveTo(20, doc.y).lineTo(575, doc.y).stroke();
     doc.moveDown(1);
 
-    
-
     doc.x = leftMargin;
     doc.y = doc.y; // keep current vertical position
 
@@ -420,6 +419,26 @@ router.get("/generate-pdf/:id", async (req, res) => {
   } catch (error) {
     console.error("Error generating PDF:", error);
     res.status(500).json({ error: "Error generating PDF" });
+  }
+});
+
+router.get("/proxy-label", async (req, res) => {
+  try {
+    const fileUrl = req.query.url;
+    if (!fileUrl) return res.status(400).json({ error: "URL is required" });
+
+    const response = await fetch(fileUrl);
+    if (!response.ok) throw new Error("Failed to fetch label from S3");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    // ✅ Fix: Convert Web Stream to Node Stream
+    const nodeStream = Readable.fromWeb(response.body);
+    nodeStream.pipe(res);
+  } catch (error) {
+    console.error("Error proxying label:", error);
+    res.status(500).json({ error: "Proxy failed" });
   }
 });
 

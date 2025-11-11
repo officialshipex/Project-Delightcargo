@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const MessageLog = require("./messageCheck.model");
 const axios = require("axios");
 const Order = require("../models/newOrder.model");
+const transporter=require("./configEmailpass")
 // 🔹 Get user WhatsApp settings
 const getNotificationSettings = async (req, res) => {
   try {
@@ -196,6 +197,7 @@ const messageSent = async (testAwb) => {
     }
 
     const validStatuses = [
+      "Booked",
       "Ready To Ship",
       "In-transit",
       "Out for Delivery",
@@ -284,6 +286,7 @@ const messageSent = async (testAwb) => {
           status: order.status,
           date: new Date(),
           mobile_number: order.receiverAddress.phoneNumber,
+          email:order.receiverAddress.email,
           isAdminWhatsAppEnable: setting.isAdminWhatsAppEnable,
         };
 
@@ -312,12 +315,13 @@ const messageSent = async (testAwb) => {
           //   }
 
           // 🟠 Send Email Message
-          //   if (setting.isUserEmailEnable || setting.isAdminEmailEnable) {
-          //     const data = await sendEmailMessage(messagePayload);
-          //     if (data.success) {
-          //       isEmailSent = true;
-          //     }
-          //   }
+            if (setting.isUserEmailEnable || setting.isAdminEmailEnable) {
+              const data = await sendEmailMessage(messagePayload);
+              console.log("data",data)
+              if (data.success) {
+                isEmailSent = true;
+              }
+            }
 
           // 💰 Deduct total credits (₹1 per message type)
           if (!skipCreditCheck && totalCharge > 0) {
@@ -354,13 +358,19 @@ const messageSent = async (testAwb) => {
   }
 };
 
-// messageSent("7D113288637");
+// messageSent("365045787027");
 
 const BASE_URL = process.env.WHATSAPP_BASE_URL;
 const API_KEY = process.env.WHATSAPP_API_KEY;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_NUMBER_ID;
 
 const statuses = [
+  {
+    key: "Booked",
+    label: "Pickup Pending",
+    template:
+      "Dear Customer, your order has been created and is pending pickup. We'll notify you once it’s picked up. Track: {tracking_link}",
+  },
   {
     key: "Ready To Ship",
     label: "Pickup Pending",
@@ -497,6 +507,118 @@ const sendWhatsAppMessage = async ({
       error.response?.data || error.message
     );
     return { success: false };
+  }
+};
+
+const sendEmailMessage = async ({
+  userId,
+  credit,
+  awb_number,
+  status,
+  date,
+  isAdminEmailEnable,
+  email,
+}) => {
+  try {
+    if (!email) throw new Error("Recipient email address is required.");
+    if (!status) throw new Error("Shipment status is required.");
+
+    // ✅ Fetch user's notification settings
+    const setting = await NotificationSetting.findOne({ userId }).lean();
+    if (!setting) {
+      console.log(`⚠️ No email settings found for user: ${userId}`);
+      return { success: false };
+    }
+
+    // ✅ Map status → field name in NotificationSettings
+    const statusFieldMap = {
+      "Booked":"isEmailPickupPendingEnable",
+      "Ready To Ship": "isEmailPickupPendingEnable",
+      "In-transit": "isEmailIntransitEnable",
+      "Out for Delivery": "isEmailOutForDeliveryEnable",
+      Delivered: "isEmailDeliveredEnable",
+      Undelivered: "isEmailUndeliveredEnable",
+      RTO: "isEmailRTOEnable",
+    };
+
+    const fieldName = statusFieldMap[status];
+    if (!fieldName) {
+      console.log(`⚠️ No mapped email field for status: ${status}`);
+      return { success: false };
+    }
+
+    // ✅ Check if email toggle is enabled
+    if (!setting[fieldName]) {
+      console.log(`🚫 Email notification disabled for ${status} (user: ${userId})`);
+      return { success: false };
+    }
+
+    // ✅ Check credit balance if admin email is not enabled
+    if (!isAdminEmailEnable && (!credit || credit <= 0)) {
+      console.log(`❌ Insufficient credits for user: ${userId}`);
+      return { success: false };
+    }
+
+    // ✅ Find matching template
+    const matchedStatus = statuses.find((s) => s.key === status);
+    if (!matchedStatus) {
+      console.log(`⚠️ No email template found for status: ${status}`);
+      return { success: false };
+    }
+
+    // ✅ Prepare message
+    const tracking_link = `https://www.shipexindia.com/track/${awb_number}`;
+    const messageBody = matchedStatus.template.replace("{tracking_link}", tracking_link);
+
+    // ✅ Email HTML Template
+    const htmlTemplate = `
+      <table cellspacing="0" cellpadding="0" style="margin:0 auto; width:100%; background-color:#f9f9f9;">
+        <tr>
+          <td>
+            <div style="background:#fff; border:1px solid #eee; font-family:Lato, Helvetica, Arial, sans-serif; margin:32px auto; max-width:500px; border-radius:16px; overflow:hidden; box-sizing:border-box;">
+              <div style="padding: 25px 0; background:#eee; text-align:center;">
+                <img src="https://shipex-india.s3.ap-south-1.amazonaws.com/uploads/1758806046534_shipexNoBG.png" alt="Shipex Logo" style="max-height:60px; width:auto;" />
+              </div>
+              <div style="padding:24px; text-align:center;">
+                <h1 style="color:#222; font-size:22px; font-weight:700;">${matchedStatus.label}</h1>
+                <p style="font-size:15px; color:#222; margin-bottom:24px;">${messageBody}</p>
+                <a href="${tracking_link}" style="display:inline-block; background:#1658db; color:#fff; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:600;">Track Shipment</a>
+                <hr style="border:0; border-bottom:1px solid #eee; margin:28px 0 16px;">
+                <p style="font-size:14px; color:#232323;">
+                  Need help? Contact us at 
+                  <a href="mailto:info@shipexindia.com" style="color:#0CBB7D;">info@shipexindia.com</a>
+                </p>
+                <div style="margin-top:18px; font-size:14px; color:#444;">
+                  Best Regards,<br><strong>Team Shipex India</strong>
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      </table>
+    `;
+
+    const mailOptions = {
+      from: '"Shipex Team" <info@shipexindia.com>',
+      to: email,
+      subject: `Shipex | ${matchedStatus.label}`,
+      html: htmlTemplate,
+    };
+
+    // ✅ Send email
+    const sentMail = await transporter.sendMail(mailOptions);
+
+    console.log("✅ Email sent:", {
+      to: email,
+      awb_number,
+      status,
+      date,
+    });
+
+    return { success: true, data: sentMail };
+  } catch (error) {
+    console.error("❌ Error sending email:", error.message || error);
+    return { success: false, error: error.message };
   }
 };
 
