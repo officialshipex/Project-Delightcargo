@@ -5,7 +5,7 @@ const mongoose = require("mongoose");
 const MessageLog = require("./messageCheck.model");
 const axios = require("axios");
 const Order = require("../models/newOrder.model");
-const transporter=require("./configEmailpass")
+const transporter = require("./configEmailpass");
 // 🔹 Get user WhatsApp settings
 const getNotificationSettings = async (req, res) => {
   try {
@@ -188,7 +188,7 @@ const getCreditBalance = async (req, res) => {
   }
 };
 
-const messageSent = async (testAwb) => {
+const messageSent = async () => {
   try {
     const allSettings = await NotificationSetting.find({}).lean();
     if (!allSettings.length) {
@@ -197,7 +197,6 @@ const messageSent = async (testAwb) => {
     }
 
     const validStatuses = [
-      "Booked",
       "Ready To Ship",
       "In-transit",
       "Out for Delivery",
@@ -210,14 +209,16 @@ const messageSent = async (testAwb) => {
 
     for (const setting of allSettings) {
       const { userId } = setting;
+     
       if (!userId) continue;
 
       // 🟡 Fetch orders for this user (filtered by test AWB)
       const userOrders = await Order.find({
         userId,
-        awb_number: testAwb,
+        // awb_number: testAwb,
         status: { $in: validStatuses },
       }).lean();
+     
 
       if (!userOrders.length) continue;
 
@@ -261,6 +262,7 @@ const messageSent = async (testAwb) => {
       // 🧠 Filter out duplicate (already sent) messages
       const filteredOrders = [];
       for (const order of todayOrders) {
+        console.log("order",order)
         const existingLog = await MessageLog.findOne({
           userId,
           awb_number: order.awb_number,
@@ -286,8 +288,10 @@ const messageSent = async (testAwb) => {
           status: order.status,
           date: new Date(),
           mobile_number: order.receiverAddress.phoneNumber,
-          email:order.receiverAddress.email,
+          email: order.receiverAddress.email,
           isAdminWhatsAppEnable: setting.isAdminWhatsAppEnable,
+          isAdminSmsEnable: setting.isAdminSMSEnable,
+          isAdminEmailEnable: setting.isAdminEmailEnable,
         };
 
         let isWhatsAppSent = false;
@@ -306,22 +310,22 @@ const messageSent = async (testAwb) => {
           }
 
           // 🟣 Send SMS Message
-          //   if (setting.isUserSMSEnable || setting.isAdminSMSEnable) {
-          //     const data = await sendSMSMessage(messagePayload);
-          //     if (data.success) {
-          //       isSMSSent = true;
-          //       if (!skipCreditCheck) totalCharge += 1; // ₹1 for SMS
-          //     }
-          //   }
+          if (setting.isUserSMSEnable || setting.isAdminSMSEnable) {
+            const data = await sendSMSMessage(messagePayload);
+            if (data.success) {
+              isSMSSent = true;
+              if (!skipCreditCheck) totalCharge += 1; // ₹1 for SMS
+            }
+          }
 
           // 🟠 Send Email Message
-            if (setting.isUserEmailEnable || setting.isAdminEmailEnable) {
-              const data = await sendEmailMessage(messagePayload);
-              console.log("data",data)
-              if (data.success) {
-                isEmailSent = true;
-              }
+          if (setting.isUserEmailEnable || setting.isAdminEmailEnable) {
+            const data = await sendEmailMessage(messagePayload);
+            console.log("data", data);
+            if (data.success) {
+              isEmailSent = true;
             }
+          }
 
           // 💰 Deduct total credits (₹1 per message type)
           if (!skipCreditCheck && totalCharge > 0) {
@@ -358,6 +362,53 @@ const messageSent = async (testAwb) => {
   }
 };
 
+const startMessageLoop = async () => {
+  try {
+    // Get current time in IST
+    const istDate = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+    );
+    const currentHour = istDate.getHours();
+
+    if (currentHour < 7) {
+      const next7am = new Date(istDate);
+      next7am.setHours(7, 0, 0, 0);
+      const delay = next7am.getTime() - istDate.getTime();
+      console.log(
+        `🕖 Waiting until 7 AM to start (in ${(delay / 1000 / 60).toFixed(
+          1
+        )} min)...`
+      );
+      setTimeout(startMessageLoop, delay);
+      return;
+    }
+
+    if (currentHour >= 7 && currentHour <= 22) {
+      console.log(
+        "🕒 Starting message sent at",
+        istDate.toLocaleTimeString("en-IN")
+      );
+      await messageSent();
+      console.log("✅ message sent completed. Next run after 5 hour...");
+      setTimeout(startMessageLoop, 5 * 60 * 60 * 1000); // 5 hour
+    } else {
+      console.log(
+        "🌙 Outside message sent window, will retry in 1 hour:",
+        istDate.toLocaleTimeString("en-IN")
+      );
+      setTimeout(startMessageLoop, 60 * 60 * 1000);
+    }
+  } catch (error) {
+    console.error("❌ Error in message sent loop:", error);
+    // setTimeout(startTrackingLoop, 15 * 60 * 1000); // retry after 15 min
+  }
+};
+
+if (process.env.NODE_ENV === "production") {
+  startMessageLoop();
+}
+
+
 // messageSent("365045787027");
 
 const BASE_URL = process.env.WHATSAPP_BASE_URL;
@@ -365,12 +416,6 @@ const API_KEY = process.env.WHATSAPP_API_KEY;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_NUMBER_ID;
 
 const statuses = [
-  {
-    key: "Booked",
-    label: "Pickup Pending",
-    template:
-      "Dear Customer, your order has been created and is pending pickup. We'll notify you once it’s picked up. Track: {tracking_link}",
-  },
   {
     key: "Ready To Ship",
     label: "Pickup Pending",
@@ -532,7 +577,6 @@ const sendEmailMessage = async ({
 
     // ✅ Map status → field name in NotificationSettings
     const statusFieldMap = {
-      "Booked":"isEmailPickupPendingEnable",
       "Ready To Ship": "isEmailPickupPendingEnable",
       "In-transit": "isEmailIntransitEnable",
       "Out for Delivery": "isEmailOutForDeliveryEnable",
@@ -549,7 +593,9 @@ const sendEmailMessage = async ({
 
     // ✅ Check if email toggle is enabled
     if (!setting[fieldName]) {
-      console.log(`🚫 Email notification disabled for ${status} (user: ${userId})`);
+      console.log(
+        `🚫 Email notification disabled for ${status} (user: ${userId})`
+      );
       return { success: false };
     }
 
@@ -568,7 +614,10 @@ const sendEmailMessage = async ({
 
     // ✅ Prepare message
     const tracking_link = `https://www.shipexindia.com/track/${awb_number}`;
-    const messageBody = matchedStatus.template.replace("{tracking_link}", tracking_link);
+    const messageBody = matchedStatus.template.replace(
+      "{tracking_link}",
+      tracking_link
+    );
 
     // ✅ Email HTML Template
     const htmlTemplate = `
@@ -618,6 +667,111 @@ const sendEmailMessage = async ({
     return { success: true, data: sentMail };
   } catch (error) {
     console.error("❌ Error sending email:", error.message || error);
+    return { success: false, error: error.message };
+  }
+};
+
+const sendSMSMessage = async ({
+  userId,
+  credit,
+  awb_number,
+  status,
+  date,
+  isAdminSmsEnable,
+  mobile_number,
+}) => {
+  try {
+    if (!mobile_number) throw new Error("Recipient phone number is required.");
+    if (!status) throw new Error("Shipment status is required.");
+
+    // ✅ Fetch user's notification settings
+    const setting = await NotificationSetting.findOne({ userId }).lean();
+    if (!setting) {
+      console.log(`⚠️ No SMS settings found for user: ${userId}`);
+      return { success: false };
+    }
+
+    // ✅ Map status → field name in NotificationSettings
+    const statusFieldMap = {
+      "Ready To Ship": "isSmsPickupPendingEnable",
+      "In-transit": "isSmsIntransitEnable",
+      "Out for Delivery": "isSmsOutForDeliveryEnable",
+      Delivered: "isSmsDeliveredEnable",
+      Undelivered: "isSmsUndeliveredEnable",
+      RTO: "isSmsRTOEnable",
+    };
+
+    const fieldName = statusFieldMap[status];
+    if (!fieldName) {
+      console.log(`⚠️ No mapped SMS field found for status: ${status}`);
+      return { success: false };
+    }
+
+    // ✅ Check if SMS toggle is enabled
+    if (!setting[fieldName]) {
+      console.log(
+        `🚫 SMS notification disabled for ${status} (user: ${userId})`
+      );
+      return { success: false };
+    }
+
+    // ✅ Check credit balance if admin SMS is not enabled
+    if (!isAdminSmsEnable && (!credit || credit <= 0)) {
+      console.log(`❌ Insufficient credits for user: ${userId}`);
+      return { success: false };
+    }
+
+    // ✅ Find matching template
+    const matchedStatus = statuses.find((s) => s.key === status);
+    if (!matchedStatus) {
+      console.log(`⚠️ No SMS template found for status: ${status}`);
+      return { success: false };
+    }
+
+    // ✅ Prepare message
+    const tracking_link = `https://www.shipexindia.com/track/${awb_number}`;
+    const messageBody = matchedStatus.template.replace(
+      "{tracking_link}",
+      tracking_link
+    );
+
+    console.log(`📨 Sending SMS to ${mobile_number}: ${messageBody}`);
+
+    // ✅ Send SMS using YourBulkSMS API
+    const response = await axios.get(
+      "http://control.yourbulksms.com/api/sendhttp.php?",
+      {
+        params: {
+          authkey: process.env.SMS_API_KEY, // Store in .env file
+          mobiles: mobile_number,
+          message: `${messageBody} - Team Shipex`,
+          sender: process.env.SMS_SENDER_ID || "SHIPX",
+          route: "2",
+          country: "0",
+          DLT_TE_ID: process.env.SMS_DLT_TEMPLATE_ID || "1707168499016611106",
+        },
+      }
+    );
+
+    console.log("📬 SMS API Response:", response.data);
+
+    if (response.data.Status === "Success") {
+      console.log("✅ SMS sent successfully:", {
+        to: mobile_number,
+        awb_number,
+        status,
+        date,
+      });
+      return { success: true, data: response.data };
+    } else {
+      console.error("❌ Failed SMS API Response:", response.data);
+      return { success: false, data: response.data };
+    }
+  } catch (error) {
+    console.error(
+      "❌ Error sending SMS:",
+      error.response?.data || error.message
+    );
     return { success: false, error: error.message };
   }
 };

@@ -277,7 +277,7 @@ const remittanceScheduleData = async () => {
         planName: codPlan.planName,
         planDays: planDays,
       };
-      console.log("remittanceEntry", remittanceEntry);
+      // console.log("remittanceEntry", remittanceEntry);
       if (shouldRemitToday) {
         // Push directly to adminCodRemittance using business logic
         await processAndRemit(remittanceEntry);
@@ -430,7 +430,9 @@ const processAndRemit = async (plan) => {
     orderDetails: plan.orderDetails,
   };
   // Actual payout to client (deduct charges here)
-  const payoutToClient = Number((codToBeDeducted - charges).toFixed(2));
+  const payoutToClient = Number(
+    (codToBeDeducted - charges - creditedAmount).toFixed(2)
+  );
   // Update codRemittance
   await codRemittance.findOneAndUpdate(
     { userId: plan.userId, CODToBeRemitted: { $gte: codToBeDeducted } }, // ensure enough COD

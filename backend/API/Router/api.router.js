@@ -16,7 +16,7 @@ const createPickupAddress=require("../Controller/warehouseCreation.controller")
 // Route to create a new order
 router.post("/external/createOrder", isAuthorized, orderCreationController);
 router.post("/external/generateToken", generateToken);
-router.get("/external/pincodeServiceability", isAuthorized, pincodeServiceability);
+router.post("/external/pincodeServiceability", isAuthorized, pincodeServiceability);
 router.post("/external/serviceableCourierServices/rate", isAuthorized, availableCourierService);
 router.post("/external/orderBooking",isAuthorized, bookOrder);
 router.post("/external/cancelledOrder/:awb_number", isAuthorized, cancelOrdersAtBooked);
