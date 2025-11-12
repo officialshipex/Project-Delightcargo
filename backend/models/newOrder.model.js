@@ -109,6 +109,7 @@ const orderSchema = new mongoose.Schema(
 
     awb_number: { type: String },
     label: { type: String },
+    manifest:{type:String},
     shipment_id: { type: String },
     provider: { type: String },
     partner:{type:String},
