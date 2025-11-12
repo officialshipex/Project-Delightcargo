@@ -210,7 +210,7 @@ app.get("/generate-pdf", async (req, res) => {
       doc
         .fontSize(12)
         .font("Helvetica-Bold")
-        .text("To Be Filled By Delhivery Surface Logistics Executive", {
+        .text("To Be Filled By Delivery Surface Logistics Executive", {
           align: "center",
           indent: -400,
         });

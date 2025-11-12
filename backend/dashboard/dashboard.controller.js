@@ -1308,6 +1308,11 @@ const getOrderSummary = async (req, res) => {
     const searchId = req.query.userId;
     // Extract filters
     const { startDate, endDate, zone, courier, paymentMode } = req.query;
+    if (!startDate || !endDate) {
+      const today = new Date();
+      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
+      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+    }
     // console.log("xone", zone);
     const userData = await User.findById(userId);
     const isAdminView = userData?.isAdmin && userData?.adminTab;
