@@ -21,7 +21,7 @@ router.post("/external/pincodeServiceability", isAuthorized, pincodeServiceabili
 router.post("/external/serviceableCourierServices/rate", isAuthorized, availableCourierService);
 router.post("/external/orderBooking",isAuthorized, bookOrder);
 router.post("/external/cancelledOrder/:awb_number", isAuthorized, cancelOrdersAtBooked);
-router.get("/external/trackOrder/:awb", isAuthorized, trackOrder);
+router.post("/external/trackOrder", trackOrder);
 router.get("/external/generateLabel/:awb",isAuthorized,generateLabel);
 router.post("/external/generateManifest",isAuthorized,generateManifest)
 router.get("/external/exceptionList",isAuthorized,exceptionList)

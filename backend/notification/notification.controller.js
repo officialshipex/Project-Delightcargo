@@ -9,14 +9,28 @@ const transporter = require("./configEmailpass");
 // 🔹 Get user WhatsApp settings
 const getNotificationSettings = async (req, res) => {
   try {
-    const userId = req.user?._id; // Assuming authentication middleware
-    const settings = await NotificationSetting.findOne({ userId });
+    // ✅ Use userId from query (if provided) or fallback to logged-in user
+    const userId = req.query.userId || req.user?._id;
 
-    if (!settings) {
-      const newSetting = await NotificationSetting.create({ userId });
-      return res.json(newSetting);
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
     }
 
+    // ✅ Try to find existing notification settings
+    let settings = await NotificationSetting.findOne({ userId });
+
+    // ✅ If not found, create a default document
+    if (!settings) {
+      settings = await NotificationSetting.create({
+        userId,
+        isAdminWhatsAppEnabled: false,
+        isAdminSMSEnabled: false,
+        isWhatsAppEnabled: false,
+        isSmsEnabled: false,
+      });
+    }
+
+    // ✅ Return same response format as before
     res.json(settings);
   } catch (error) {
     console.error("Error fetching WhatsApp settings:", error);
@@ -27,7 +41,8 @@ const getNotificationSettings = async (req, res) => {
 // 🔹 Update any field dynamically
 const updateNotificationSetting = async (req, res) => {
   try {
-    const userId = req.user?._id;
+    // ✅ Prefer userId from body if provided (admin case)
+    const userId = req.body.userId || req.user?._id;
     const { field, value } = req.body;
 
     if (!field)
@@ -35,37 +50,54 @@ const updateNotificationSetting = async (req, res) => {
 
     const updateData = { [field]: value };
     let timestampField = null;
+
+    // ✅ WhatsApp toggle
     if (field.startsWith("isWhatsApp")) {
       const statusKey = field.replace("isWhatsApp", "").replace("Enable", "");
       timestampField = `whatsapp${statusKey}UpdatedAt`;
+
+      // ✅ Also update admin WhatsApp setting
+      updateData["isAdminWhatsAppEnable"] = value;
     }
 
-    // SMS status toggle timestamp
-    else if (field.startsWith("isSMS")) {
-      const statusKey = field.replace("isSMS", "").replace("Enable", "");
+    // ✅ SMS toggle
+    else if (field.startsWith("isSMS") || field.startsWith("isSms")) {
+      const statusKey = field
+        .replace("isSMS", "")
+        .replace("isSms", "")
+        .replace("Enable", "");
       timestampField = `sms${statusKey}UpdatedAt`;
+
+      // ✅ Also update admin SMS setting
+      updateData["isAdminSMSEnable"] = value;
     }
 
-    // Email status toggle timestamp
+    // ✅ Email toggle (same as before)
     else if (field.startsWith("isEmail")) {
       const statusKey = field.replace("isEmail", "").replace("Enable", "");
       timestampField = `email${statusKey}UpdatedAt`;
     }
 
-    // If a timestamp field is determined, update it
+    // ✅ Add timestamp if determined
     if (timestampField) {
       updateData[timestampField] = new Date();
     }
 
+    // ✅ Save or create user-specific notification setting
     const updated = await NotificationSetting.findOneAndUpdate(
       { userId },
       { $set: updateData },
       { new: true, upsert: true }
     );
 
-    res.json({ success: true, updated, updatedAt: new Date() });
+    res.json({
+      success: true,
+      message: `${field} updated successfully for user ${userId}`,
+      updated,
+      updatedAt: new Date(),
+    });
   } catch (error) {
-    console.error("Error updating WhatsApp setting:", error);
+    console.error("Error updating notification setting:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -209,7 +241,7 @@ const messageSent = async () => {
 
     for (const setting of allSettings) {
       const { userId } = setting;
-     
+
       if (!userId) continue;
 
       // 🟡 Fetch orders for this user (filtered by test AWB)
@@ -218,7 +250,6 @@ const messageSent = async () => {
         // awb_number: testAwb,
         status: { $in: validStatuses },
       }).lean();
-     
 
       if (!userOrders.length) continue;
 
@@ -262,7 +293,7 @@ const messageSent = async () => {
       // 🧠 Filter out duplicate (already sent) messages
       const filteredOrders = [];
       for (const order of todayOrders) {
-        console.log("order",order)
+        console.log("order", order);
         const existingLog = await MessageLog.findOne({
           userId,
           awb_number: order.awb_number,
@@ -407,7 +438,6 @@ const startMessageLoop = async () => {
 if (process.env.NODE_ENV === "production") {
   startMessageLoop();
 }
-
 
 // messageSent("365045787027");
 
