@@ -9,20 +9,10 @@ const { PutObjectCommand } = require("@aws-sdk/client-s3");
 
 const generateLabel = async (req, res) => {
   try {
-    const { awbs } = req.body;
-    if (!awbs || !Array.isArray(awbs) || awbs.length === 0) {
-      return res
-        .status(400)
-        .json({
-          error: "AWB array is required (e.g. { awbs: ['AWB1','AWB2'] })",
-        });
-    }
-
-    const orders = await Order.find({ awb_number: { $in: awbs } });
     
-    if (!orders.length) {
-      return res.status(404).json({ error: "Orders not found" });
-    }
+
+    const orderData = await Order.findOne({ awb_number: req.params.awb });
+    // console.log("order",orderData)
 
     // ✅ Check if order exists FIRST
     if (!orderData) {
