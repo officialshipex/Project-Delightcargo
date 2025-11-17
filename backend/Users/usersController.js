@@ -401,6 +401,7 @@ const getUserById = async (req, res) => {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       isBlocked: user.isBlocked,
+      apiAccess:user.apiAccess,
       logo: user.profileImage || "",
       referralCode: user.referralCode || "",
       lastLogin: user.lastLogin,
@@ -441,7 +442,7 @@ const getUserById = async (req, res) => {
         : null,
       billingAddress: billingAddress,
     };
-    console.log(userDetails);
+    // console.log(userDetails);
 
     return res.status(200).json({
       success: true,
@@ -487,6 +488,42 @@ const updateBlockStatus = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Internal server error while updating user block status.",
+      error: error.message,
+    });
+  }
+};
+
+const updateApiAccess = async (req, res) => {
+  try {
+    const { userId, apiAccess } = req.body;
+
+    // Validate
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Update API access
+    user.apiAccess = apiAccess;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `API Access has been ${
+        apiAccess ? "enabled" : "disabled"
+      } successfully.`,
+      user,
+    });
+  } catch (error) {
+    console.error("Error updating API access:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error while updating API access.",
       error: error.message,
     });
   }
@@ -774,6 +811,7 @@ module.exports = {
   changeUser,
   getUserById,
   updateBlockStatus,
+  updateApiAccess,
   updateProfile,
   updateReferralCommission,
 };

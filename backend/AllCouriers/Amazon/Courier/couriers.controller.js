@@ -372,6 +372,34 @@ const getShipmentTracking = async (trackingId) => {
 };
 // getShipmentTracking("364157621588");
 
+const getCorrectShipDate = () => {
+  const now = new Date();
+  let shipDate = new Date(now);
+  const hour = now.getHours();
+  const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+
+  // If Saturday after 2 PM → move to Monday
+  if (day === 6 && hour >= 14) {
+    shipDate.setDate(shipDate.getDate() + 2); 
+  }
+  // If Sunday → move to Monday
+  else if (day === 0) {
+    shipDate.setDate(shipDate.getDate() + 1);
+  }
+  // Normal case
+  else if (hour >= 14) {
+    shipDate.setDate(shipDate.getDate() + 1);
+
+    // If next day is Sunday → skip to Monday
+    if (shipDate.getDay() === 0) {
+      shipDate.setDate(shipDate.getDate() + 1);
+    }
+  }
+// console.log("shipdate",shipDate.toISOString().replace(/\.\d{3}Z$/, "Z"))
+  return shipDate.toISOString().replace(/\.\d{3}Z$/, "Z");
+};
+
+
 const checkAmazonServiceability = async (provider, payload) => {
   try {
     // console.log("payloadprovider", payload);
@@ -406,7 +434,7 @@ const checkAmazonServiceability = async (provider, payload) => {
     const requestBody = {
       shipFrom,
       shipTo,
-      shipDate: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      shipDate: getCorrectShipDate(),
       packages: [
         {
           dimensions: {
