@@ -237,7 +237,7 @@ const createOrder = async (req, res) => {
       ],
     };
 
-    console.log("payloadData", payloadData.shipments);
+    // console.log("payloadData", payloadData.shipments);
 
     const payload = `format=json&data=${encodeURIComponent(
       JSON.stringify(payloadData)
@@ -266,7 +266,7 @@ const createOrder = async (req, res) => {
       },
       timeout: 8000,
     });
-
+// console.log("delhiver",response.data)
     const result = response.data?.packages?.[0];
     if (!response.data.success || !result) {
       await Order.findByIdAndUpdate(id, { status: "new" });

@@ -14,7 +14,7 @@ const getToken = async (req, res) => {
     // Validate if the API token matches the provided apiKey
     if (API_TOKEN !== apiKey) {
         // If the token does not match, return an unauthorized response
-        return res.status(401).json({ message: 'Unauthorized access. Invalid API key.' });
+        return res.status(400).json({ message: 'Unauthorized access. Invalid API key.' });
     }
 
     const courierData = {

@@ -41,7 +41,7 @@ const saveSmartShip = async (req, res) => {
   // Validate if the provided credentials match the expected ones
   if (USERNAME !== username || PASSWORD !== password) {
     return res
-      .status(401)
+      .status(400)
       .json({ message: "Unauthorized access. Invalid credentials." });
   }
 

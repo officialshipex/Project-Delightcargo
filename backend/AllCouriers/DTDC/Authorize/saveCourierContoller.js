@@ -23,7 +23,7 @@ const getToken = async (req, res) => {
     TOKEN !== token
   ) {
     return res
-      .status(401)
+      .status(400)
       .json({ message: "Unauthorized access. Invalid credentials." });
   }
 
