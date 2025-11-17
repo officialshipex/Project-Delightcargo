@@ -4,7 +4,9 @@ const DEL_API_TOKEN = process.env.DEL_API_TOKEN;
 const Order = require("../models/newOrder.model");
 const moment = require("moment");
 const FormData = require("form-data");
-const {getAuthToken}=require("../AllCouriers/Zipypost/Authorize/zipyPost.controller")
+const {
+  getAuthToken,
+} = require("../AllCouriers/Zipypost/Authorize/zipyPost.controller");
 const {
   getAccessToken,
 } = require("../AllCouriers/SmartShip/Authorize/smartShip.controller");
@@ -420,7 +422,7 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
         headers: { Authorization: `Token ${DEL_API_TOKEN}` },
       }
     );
-
+    // console.log("ndr delhivery",ndrStatusResponse.data.failed_wbns)
     if (ndrStatusResponse.data.status === "Failure") {
       return {
         success: false,
@@ -801,8 +803,8 @@ const submitNdrToZipypost = async (awb, payload) => {
       headers: {
         "Content-Type": "application/json",
         authorization: token.authToken,
-        timestamp:token.timestamp,
-        sellerid:sellerId
+        timestamp: token.timestamp,
+        sellerid: sellerId,
       },
     });
 

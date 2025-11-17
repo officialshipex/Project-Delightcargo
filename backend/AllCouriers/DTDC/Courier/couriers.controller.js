@@ -174,12 +174,12 @@ const createOrder = async (req, res) => {
         },
       ],
     };
-    // console.log(
-    //   "consignments",
-    //   shipmentData,
-    //   shipmentData.consignments[0].origin_details,
-    //   shipmentData.consignments[0].destination_details
-    // );
+    console.log(
+      "consignments",
+      shipmentData,
+      shipmentData.consignments[0].origin_details,
+      shipmentData.consignments[0].destination_details
+    );
 
     // --- Create shipment API call ---
     let response;
@@ -211,6 +211,7 @@ const createOrder = async (req, res) => {
     }
 
     const result = response?.data?.data?.[0];
+    // console.log("reslt",result)
     if (!result?.success) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();

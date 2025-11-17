@@ -6,7 +6,7 @@ const SmartShipStatusMapping = require("../statusMap/SmartShipStatusMapping");
 const DelhiveryStatusMapping = require("../statusMap/DelhiveryStatusMapping");
 const AmazonStatusMapping = require("../statusMap/AmazonStatusMapping");
 const ecomExpressStatusMapping = require("../statusMap/EcomStatusMapping");
-const ZipyPostScanCodeMapping=require("../statusMap/ZipypostStatusMapping")
+const ZipyPostScanCodeMapping = require("../statusMap/ZipypostStatusMapping");
 
 const cron = require("node-cron");
 const {
@@ -223,6 +223,9 @@ const trackSingleOrder = async (order) => {
             )
           ) {
             order.ndrStatus = dbMapping.sy_status;
+          }
+          if (order.status === "RTO" || order.status === "RTO In-transit") {
+            order.ndrStatus = order.status;
           }
           if (order.status === "RTO Delivered") {
             order.ndrStatus = "RTO Delivered";
@@ -782,6 +785,9 @@ const trackSingleOrder = async (order) => {
           }
           if (order.status === "RTO Delivered") {
             order.ndrStatus = "RTO Delivered";
+          }
+          if (order.status === "RTO" || order.status === "RTO In-transit") {
+            order.ndrStatus = order.status;
           }
         }
       }
