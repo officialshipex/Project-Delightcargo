@@ -221,9 +221,10 @@ const trackSingleOrder = async (order) => {
           } else {
             order.reattempt = false;
           }
+          // console.log("db mapping",dbMapping.sy_status)
           // Only set ndrStatus for actual NDR-related states
           if (
-            ["Our for Delivery", "RTO", "Undelivered"].includes(
+            ["Our for Delivery", "RTO", "Undelivered","In-transit","RTO In-transit","RTO Delivered"].includes(
               dbMapping.sy_status
             )
           ) {
@@ -785,7 +786,7 @@ const trackSingleOrder = async (order) => {
           // order.ndrStatus=dbMapping.sy_status
           // Only set ndrStatus for actual NDR-related states
           if (
-            ["Our for Delivery", "RTO", "Undelivered"].includes(
+            ["Our for Delivery", "RTO", "Undelivered","In-transit","RTO In-transit","RTO Delivered"].includes(
               dbMapping.sy_status
             )
           ) {
@@ -813,6 +814,7 @@ const trackSingleOrder = async (order) => {
         } else {
           // No NDR raised → only status is Delivered
           order.status = "Delivered";
+          // order.ndrStatus="Delivered";
         }
       }
       // await order.save();
@@ -1089,7 +1091,7 @@ const trackOrders = async () => {
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       // ndrStatus: "Undelivered",
       // provider: "Delhivery",
-      // awb_number: "78086296665",
+      // awb_number: "35973710046480",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
