@@ -239,6 +239,7 @@ const filterNdrOrdersForEmployee = async (req, res) => {
       awbNumber,
       ndrStatus,
       status,
+      tab,
       courier,
       startDate,
       endDate,
@@ -254,6 +255,12 @@ const filterNdrOrdersForEmployee = async (req, res) => {
     } = req.query;
     // console.log("Query Params:", req.query);
     const filter = {};
+
+    // ⭐ Special logic when action=Action_Requested
+    if (tab === "Action_Required") {
+      filter.reattempt = true; // Shipment eligible for RE-ATTEMPT
+      filter.ndrStatus = "Undelivered"; // Must be Undelivered
+    }
 
     // Order ID
     if (orderId) {

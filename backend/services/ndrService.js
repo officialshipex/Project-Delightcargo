@@ -267,7 +267,7 @@ const submitNdrToAmazon = async (
     // Send request
     const response = await axios.post(url, payload, { headers });
 
-    console.log("response", response);
+    // console.log("response", response);
     console.log("Amazon NDR Response:", {
       status: response.status,
       headers: response.headers,

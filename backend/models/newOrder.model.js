@@ -121,7 +121,7 @@ const orderSchema = new mongoose.Schema(
     courierServiceName: { type: String },
     RTOCharges: { type: String },
     COD: { type: String },
-    reattempt: { type: Boolean },
+    reattempt: { type: Boolean ,default:false},
     commodityId: { type: Number },
     estimatedDeliveryDate: { type: Date },
     tracking: [
