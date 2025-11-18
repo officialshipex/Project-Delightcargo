@@ -650,8 +650,16 @@ const getOrdersByNdrStatus = async (req, res) => {
       limitQuery === "All" || !limitQuery ? null : parseInt(limitQuery);
     const skip = limit ? (page - 1) * limit : 0;
     const status = req.query.status;
-
+    const tab = req.query.tab;
     const andConditions = [{ userId }];
+    // ⭐ Special logic for Action Required tab
+    if (status === "Undelivered" && tab === "Action_Required") {
+      andConditions.push({ ndrStatus: "Undelivered" });
+      andConditions.push({ reattempt: true });
+    } else if (status && status !== "All") {
+      andConditions.push({ ndrStatus: status });
+    }
+
     if (status && status !== "All") {
       andConditions.push({ ndrStatus: status });
     }
@@ -2046,7 +2054,7 @@ const checkBulkUser = async (req, res) => {
       error: error.message,
     });
   }
-}; 
+};
 
 const checkCourier = async (req, res) => {
   try {
@@ -2087,5 +2095,5 @@ module.exports = {
   bulkCancelOrder,
   checkBulkPickup,
   checkBulkUser,
-  checkCourier
+  checkCourier,
 };

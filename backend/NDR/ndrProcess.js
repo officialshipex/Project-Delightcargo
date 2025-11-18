@@ -205,8 +205,16 @@ const ndrBulkProcessController = async (req, res) => {
             phone
           );
         } else if (partner === "ZipyPost") {
+          const customAction =
+            action === "RE-ATTEMPT"
+              ? "Re-Attempt"
+              : action === "CHANGE CONTACT"
+              ? "Change Contact"
+              : action === "CHANGE ADDRESS"
+              ? "Change Address"
+              : action; // Default to original action if it doesn't match any case
           const payload = {
-            action,
+            action: customAction,
             seller_remark: remarks,
             contact_number: phone,
             customer_name,
@@ -214,7 +222,7 @@ const ndrBulkProcessController = async (req, res) => {
             address2,
             provider,
           };
-
+          console.log("payload", payload);
           apiResponse = await submitNdrToZipypost(awb_number, payload);
         } else {
           apiResponse = { success: false, message: "Unsupported provider" };

@@ -175,7 +175,7 @@ const trackSingleOrder = async (order) => {
           const attemptCount = order.ndrHistory?.length || 0;
           if (normalizedData.Instructions === "Undelivered") {
             // console.log("ecom", normalizedData.ReasonCode);
-
+            order.reattempt = true;
             order.ndrHistory.push({
               date: normalizedData.StatusDateTime,
               action: "Auto Reattempt",
@@ -211,10 +211,15 @@ const trackSingleOrder = async (order) => {
           console.log("maped dtdc status",dbMapping.sy_status)
           order.status = dbMapping.sy_status;
           if (
-            order.status === "Cancelled" &&
-            order.tracking[order.tracking.length - 1].status === "NONDLV"
+            dbMapping.sy_status === "Cancelled" &&
+            order.tracking.length > 3
           ) {
             order.status = "RTO";
+          }
+          if (dbMapping.code === "SETRTO") {
+            order.reattempt = true;
+          } else {
+            order.reattempt = false;
           }
           // Only set ndrStatus for actual NDR-related states
           if (
@@ -373,6 +378,7 @@ const trackSingleOrder = async (order) => {
         ) {
           order.status = "Undelivered";
           order.ndrStatus = "Undelivered";
+          order.reattempt = true;
           updateNdrHistoryByAwb(order.awb_number);
 
           order.ndrReason = {
@@ -509,6 +515,7 @@ const trackSingleOrder = async (order) => {
           order.ndrHistory.length <= 2
         ) {
           order.ndrStatus = "Undelivered";
+          order.reattempt = true;
           const attemptCount = order.ndrHistory?.length + 1 || 0;
           // Create new structured history entry
           const newHistoryEntry = {
@@ -573,6 +580,7 @@ const trackSingleOrder = async (order) => {
       if (SmartShipStatusMapping[instruction] === "Undelivered") {
         order.status = "Undelivered";
         order.ndrStatus = "Undelivered";
+        order.reattempt = true;
         updateNdrHistoryByAwb(order.awb_number);
         order.ndrReason = {
           date: normalizedData.StatusDateTime,
@@ -677,7 +685,7 @@ const trackSingleOrder = async (order) => {
           order.status = "Undelivered";
           order.ndrStatus = "Undelivered";
           // updateNdrHistoryByAwb(order.awb_number);
-
+          order.reattempt = true;
           order.ndrReason = {
             date: normalizedData.StatusDateTime,
             reason: normalizedData.StrRemarks,
@@ -863,6 +871,7 @@ const trackSingleOrder = async (order) => {
           order.ndrHistory.push(newHistoryEntry);
         }
       }
+      order.reattempt = isReAttemptEligible(order, normalizedData);
     }
     if (partner === "ZipyPost") {
       const scanCode = normalizedData.scanCode;
@@ -926,7 +935,7 @@ const trackSingleOrder = async (order) => {
         ) {
           order.ndrStatus = "Undelivered";
           const attemptCount = order.ndrHistory?.length + 1 || 0;
-
+          order.reattempt = true;
           const newHistoryEntry = {
             actions: [
               {
@@ -1078,9 +1087,9 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      // ndrStatus:"Undelivered"
-      // partner: "ZipyPost",
-      // awb_number: "78068439820",
+      // ndrStatus: "Undelivered",
+      // provider: "Delhivery",
+      // awb_number: "78086296665",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1431,6 +1440,53 @@ const updateNdrHistoryByAwb = async (awb_number) => {
     console.error("❌ Error updating order by AWB:", error);
   }
 };
+
+function isReAttemptEligible(order, normalizedData) {
+  const eligibleNSL = [
+    "EOD-74",
+    "EOD-15",
+    "EOD-104",
+    "EOD-43",
+    "EOD-86",
+    "EOD-11",
+    "EOD-69",
+    "EOD-6",
+  ];
+
+  // 1. Check NSL eligibility
+  if (
+    !normalizedData.StatusCode ||
+    !eligibleNSL.includes(normalizedData.StatusCode)
+  ) {
+    return false;
+  }
+
+  // 2. Check attempt count (should be 1 or 2)
+  const attempts = order.ndrHistory?.length || 0;
+  if (attempts >= 2) {
+    return false;
+  }
+
+  // 3. Check time from normalizedData.StatusDateTime
+  if (!normalizedData.StatusDateTime) return false;
+
+  const scanDate = new Date(normalizedData.StatusDateTime);
+  const scanHour = scanDate.getHours();
+
+  // Must be after 9 PM
+  if (scanHour < 21) {
+    return false;
+  }
+
+  // 4. Status must be Undelivered
+  const isUndelivered =
+    normalizedData.Status === "Undelivered" ||
+    normalizedData.Instructions?.toLowerCase()?.includes("undelivered");
+
+  if (!isUndelivered) return false;
+
+  return true;
+}
 
 // updateNdrHistoryByAwb("362413842319");
 
