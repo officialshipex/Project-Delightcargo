@@ -13,8 +13,9 @@ const DelhiveryWebhook = async (req, res) => {
 
 const ShreeMarutiWebhook = async (req, res) => {
   const token = req.headers.authorization;
+  console.log("token",token)
 
-  if (token !== `Bearer ${SHREEMARUTI_WEBHOOK_TOKEN}`) {
+  if (token !== SHREEMARUTI_WEBHOOK_TOKEN) {
     return res.status(401).send("Unauthorized");
   }
 
