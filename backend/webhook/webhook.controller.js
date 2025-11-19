@@ -15,11 +15,11 @@ const DelhiveryWebhook = async (req, res) => {
 
 const ShreeMarutiWebhook = async (req, res) => {
   const token = req.headers.authorization;
-  console.log("token",token)
+  // console.log("token",token)
 
-  if (token !== SHREEMARUTI_WEBHOOK_TOKEN) {
-    return res.status(401).send("Unauthorized");
-  }
+  // if (token !== SHREEMARUTI_WEBHOOK_TOKEN) {
+  //   return res.status(401).send("Unauthorized");
+  // }
 
   console.log("Webhook Scan Received:", req.body);
   res.status(200).send("OK");
