@@ -14,22 +14,22 @@ const aadhaarSchema = new mongoose.Schema({
     },
     status : {
         type: String,
-        required: true,
+        // required: true,
     },
     sonOf: {
         type: String,
-        required: true,
+        // required: true,
     },
     dob : {
         type: String,
-        required: true,
+        // required: true,
     },
     email : {
         type: String,
     },
     gender : {
         type: String,
-        required: true,
+        // required: true,
     },
     address : {
         type: String,

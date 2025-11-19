@@ -867,8 +867,8 @@ const submitNdrToZipypost = async (awb, payload) => {
     };
   } catch (error) {
     console.error(
-      "❌ ZipyPost NDR Submission Error:",
-      error?.response?.data || error.message
+      "❌ ZipyPost NDR Submission Errororo:",
+      error
     );
 
     return {
