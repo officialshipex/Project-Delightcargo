@@ -82,7 +82,8 @@ const createOrderDTDC = async (
     }
     const walletHoldAmount = currentWallet?.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    if (currentWallet.balance < charges) {
+    const balance= currentWallet.balance + currentWallet.creditLimit;
+    if (balance < charges) {
       return { success: false, message: "Insufficient Wallet Balance" };
     }
 

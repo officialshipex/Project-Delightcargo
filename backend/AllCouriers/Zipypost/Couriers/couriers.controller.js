@@ -146,7 +146,8 @@ const createZipypostOrder = async (req, res) => {
     // ✅ Check balance with safety margin
     const hold = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - hold;
-    if (currentWallet.balance < finalCharges){
+    const balance = currentWallet.balance + currentWallet.creditLimit;
+    if (balance < finalCharges){
       return res.status(400).json({
         success: false,
         message: "Insufficient Wallet Balance",

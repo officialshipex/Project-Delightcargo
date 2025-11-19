@@ -53,7 +53,8 @@ const orderCreationEkart = async (req, res) => {
 
     // 5. Check wallet balance
     const effectiveBalance = wallet.balance - (wallet.holdAmount || 0);
-    if (effectiveBalance < finalCharges) {
+    const balance = wallet.balance + (wallet.creditLimit || 0);
+    if (balance < finalCharges) {
       return res
         .status(400)
         .json({ success: false, message: "Insufficient wallet balance" });

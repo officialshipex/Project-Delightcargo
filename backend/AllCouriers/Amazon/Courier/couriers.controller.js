@@ -127,8 +127,8 @@ const createOneClickShipment = async (req, res) => {
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
     const balanceToBeDeducted =
       finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
-
-    if (currentWallet.balance < balanceToBeDeducted) {
+    const balance = currentWallet.balance + currentWallet.creditLimit;
+    if (balance < balanceToBeDeducted) {
       await Order.findByIdAndUpdate(id, { status: "new" }, { session });
       await session.abortTransaction();
       session.endSession();
@@ -205,7 +205,8 @@ const createOneClickShipment = async (req, res) => {
               channelOrderId: currentOrder.orderId || null,
               category: "debit",
               amount: balanceToBeDeducted,
-              balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+              balanceAfterTransaction:
+                currentWallet.balance - balanceToBeDeducted,
               date: new Date(),
               awb_number: trackingId,
               description: "Freight Charges Applied",
@@ -261,7 +262,7 @@ const cancelShipment = async (shipmentId) => {
     // console.error("Failed to get access token");
     return;
   }
-console.log("shipement",shipmentId)
+  console.log("shipement", shipmentId);
   const isCancelled = await Order.findOne({
     shipment_id: shipmentId,
     status: "Cancelled",
@@ -380,7 +381,7 @@ const getCorrectShipDate = () => {
 
   // If Saturday after 2 PM → move to Monday
   if (day === 6 && hour >= 14) {
-    shipDate.setDate(shipDate.getDate() + 2); 
+    shipDate.setDate(shipDate.getDate() + 2);
   }
   // If Sunday → move to Monday
   else if (day === 0) {
@@ -395,10 +396,9 @@ const getCorrectShipDate = () => {
       shipDate.setDate(shipDate.getDate() + 1);
     }
   }
-// console.log("shipdate",shipDate.toISOString().replace(/\.\d{3}Z$/, "Z"))
+  // console.log("shipdate",shipDate.toISOString().replace(/\.\d{3}Z$/, "Z"))
   return shipDate.toISOString().replace(/\.\d{3}Z$/, "Z");
 };
-
 
 const checkAmazonServiceability = async (provider, payload) => {
   try {

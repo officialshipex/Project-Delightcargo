@@ -164,7 +164,8 @@ const orderRegistrationOneStep = async (req, res) => {
 
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
-    if (currentWallet.balance < finalCharges) {
+      const balance = currentWallet.balance + currentWallet.creditLimit;
+    if (balance < finalCharges) {
       await session.abortTransaction();
       session.endSession();
       return res

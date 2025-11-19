@@ -19,13 +19,13 @@ const createShipmentAmazon = async (
     console.log("amazon", serviceDetails, orderId, walletId, charges);
     const accessToken = await getAmazonAccessToken();
     if (!accessToken) {
-      console.log("accesstoken")
+      console.log("accesstoken");
       return { success: false, message: "Access token missing" };
     }
 
     const currentOrder = await Order.findById(orderId);
     if (!currentOrder) {
-      console.log("order")
+      console.log("order");
       return { success: false, message: "Order not found" };
     }
 
@@ -43,7 +43,7 @@ const createShipmentAmazon = async (
       // res
     );
     if (!zone) {
-      console.log("sone")
+      console.log("sone");
       return res.status(400).json({ message: "Pincode not serviceable" });
     }
 
@@ -78,9 +78,9 @@ const createShipmentAmazon = async (
 
     const holdAmount = currentWallet?.holdAmount || 0;
     const availableBalance = currentWallet.balance - holdAmount;
-
-    if (currentWallet.balance < charges) {
-      console.log("balance")
+    const balance = currentWallet.balance + currentWallet.creditLimit;
+    if (balance < charges) {
+      // console.log("balance")
       return {
         success: false,
         message: "Insufficient Wallet Balance",
@@ -136,7 +136,7 @@ const createShipmentAmazon = async (
     const result = response.data?.payload;
     console.log("resulttttttttreress", result);
     if (!result) {
-      console.log("amazon result")
+      console.log("amazon result");
       return {
         success: false,
         message: "Error creating shipment",
