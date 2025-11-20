@@ -1,7 +1,8 @@
 const webhookRouter = require('express').Router();
-const {DelhiveryWebhook,DTDCWebhook}=require("./webhook.controller")
+const {DelhiveryWebhook}=require("./webhook.controller")
 const {ShreeMarutiWebhook}=require("./ShreeMarutiWebhook.controller")
 const {AmazonShippingWebhook}=require("./AmasonShippingWebhook.controller")
+const {DTDCWebhook}=require("./DtdcWebhook.controller")
 
 webhookRouter.post('/delhivery', DelhiveryWebhook);
 webhookRouter.post("/shree-maruti",ShreeMarutiWebhook);

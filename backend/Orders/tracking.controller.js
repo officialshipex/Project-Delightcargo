@@ -1493,4 +1493,4 @@ function isReAttemptEligible(order, normalizedData) {
 
 // updateNdrHistoryByAwb("362413842319");
 
-module.exports = { trackSingleOrder, startTrackingLoop,formatShreeMarutiDate,updateNdrHistoryByAwb,formatAmazonDate };
+module.exports = { trackSingleOrder, startTrackingLoop,formatShreeMarutiDate,updateNdrHistoryByAwb,formatAmazonDate,formatDTDCDateTime };
