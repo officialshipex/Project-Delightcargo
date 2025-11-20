@@ -13,17 +13,7 @@ const DelhiveryWebhook = async (req, res) => {
   res.status(200).send("OK");
 };
 
-const ShreeMarutiWebhook = async (req, res) => {
-  const token = req.headers.authorization;
-  // console.log("token",token)
 
-  // if (token !== SHREEMARUTI_WEBHOOK_TOKEN) {
-  //   return res.status(401).send("Unauthorized");
-  // }
-
-  console.log("Webhook Scan Received:", req.body);
-  res.status(200).send("OK");
-};
 
 const DTDCWebhook = async (req, res) => {
   const token = req.headers.authorization;
@@ -37,15 +27,5 @@ const DTDCWebhook = async (req, res) => {
   res.status(200).send("OK");
 };
 
-const AmazonShippingWebhook = async (req, res) => {
-  const token = req.headers.authorization;
-  console.log("token",token)
 
-  if (token !== AMAZON_SHIPPING_WEBHOOK_TOKEN) {
-    return res.status(401).send("Unauthorized");
-  }
-
-  console.log("Webhook Scan Received:", req.body);
-  res.status(200).send("OK");
-};
-module.exports = { DelhiveryWebhook,ShreeMarutiWebhook,DTDCWebhook,AmazonShippingWebhook };
+module.exports = { DelhiveryWebhook,DTDCWebhook};
