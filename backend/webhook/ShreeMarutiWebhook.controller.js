@@ -30,15 +30,15 @@ const ShreeMarutiWebhook = async (req, res) => {
 
     // Normalize
     const normalizedData = {
-      Status: data.orderStatus || event,
-      Instructions: event,
-      StrRemarks: data.remarks || null,
+      Status: event,
+      Instructions: data.orderStatus,
+      StrRemarks: data.remarks || data.reason,
       StatusDateTime: formatShreeMarutiDate(data.statusUpdatedAt) || new Date(),
     };
 
     console.log("Normalized Webhook Data:", normalizedData);
 
-    const status = normalizedData.Status.toUpperCase();
+    const status = normalizedData.Status;
 
     /* ────────────────────────────────────────────────
        CHECK IF STATUS IS RTO STATUS
