@@ -38,7 +38,7 @@ const ShreeMarutiWebhook = async (req, res) => {
 
     console.log("Normalized Webhook Data:", normalizedData);
 
-    const status = normalizedData.Status;
+    const status = normalizedData.Status.toUpperCase();
 
     /* ────────────────────────────────────────────────
        CHECK IF STATUS IS RTO STATUS
