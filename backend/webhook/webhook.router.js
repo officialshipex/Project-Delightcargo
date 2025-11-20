@@ -6,6 +6,6 @@ const {AmazonShippingWebhook}=require("./AmasonShippingWebhook.controller")
 webhookRouter.post('/delhivery', DelhiveryWebhook);
 webhookRouter.post("/shree-maruti",ShreeMarutiWebhook);
 webhookRouter.post("/dtdc",DTDCWebhook);
-webhookRouter.post("/amazon-shipping",AmazonShippingWebhook);
+webhookRouter.post("/amazon-shippin",AmazonShippingWebhook);
 
 module.exports = webhookRouter;

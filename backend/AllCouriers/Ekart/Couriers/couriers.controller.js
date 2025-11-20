@@ -6,82 +6,110 @@ const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
 
 const orderCreationEkart = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
     const { id, finalCharges, courierServiceName, provider } = req.body;
 
-    // 1. Get access token
+    // --- Fetch Access Token ---
     const accessToken = await getAccessToken();
     if (!accessToken) {
-      return res
-        .status(500)
-        .json({ success: false, message: "Failed to get access token" });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to get access token",
+      });
     }
 
-    // 2. Fetch order
-    const currentOrder = await Order.findById(id);
+    session.startTransaction();
+
+    // --- Fetch & lock order atomically ---
+    const currentOrder = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
+    );
+
     if (!currentOrder) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Order not found" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message:
+          "Shipment cannot be created because order is already processed or not in 'new' status.",
+      });
     }
 
-    // 3. Check zone serviceability (if getZone is implemented)
+    // --- Check zone ---
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
     );
+
     if (!zone) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(400)
         .json({ success: false, message: "Pincode not serviceable" });
     }
 
-    // 4. Fetch user & wallet
-    const user = await User.findById(currentOrder.userId);
+    // --- Fetch user & wallet inside transaction ---
+    const user = await User.findById(currentOrder.userId).session(session);
+
     if (!user) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
     }
 
-    const wallet = await Wallet.findById(user.Wallet);
-    if (!wallet) {
+    const currentWallet = await Wallet.findById(user.Wallet).session(session);
+
+    if (!currentWallet) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "Wallet not found" });
     }
 
-    // 5. Check wallet balance
-    const effectiveBalance = wallet.balance - (wallet.holdAmount || 0);
-    const balance = wallet.balance + (wallet.creditLimit || 0);
+    // --- Wallet balance check ---
+    const effectiveBalance =
+      currentWallet.balance - (currentWallet.holdAmount || 0);
+    const balance = currentWallet.balance + currentWallet.creditLimit;
+
     if (balance < finalCharges) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Insufficient wallet balance" });
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient Wallet Balance",
+      });
     }
 
-    // 6. Prepare data for API payload
-    const todayStr = new Date().toISOString().split("T")[0]; // yyyy-mm-dd
+    // --- Build Ekart Payload ---
+    const todayStr = new Date().toISOString().split("T")[0];
     const isCOD = currentOrder.paymentDetails.method === "COD";
 
-    // products_desc: comma separated product names
     const productsDesc =
-      currentOrder.productDetails
-        .map((p) => p.name)
-        .filter(Boolean)
-        .join(", ") || "Goods";
+      currentOrder.productDetails.map((p) => p.name).join(", ") || "Goods";
 
-    // Total quantity sum across products
     const totalQuantity = currentOrder.productDetails.reduce(
       (sum, p) => sum + (p.quantity || 0),
       0
     );
 
-    // Construct items array for shipment
+    const firstProduct = currentOrder.productDetails[0] || {};
+
     const items = currentOrder.productDetails.map((p) => ({
       product_name: p.name || "",
       sku: p.sku || "",
-      taxable_value: Number(p.unitPrice || 0) * (p.quantity || 1),
+      taxable_value: (p.unitPrice || 0) * (p.quantity || 1),
       description: p.name || "",
       quantity: p.quantity || 1,
       length:
@@ -97,31 +125,22 @@ const orderCreationEkart = async (req, res) => {
       igst_tax_value: 0,
     }));
 
-    // For qc_details, take first product or empty
-    const firstProduct = currentOrder.productDetails[0] || {};
-
-    // Define seller info here or fetch from your env/config
-    const sellerName =
-      process.env.SELLER_NAME ||
-      currentOrder.pickupAddress.contactName ||
-      "Seller Name";
-    const sellerAddress =
-      process.env.SELLER_ADDRESS ||
-      currentOrder.pickupAddress.address ||
-      "Seller Address";
-    const sellerGstTin = process.env.SELLER_GST_TIN || "";
-
-    // Payload for Ekart shipment create API
     const payload = {
-      seller_name: sellerName,
-      seller_address: sellerAddress,
-      seller_gst_tin: sellerGstTin,
+      seller_name:
+        process.env.SELLER_NAME ||
+        currentOrder.pickupAddress.contactName ||
+        "Seller",
+      seller_address:
+        process.env.SELLER_ADDRESS ||
+        currentOrder.pickupAddress.address ||
+        "Seller Address",
+      seller_gst_tin: process.env.SELLER_GST_TIN || "",
       seller_gst_amount: 0,
       consignee_gst_amount: 0,
       integrated_gst_amount: 0,
-      ewbn: "", // fill if available
-      order_number: currentOrder.orderId?.toString() || "",
-      invoice_number: currentOrder.orderId?.toString() || "",
+      ewbn: "",
+      order_number: currentOrder.orderId || "",
+      invoice_number: currentOrder.orderId || "",
       invoice_date: todayStr,
       document_number: "",
       document_date: todayStr,
@@ -129,8 +148,8 @@ const orderCreationEkart = async (req, res) => {
       consignee_name: currentOrder.receiverAddress.contactName || "",
       products_desc: productsDesc,
       payment_mode: isCOD ? "COD" : "Prepaid",
-      category_of_goods: productsDesc, // or categorize logically
-      hsn_code: "", // add if you have
+      category_of_goods: productsDesc,
+      hsn_code: "",
       total_amount: currentOrder.paymentDetails.amount || 0,
       tax_value: 0,
       taxable_amount: currentOrder.paymentDetails.amount || 0,
@@ -145,33 +164,33 @@ const orderCreationEkart = async (req, res) => {
       return_reason: "",
       drop_location: {
         location_type: "Office",
-        address: currentOrder.receiverAddress.address || "",
-        city: currentOrder.receiverAddress.city || "",
-        state: currentOrder.receiverAddress.state || "",
+        address: currentOrder.receiverAddress.address,
+        city: currentOrder.receiverAddress.city,
+        state: currentOrder.receiverAddress.state,
         country: "IN",
-        name: currentOrder.receiverAddress.contactName || "",
-        phone: currentOrder.receiverAddress.phoneNumber || "",
-        pin: +currentOrder.receiverAddress.pinCode || 0,
+        name: currentOrder.receiverAddress.contactName,
+        phone: currentOrder.receiverAddress.phoneNumber,
+        pin: +currentOrder.receiverAddress.pinCode,
       },
       pickup_location: {
         location_type: "Office",
-        address: currentOrder.pickupAddress.address || "",
-        city: currentOrder.pickupAddress.city || "",
-        state: currentOrder.pickupAddress.state || "",
+        address: currentOrder.pickupAddress.address,
+        city: currentOrder.pickupAddress.city,
+        state: currentOrder.pickupAddress.state,
         country: "IN",
-        name: currentOrder.pickupAddress.contactName || "",
-        phone: currentOrder.pickupAddress.phoneNumber || "",
-        pin: +currentOrder.pickupAddress.pinCode || 0,
+        name: currentOrder.pickupAddress.contactName,
+        phone: currentOrder.pickupAddress.phoneNumber,
+        pin: +currentOrder.pickupAddress.pinCode,
       },
       return_location: {
         location_type: "Office",
-        address: currentOrder.pickupAddress.address || "",
-        city: currentOrder.pickupAddress.city || "",
-        state: currentOrder.pickupAddress.state || "",
+        address: currentOrder.pickupAddress.address,
+        city: currentOrder.pickupAddress.city,
+        state: currentOrder.pickupAddress.state,
         country: "IN",
-        name: currentOrder.pickupAddress.contactName || "",
-        phone: currentOrder.pickupAddress.phoneNumber || "",
-        pin: +currentOrder.pickupAddress.pinCode || 0,
+        name: currentOrder.pickupAddress.contactName,
+        phone: currentOrder.pickupAddress.phoneNumber,
+        pin: +currentOrder.pickupAddress.pinCode,
       },
       qc_details: {
         qc_shipment: true,
@@ -188,75 +207,115 @@ const orderCreationEkart = async (req, res) => {
         product_images: firstProduct.images || [],
       },
       items,
-      what3words_address: "", // provide if available
+      what3words_address: "",
     };
 
-    // 7. Call Ekart API
-    const ekartApiUrl =
-      "https://app.elite.ekartlogistics.in/api/v1/package/create";
-
-    const response = await axios.post(ekartApiUrl, payload, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    // 8. Update order and wallet on success
-    if (
-      (response.status === 200 || response.status === 201) &&
-      response.data.status === true
-    ) {
-      currentOrder.status = "Ready To Ship";
-      currentOrder.provider = provider;
-      currentOrder.courierServiceName = courierServiceName;
-      currentOrder.totalFreightCharges = finalCharges;
-      currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.awb_number = response.data.tracking_id;
-      currentOrder.shipment_id = currentOrder.orderId;
-      currentOrder.totalFreightCharges =
-        finalCharges === "N/A" ? 0 : parseInt(finalCharges);
-      currentOrder.zone = zone.zone;
-      await currentOrder.save();
-
-      // Deduct wallet balance and add transaction record
-      await wallet.updateOne({
-        $inc: { balance: -finalCharges },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId,
-            category: "debit",
-            amount: finalCharges,
-            balanceAfterTransaction: wallet.balance - finalCharges,
-            date: new Date().toISOString.slice(0, 16).replace("T", " "),
-            description: `Freight Charges Applied`,
-            awb_number: response.data.tracking_id,
+    // --- Ekart API call ---
+    let response;
+    try {
+      response = await axios.post(
+        "https://app.elite.ekartlogistics.in/api/v1/package/create",
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
           },
-        },
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: "Shipment Created Successfully",
-        data: response.data,
+        }
+      );
+    } catch (err) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(500).json({
+        success: false,
+        message: err.response?.data?.message || "Ekart Shipment Failed",
+        error: err.response?.data || err.message,
       });
     }
 
-    // 9. Handle non-successful Ekart response
-    return res.status(400).json({
-      success: false,
-      message: "Failed to create shipment on Ekart",
-      data: response.data,
-    });
-  } catch (error) {
-    console.error(
-      "Ekart order creation error:",
-      error.response?.data || error.message || error
+    if (!response?.data?.status) {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: response.data?.message || "Shipment Failed",
+      });
+    }
+
+    // --- Update Order inside session ---
+    const balanceToBeDeducted = parseFloat(finalCharges) || 0;
+
+    await Order.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: "Booked",
+          awb_number: response.data.tracking_id,
+          shipment_id: currentOrder.orderId,
+          provider,
+          courierServiceName,
+          totalFreightCharges: balanceToBeDeducted,
+          cancelledAtStage: null,
+          shipmentCreatedAt: new Date(),
+          zone: zone.zone,
+        },
+        $push: {
+          tracking: {
+            status: "Booked",
+            StatusLocation: currentOrder.pickupAddress.city || "",
+            StatusDateTime: new Date(),
+            Instructions: "Order booked successfully",
+          },
+        },
+      },
+      { session, new: true }
     );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // --- Send Early Response ---
+    res.status(200).json({
+      success: true,
+      message: "Shipment Created Successfully",
+      awb: response.data.tracking_id,
+    });
+
+    // --- Wallet update in background ---
+    process.nextTick(async () => {
+      try {
+        await Wallet.findOneAndUpdate(
+          { _id: user.Wallet, balance: { $gte: balanceToBeDeducted } },
+          {
+            $inc: { balance: -balanceToBeDeducted },
+            $push: {
+              transactions: {
+                channelOrderId: currentOrder.orderId,
+                category: "debit",
+                amount: balanceToBeDeducted,
+                balanceAfterTransaction:
+                  currentWallet.balance - balanceToBeDeducted,
+                date: new Date(),
+                awb_number: response.data.tracking_id,
+                description: "Freight Charges Applied",
+              },
+            },
+          }
+        );
+      } catch (err) {
+        console.error("Wallet update error:", err.message);
+      }
+    });
+  } catch (err) {
+    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
+    await session.abortTransaction();
+    session.endSession();
     return res.status(500).json({
       success: false,
       message: "Failed to create shipment",
-      error: error.response?.data || error.message,
+      error: err.response?.data || err.message,
     });
   }
 };
@@ -310,15 +369,15 @@ const cancelShipmentEkart = async (tracking_id) => {
       );
 
       return {
-        data:response.data,
-        code:201
+        data: response.data,
+        code: 201,
       };
     } else {
       // If API response says cancellation failed
       return {
-        error:"Error in shipment cancellation",
-        details:response.data,
-        code:400
+        error: "Error in shipment cancellation",
+        details: response.data,
+        code: 400,
       };
     }
   } catch (error) {

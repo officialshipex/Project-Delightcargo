@@ -9,28 +9,25 @@ const AmazonShippingWebhook = async (req, res) => {
   try {
     const token = req.headers.authorization;
     console.log("Amazon Webhook Token:", token);
+
     if (token !== AMAZON_SHIPPING_WEBHOOK_TOKEN) {
       return res.status(401).send("Unauthorized");
     }
+
     console.log("Amazon Webhook Payload Received:", req.body);
-    const payload = req.body?.payload;
 
-    if (!payload) return res.status(400).send("Invalid payload");
+    const detail = req.body?.detail;
+    if (!detail) return res.status(400).send("Invalid payload");
 
-    const trackingId = payload.trackingId || payload.alternateLegTrackingId;
+    const trackingId = detail.trackingId || detail.alternateLegTrackingId;
     if (!trackingId) return res.status(400).send("Missing tracking ID");
 
     const order = await Order.findOne({ awb_number: trackingId });
     if (!order) return res.status(404).send("Order not found");
 
-    const events = payload.eventHistory || [];
-    if (!events.length) return res.status(400).send("No events found");
-
-    // Latest Event
-    const latestEvent = events[events.length - 1];
-    const eventCode = latestEvent.eventCode;
-    const eventTime = formatAmazonDate(latestEvent.eventTime);
-    const shipmentType = latestEvent.shipmentType; // FORWARD / RETURNS
+    const eventCode = detail.eventCode; // e.g. ReadyForReceive
+    const eventTime = formatAmazonDate(detail.eventTime);
+    const shipmentType = detail.shipmentType; // FORWARD / RETURNS
 
     console.log("Processing Amazon Webhook:", {
       trackingId,
@@ -41,10 +38,10 @@ const AmazonShippingWebhook = async (req, res) => {
     // ---------------------------
     // FORWARD FLOW
     // ---------------------------
-
     if (shipmentType === "FORWARD") {
       if (eventCode === "ReadyForReceive") {
         order.status = "Ready To Ship";
+        order.reattempt = false;
       }
 
       if (
@@ -66,30 +63,25 @@ const AmazonShippingWebhook = async (req, res) => {
       if (eventCode === "Delivered") {
         order.status = "Delivered";
 
-        // If at least 1 NDR happened before → NDR Delivered
+        // If NDR existed → NDR Delivered
         if (order.ndrHistory && order.ndrHistory.length > 0) {
           order.ndrStatus = "Delivered";
         } else {
-          // No NDR → Keep ndrStatus empty
           order.ndrStatus = null;
         }
 
         order.reattempt = false;
       }
 
-      // --------------- NDR / FAILED DELIVERY ---------------
+      // NDR / Failed Delivery
       if (eventCode === "Rejected" || eventCode === "Undeliverable") {
         order.status = "Undelivered";
         order.ndrStatus = "Undelivered";
         order.reattempt = true;
 
-        const reason =
-          payload?.summary?.trackingDetailCodes?.forward?.join(", ") ||
-          eventCode;
-
         order.ndrReason = {
           date: eventTime,
-          reason,
+          reason: eventCode,
         };
 
         updateNdrHistoryByAwb(order.awb_number);
@@ -129,15 +121,15 @@ const AmazonShippingWebhook = async (req, res) => {
     }
 
     // ---------------------------
-    // TRACKING ARRAY UPDATE
-    // Only: Status, Instruction, Date, Location
+    // TRACKING PUSH
     // ---------------------------
-
     order.tracking.push({
       Status: order.status,
       Instructions: eventCode,
       StatusDateTime: eventTime,
-      StatusLocation: formatAmazonLocation(latestEvent.location),
+      StatusLocation: detail.location
+        ? formatAmazonLocation(detail.location)
+        : "",
     });
 
     await order.save();
@@ -153,8 +145,8 @@ function formatAmazonLocation(location = {}) {
   const { city, stateOrRegion, postalCode, countryCode } = location;
 
   return [city, stateOrRegion, postalCode, countryCode]
-    .filter(Boolean) // remove undefined/empty
-    .join(", "); // join into 1 line string
+    .filter(Boolean)
+    .join(", ");
 }
 
 module.exports = { AmazonShippingWebhook };
