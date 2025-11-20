@@ -468,9 +468,9 @@ const submitNdrToDtdc = async (
   remarks
 ) => {
   const failedOrders = [];
-
+// console.log("awb",awb_number,rtoAction)
   // Validation
-  if (!awb_number || !customer_code || !rtoAction) {
+  if (!awb_number || !rtoAction) {
     return {
       status: 400,
       error: "Missing required fields",

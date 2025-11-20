@@ -10,10 +10,10 @@ const getAccessToken = async () => {
     password: PASSWORD,
   };
   console.log("Credentials:", credentials, EKART_CLIENT_ID);
-  const client_id = "EKART_67a48734b43c30b894d7fda2";
+  // const client_id = "EKART_67a48734b43c30b894d7fda2";
   try {
     const response = await axios.post(
-      `https://app.elite.ekartlogistics.in/integrations/v2/auth/token/${client_id}`,
+      `https://app.elite.ekartlogistics.in/integrations/v2/auth/token/${EKART_CLIENT_ID}`,
       credentials,
       {
         headers: { "Content-Type": "application/json" },

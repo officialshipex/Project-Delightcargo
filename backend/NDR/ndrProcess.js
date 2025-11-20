@@ -60,8 +60,8 @@ const ndrProcessController = async (req, res) => {
       response = await submitNdrToDtdc(
         awb_number,
         customer_code,
-        rtoAction,
-        remarks
+        action,
+        comments
       );
     } else if (orderDetails.provider === "Amazon Shipping") {
       response = await submitNdrToAmazon(
