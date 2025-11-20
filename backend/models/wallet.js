@@ -20,7 +20,7 @@ const walletHistorySchema = new mongoose.Schema(
       paymentId: { type: String },
       orderId: { type: String },
       signature: { type: String },
-      description:{type:String},
+      description: { type: String },
       walletId: { type: mongoose.Schema.Types.ObjectId, ref: "Wallet" }, // 👈 Added walletId properly
       amount: { type: Number }, // 👈 Added amount properly
       transactionId: { type: String },
@@ -35,6 +35,7 @@ const walletSchema = new mongoose.Schema(
   {
     balance: { type: Number, default: 0 },
     creditBalance: { type: Number, default: 0 },
+    creditLimit: { type: Number, default: 0 },
     holdAmount: { type: Number, default: 0 },
     transactions: [transactionSchema],
     walletHistory: [walletHistorySchema], // Only payment details

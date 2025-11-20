@@ -1492,4 +1492,4 @@ function isReAttemptEligible(order, normalizedData) {
 
 // updateNdrHistoryByAwb("362413842319");
 
-module.exports = { trackSingleOrder, startTrackingLoop };
+module.exports = { trackSingleOrder, startTrackingLoop,formatShreeMarutiDate };

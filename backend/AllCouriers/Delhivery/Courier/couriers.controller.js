@@ -158,14 +158,12 @@ const createOrder = async (req, res) => {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: !waybills.length
-            ? "No Waybill Available"
-            : "Pincode not serviceable",
-        });
+      return res.status(400).json({
+        success: false,
+        message: !waybills.length
+          ? "No Waybill Available"
+          : "Pincode not serviceable",
+      });
     }
 
     // Step 4️⃣ Create warehouse and get courier type in parallel
@@ -248,8 +246,8 @@ const createOrder = async (req, res) => {
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
     const balanceToBeDeducted =
       finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
-
-    if (currentWallet.balance < balanceToBeDeducted) {
+    const balance = currentWallet.balance + currentWallet.creditLimit;
+    if (balance < balanceToBeDeducted) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
@@ -266,7 +264,7 @@ const createOrder = async (req, res) => {
       },
       timeout: 8000,
     });
-// console.log("delhiver",response.data)
+    // console.log("delhiver",response.data)
     const result = response.data?.packages?.[0];
     if (!response.data.success || !result) {
       await Order.findByIdAndUpdate(id, { status: "new" });
@@ -315,7 +313,8 @@ const createOrder = async (req, res) => {
               channelOrderId: currentOrder.orderId || null,
               category: "debit",
               amount: balanceToBeDeducted,
-              balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+              balanceAfterTransaction:
+                currentWallet.balance - balanceToBeDeducted,
               date: new Date(),
               awb_number: result.waybill || "",
               description: `Freight Charges Applied`,

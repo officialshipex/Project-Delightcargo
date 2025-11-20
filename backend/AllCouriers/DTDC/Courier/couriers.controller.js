@@ -96,7 +96,8 @@ const createOrder = async (req, res) => {
     // --- Wallet check ---
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
-    if (currentWallet.balance < finalCharges) {
+    const balance = currentWallet.balance + currentWallet.creditLimit;
+    if (balance < finalCharges) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();

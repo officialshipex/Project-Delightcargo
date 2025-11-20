@@ -10,6 +10,7 @@ const AllocateRole = require("../models/allocateRoleSchema");
 const Order = require("../models/newOrder.model");
 const BillingAddress = require("../models/billingInfo.model");
 const { generateKeySync } = require("crypto");
+const Wallet=require("../models/wallet")
 
 // const getUsers = async (req, res) => {
 //     try {
@@ -350,7 +351,7 @@ const getAllUsers = async (req, res) => {
 
 const getUserById = async (req, res) => {
   try {
-    const { id } = req.query;
+    const id = req.query.id || req.user._id;
 
     if (!id) {
       return res
@@ -359,10 +360,10 @@ const getUserById = async (req, res) => {
     }
 
     const user = await User.findById(id)
-      .populate("Wallet", "balance holdAmount")
+      .populate("Wallet", "balance holdAmount creditLimit")
       // .select("userId fullname email phoneNumber company kycDone creditLimit createdAt")
       .lean();
-    console.log("user", user);
+    // console.log("user", user);
     if (!user) {
       return res
         .status(404)
@@ -395,7 +396,7 @@ const getUserById = async (req, res) => {
       isEmailVerified: user.isEmailVerified,
       isPhoneVerified: user.isPhoneVerified,
       holdAmount: holdAmount,
-      creditLimit: user.creditLimit || 0,
+      creditLimit: user.Wallet?.creditLimit || 0,
       rateCard: plan?.planName || "N/A",
       codPlan: codPlan?.planName || "N/A",
       createdAt: user.createdAt,
@@ -801,6 +802,61 @@ const updateReferralCommission = async (req, res) => {
   }
 };
 
+const updateCreditLimit = async (req, res) => {
+  try {
+    const { userId, creditLimit } = req.body;
+
+    if (!userId || creditLimit === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "userId and creditLimit are required",
+      });
+    }
+
+    // ---- Fetch User ----
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (!user.Wallet) {
+      return res.status(400).json({
+        success: false,
+        message: "Wallet not linked to this user",
+      });
+    }
+
+    // ---- Fetch Wallet ----
+    const wallet = await Wallet.findById(user.Wallet);
+    if (!wallet) {
+      return res.status(404).json({
+        success: false,
+        message: "Wallet not found",
+      });
+    }
+
+    // ---- Update Credit Limit ----
+    wallet.creditLimit = creditLimit;
+    await wallet.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Credit limit updated successfully",
+      creditLimit: wallet.creditLimit,
+    });
+
+  } catch (error) {
+    console.error("Update Credit Limit Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
 module.exports = {
   getUsers,
   getUserDetails,
@@ -814,4 +870,5 @@ module.exports = {
   updateApiAccess,
   updateProfile,
   updateReferralCommission,
+  updateCreditLimit
 };

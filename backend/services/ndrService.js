@@ -579,7 +579,7 @@ const submitNdrToDtdc = async (
       orderInDb.status = "Undelivered";
       await orderInDb.save();
 
-      console.log("Order updated:", orderInDb);
+      // console.log("Order updated:", orderInDb);
 
       return {
         status: 200,
@@ -832,7 +832,7 @@ const submitNdrToZipypost = async (awb, payload) => {
           : action,
       actionBy: "ShipexIndia",
       remark: seller_remark || "NDR Action Requested",
-      source: provider || "ZipyPost",
+      source: "ShipexIndia",
       date: new Date(),
     };
 

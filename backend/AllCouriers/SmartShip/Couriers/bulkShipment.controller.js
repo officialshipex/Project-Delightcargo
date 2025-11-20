@@ -82,7 +82,8 @@ const orderRegistrationOneStep = async (
 
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
-    if (currentWallet.balance < charges) {
+      const balance = currentWallet.balance + currentWallet.creditLimit;
+    if (balance < charges) {
       return { success: false, message: "Insufficient Wallet Balance" };
     }
 

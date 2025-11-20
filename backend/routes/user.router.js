@@ -18,5 +18,6 @@ router.post('/apiAccess',isAuthorized,userController.updateApiAccess)
 router.get('/AssignPlan/:userId/:planId',isAuthorized,userController.assignPlan);
 router.post('/update-profile',isAuthorized,uploads.single("profileImage"),userController.updateProfile);
 router.post('/updateReferralCommission',isAuthorized,userController.updateReferralCommission);
+router.put("/updateCreditLimit",isAuthorized,userController.updateCreditLimit);
 
 module.exports=router;
