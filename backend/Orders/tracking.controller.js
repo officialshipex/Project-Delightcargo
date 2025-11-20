@@ -1089,6 +1089,7 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
+      provider:{nin:["Shree Maruti"]},
       // ndrStatus: "Undelivered",
       // provider: "Delhivery",
       // awb_number: "35973710046480",
