@@ -658,9 +658,28 @@ const getDashboardOverview = async (req, res) => {
     // If not provided, take today's date
     if (!startDate || !endDate) {
       const today = new Date();
-      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
-      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+
+      startDate = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate(),
+        0,
+        0,
+        0,
+        0
+      );
+
+      endDate = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate(),
+        23,
+        59,
+        59,
+        999
+      );
     }
+
     // console.log("startDate,endDate", startDate, endDate);
 
     const userData = await User.findById(userId);
@@ -844,48 +863,67 @@ const getDashboardOverview = async (req, res) => {
             },
             { $count: "count" },
           ],
-
-          // 🔹 NDR stats
-          actionRequired: [
-            {
-              $match: {
-                "ndrReason.date": {
-                  $gte: new Date(startDate),
-                  $lte: new Date(endDate),
-                },
-                ndrStatus: "Undelivered",
-              },
-            },
-            { $count: "count" },
-          ],
-          actionRequested: [
-            {
-              $match: {
-                "ndrReason.date": {
-                  $gte: new Date(startDate),
-                  $lte: new Date(endDate),
-                },
-                ndrStatus: "Action_Requested",
-              },
-            },
-            { $count: "count" },
-          ],
-          ndrDelivered: [
-            {
-              $match: {
-                shipmentCreatedAt: {
-                  $gte: new Date(startDate),
-                  $lte: new Date(endDate),
-                },
-                ndrStatus: "Delivered",
-              },
-            },
-            { $count: "count" },
-          ],
         },
       },
     ]);
 
+    // ======================
+    // Separate NDR Aggregate
+    // ======================
+    const ndrMatch = {
+      "ndrReason.date": {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      },
+      ...(isAdminView && searchId
+        ? { userId: new mongoose.Types.ObjectId(searchId) }
+        : !isAdminView
+        ? { userId: new mongoose.Types.ObjectId(userId) }
+        : {}),
+    };
+
+    // Aggregate all NDR first
+    const ndrStatsAgg = await Order.aggregate([
+      { $match: ndrMatch },
+      {
+        $project: {
+          ndrStatus: 1,
+          reattempt: 1,
+        },
+      },
+      {
+        $group: {
+          _id: "$ndrStatus",
+          items: {
+            $push: {
+              reattempt: "$reattempt",
+            },
+          },
+        },
+      },
+    ]);
+
+    let actionRequired = 0;
+    let actionRequested = 0;
+    let ndrDelivered = 0;
+
+    ndrStatsAgg.forEach((item) => {
+      if (item._id === "Undelivered") {
+        // Count only documents where reattempt == true
+        actionRequired = item.items.filter((x) => x.reattempt === true).length;
+      }
+
+      if (item._id === "Action_Requested") {
+        actionRequested = item.items.length;
+      }
+
+      if (item._id === "Delivered") {
+        ndrDelivered = item.items.length;
+      }
+    });
+
+    const totalNdr = actionRequired + actionRequested + ndrDelivered;
+    // console.log("ndr stats", ndrStatsAgg);
     const codMatch = {};
     if (searchId) {
       // Admin is viewing a specific user
@@ -931,11 +969,6 @@ const getDashboardOverview = async (req, res) => {
       avgShippingData.count > 0
         ? avgShippingData.totalFreight / avgShippingData.count
         : 0;
-// console.log("result",result)
-    const totalNdr =
-      (result.actionRequired[0]?.count || 0) +
-      (result.actionRequested[0]?.count || 0) +
-      (result.ndrDelivered[0]?.count || 0);
 
     // ✅ Final Response
     return res.status(200).json({
@@ -968,9 +1001,9 @@ const getDashboardOverview = async (req, res) => {
 
         ndrStats: {
           totalNdr,
-          actionRequired: result.actionRequired[0]?.count || 0,
-          actionRequested: result.actionRequested[0]?.count || 0,
-          ndrDelivered: result.ndrDelivered[0]?.count || 0,
+          actionRequired,
+          actionRequested,
+          ndrDelivered,
         },
       },
     });
