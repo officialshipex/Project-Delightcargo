@@ -54,9 +54,9 @@ const usersSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    adminApiAccess:{
-      type:Boolean,
-      default:true
+    adminApiAccess: {
+      type: Boolean,
+      default: true,
     },
     isBlocked: {
       type: Boolean,
@@ -112,7 +112,7 @@ const usersSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     }, // 👈 who referred this user
-    referralCommissionPercentage:{
+    referralCommissionPercentage: {
       type: Number,
       default: 0,
     },
@@ -133,19 +133,21 @@ const usersSchema = new mongoose.Schema(
 usersSchema.pre("save", async function (next) {
   if (this.isNew) {
     try {
-      const wallet = new Wallet({
-        balance: 0,
-        transactions: [],
-      });
-      const savedWallet = await wallet.save();
-      this.Wallet = savedWallet._id;
+      // Prevent duplicate wallet creation
+      if (!this.Wallet) {
+        const newWallet = await Wallet.create({
+          balance: 0,
+          transactions: [],
+        });
+        this.Wallet = newWallet._id;
+      }
 
-      const codPlan = new CodPlan({
-        user: this._id, // Associate with User
-        planName: "D+7", // Default plan
+      // COD plan
+      await CodPlan.create({
+        user: this._id,
+        planName: "D+7",
       });
 
-      await codPlan.save();
       next();
     } catch (error) {
       next(error);

@@ -495,6 +495,92 @@ const updateBlockStatus = async (req, res) => {
   }
 };
 
+async function generateWalletReport() {
+  try {
+    // 1️⃣ Fetch Users and Wallet IDs they reference
+    const users = await User.find({}, { Wallet: 1 });
+    const usedWalletIds = users
+      .filter((u) => u.Wallet)
+      .map((u) => u.Wallet.toString());
+
+    // 2️⃣ Fetch all Wallets
+    const allWallets = await Wallet.find({});
+    const allWalletIds = allWallets.map((w) => w._id.toString());
+
+    console.log("\n==================== WALLET REPORT ====================");
+
+    console.log(`👤 Total Users: ${users.length}`);
+    console.log(`👜 Total Wallets in DB: ${allWalletIds.length}`);
+    console.log(`🔗 Wallets referenced by Users: ${usedWalletIds.length}`);
+
+    // 3️⃣ Orphan wallets (not linked to user)
+    const orphanWallets = allWallets.filter(
+      (w) => !usedWalletIds.includes(w._id.toString())
+    );
+
+    console.log(`❗ Orphan Wallets (no user linked): ${orphanWallets.length}`);
+
+    // 4️⃣ Duplicate wallet references
+    const walletCountMap = {};
+    users.forEach((u) => {
+      if (u.Wallet) {
+        const wid = u.Wallet.toString();
+        walletCountMap[wid] = (walletCountMap[wid] || 0) + 1;
+      }
+    });
+
+    const duplicateWallets = Object.entries(walletCountMap)
+      .filter(([wid, count]) => count > 1)
+      .map(([wid, count]) => ({ walletId: wid, userCount: count }));
+
+    console.log(
+      `⚠ Duplicate Wallet IDs (shared by multiple users): ${duplicateWallets.length}`
+    );
+
+    // 5️⃣ Users missing wallet assignment
+    const usersWithoutWallet = users.filter((u) => !u.Wallet);
+
+    console.log(
+      `🚫 Users without wallet assigned: ${usersWithoutWallet.length}`
+    );
+
+    // 6️⃣ Filter SAFE orphan wallets that CAN be deleted
+    const safeToDeleteOrphans = orphanWallets.filter((w) => {
+      return (
+        (w.balance || 0) === 0 &&
+        (w.holdAmount || 0) === 0 &&
+        (!w.transactions || w.transactions.length === 0) &&
+        (!w.walletHistory || w.walletHistory.length === 0)
+      );
+    });
+
+    console.log(
+      `\n🟢 Safe orphan wallets to delete (zero amount + no history): ${safeToDeleteOrphans.length}`
+    );
+
+    console.log(
+      "Wallet IDs to be deleted:",
+      safeToDeleteOrphans.map((w) => w._id.toString())
+    );
+
+    // 7️⃣ DELETE ONLY safe orphan wallets
+    const deleteResult = await Wallet.deleteMany({
+      _id: { $in: safeToDeleteOrphans.map((w) => w._id) },
+    });
+
+    console.log(
+      `\n🗑 Deleted Wallet Count: ${deleteResult.deletedCount} (only safe orphans)`
+    );
+
+    console.log("\n==================== END REPORT ====================\n");
+  } catch (err) {
+    console.error("❌ Error generating report:", err);
+  }
+}
+
+// Run the function
+// generateWalletReport();
+
 const updateApiAccess = async (req, res) => {
   try {
     const { userId: bodyUserId, apiAccess, adminApiAccess } = req.body;
