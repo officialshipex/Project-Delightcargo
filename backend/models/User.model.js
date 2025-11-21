@@ -54,6 +54,10 @@ const usersSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    adminApiAccess:{
+      type:Boolean,
+      default:true
+    },
     isBlocked: {
       type: Boolean,
       default: false,
