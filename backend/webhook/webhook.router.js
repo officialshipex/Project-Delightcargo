@@ -7,6 +7,6 @@ const {DTDCWebhook}=require("./DtdcWebhook.controller")
 webhookRouter.post('/delhivery', DelhiveryWebhook);
 webhookRouter.post("/shree-maruti",ShreeMarutiWebhook);
 webhookRouter.post("/dtdc",DTDCWebhook);
-webhookRouter.post("/amazon-shippin",AmazonShippingWebhook);
+webhookRouter.post("/amazon-shipping",AmazonShippingWebhook);
 
 module.exports = webhookRouter;
