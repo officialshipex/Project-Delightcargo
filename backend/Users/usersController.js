@@ -10,7 +10,7 @@ const AllocateRole = require("../models/allocateRoleSchema");
 const Order = require("../models/newOrder.model");
 const BillingAddress = require("../models/billingInfo.model");
 const { generateKeySync } = require("crypto");
-const Wallet=require("../models/wallet")
+const Wallet = require("../models/wallet");
 
 // const getUsers = async (req, res) => {
 //     try {
@@ -402,7 +402,8 @@ const getUserById = async (req, res) => {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       isBlocked: user.isBlocked,
-      apiAccess:user.apiAccess,
+      adminApiAccess: user.adminApiAccess,
+      apiAccess: user.apiAccess,
       logo: user.profileImage || "",
       referralCode: user.referralCode || "",
       lastLogin: user.lastLogin,
@@ -496,28 +497,43 @@ const updateBlockStatus = async (req, res) => {
 
 const updateApiAccess = async (req, res) => {
   try {
-    const { userId, apiAccess } = req.body;
+    const { userId: bodyUserId, apiAccess, adminApiAccess } = req.body;
 
-    // Validate
-    if (!userId) {
+    // If userId is provided in body → update apiAccess
+    // If userId is not provided → use req.user._id and update adminApiAccess
+    const targetUserId = bodyUserId || req.user?._id;
+
+    if (!targetUserId) {
       return res.status(400).json({ message: "User ID is required" });
     }
 
-    // Find user
-    const user = await User.findById(userId);
+    // Fetch user
+    const user = await User.findById(targetUserId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Update API access
-    user.apiAccess = apiAccess;
+    // Condition 1: userId comes from req.body → update apiAccess
+    if (bodyUserId) {
+      user.adminApiAccess = adminApiAccess;
+    }
+
+    // Condition 2: userId comes from req.user → update adminApiAccess
+    if (!bodyUserId && req.user) {
+      user.apiAccess = apiAccess;
+    }
+
     await user.save();
 
     return res.status(200).json({
       success: true,
-      message: `API Access has been ${
-        apiAccess ? "enabled" : "disabled"
-      } successfully.`,
+      message: bodyUserId
+        ? `API Access has been ${
+            apiAccess ? "enabled" : "disabled"
+          } successfully.`
+        : `Admin API Access has been ${
+            adminApiAccess ? "enabled" : "disabled"
+          } successfully.`,
       user,
     });
   } catch (error) {
@@ -847,7 +863,6 @@ const updateCreditLimit = async (req, res) => {
       message: "Credit limit updated successfully",
       creditLimit: wallet.creditLimit,
     });
-
   } catch (error) {
     console.error("Update Credit Limit Error:", error);
     return res.status(500).json({
@@ -870,5 +885,5 @@ module.exports = {
   updateApiAccess,
   updateProfile,
   updateReferralCommission,
-  updateCreditLimit
+  updateCreditLimit,
 };

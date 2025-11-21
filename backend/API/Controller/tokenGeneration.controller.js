@@ -33,7 +33,7 @@ const generateToken = async (req, res) => {
     }
 
     // 🔍 3.1 Check API access
-    if (user.apiAccess === false) {
+    if (user.apiAccess === false || user.adminApiAccess === false) {
       return res.status(403).json({
         success: false,
         message:
