@@ -12,24 +12,115 @@ const BillingAddress = require("../models/billingInfo.model");
 const { generateKeySync } = require("crypto");
 const Wallet = require("../models/wallet");
 
-// const getUsers = async (req, res) => {
-//     try {
-//         const allUsers = await User.find({});
-//         res.status(201).json({
-//             success: true,
-//             data: allUsers,
-//         });
-//     } catch (error) {
-//         console.error("Error fetching users:", error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Failed to fetch users",
-//             error: error.message,
-//         });
-//     }
-// };
+const refundFreightIfSingleDebit = async (orderId) => {
+  try {
+    if (!orderId) {
+      console.log("❌ orderId is required");
+      return;
+    }
 
-// In user controller
+    // 1️⃣ Fetch Order with allowed statuses
+    const order = await Order.findOne({
+      orderId: orderId,
+      status: { $in: ["Booked", "Ready To Ship", "Not Picked"] },
+    });
+
+    if (!order) {
+      console.log("❌ Order not found or status not eligible");
+      return;
+    }
+
+    const awb = order.awb_number;
+    if (!awb) {
+      console.log("❌ Order does not contain awb_number");
+      return;
+    }
+
+    // 2️⃣ Fetch User
+    const user = await User.findById(order.userId);
+    if (!user || !user.Wallet) {
+      console.log("❌ User or Wallet not found");
+      return;
+    }
+
+    // 3️⃣ Fetch Wallet
+    const wallet = await Wallet.findById(user.Wallet);
+    if (!wallet) {
+      console.log("❌ Wallet not found");
+      return;
+    }
+
+    // 4️⃣ Fetch transactions by AWB NUMBER
+    const walletTxns = wallet.transactions.filter(
+      (txn) => txn.awb_number === awb
+    );
+
+    // ---------------------------------------------------------
+    // ⭐ NEW LOGIC: If 2 transactions exist → CANCEL ORDER + UPDATE TXNS
+    // ---------------------------------------------------------
+    if (walletTxns.length === 2) {
+      console.log(
+        `⚠ Found TWO transactions for AWB ${awb}. Marking CANCELLED.`
+      );
+
+      // A) Update Order Status → Cancelled
+      order.status = "Cancelled";
+      await order.save();
+
+      // B) Update both related wallet transactions
+      wallet.transactions = wallet.transactions.map((txn) => {
+        if (txn.awb_number === awb) {
+          txn.transactionStatus = "Cancelled"; // ← new field
+        }
+        return txn;
+      });
+
+      await wallet.save();
+
+      console.log("✅ Order and Transactions marked as CANCELLED");
+      return;
+    }
+
+    // ---------------------------------------------------------
+    // ⭐ ORIGINAL LOGIC: If only 1 DEBIT → Create CREDIT
+    // ---------------------------------------------------------
+    if (walletTxns.length === 1 && walletTxns[0].category === "debit") {
+      const creditAmount = order.totalFreightCharges;
+
+      if (!creditAmount || creditAmount <= 0) {
+        console.log("❌ Invalid freight charge amount");
+        return;
+      }
+
+      const newBalance = wallet.balance + creditAmount;
+
+      wallet.transactions.push({
+        channelOrderId: orderId,
+        category: "credit",
+        amount: creditAmount,
+        balanceAfterTransaction: newBalance,
+        awb_number: awb,
+        description: "Freight Charges Received",
+      });
+
+      wallet.balance = newBalance;
+      await wallet.save();
+
+      console.log("✅ Credit transaction added successfully");
+      console.log("➡ Updated Wallet Balance:", newBalance);
+      return;
+    }
+
+    console.log(
+      `ℹ No action taken. Existing transactions for AWB ${awb}: ${walletTxns.length}`
+    );
+  } catch (error) {
+    console.error("❌ Refund Freight Error:", error.message);
+  }
+};
+
+// refundFreightIfSingleDebit(861985)
+
 const getUsers = async (req, res) => {
   try {
     let allUsers = [];
@@ -494,6 +585,92 @@ const updateBlockStatus = async (req, res) => {
     });
   }
 };
+
+async function generateWalletReport() {
+  try {
+    // 1️⃣ Fetch Users and Wallet IDs they reference
+    const users = await User.find({}, { Wallet: 1 });
+    const usedWalletIds = users
+      .filter((u) => u.Wallet)
+      .map((u) => u.Wallet.toString());
+
+    // 2️⃣ Fetch all Wallets
+    const allWallets = await Wallet.find({});
+    const allWalletIds = allWallets.map((w) => w._id.toString());
+
+    console.log("\n==================== WALLET REPORT ====================");
+
+    console.log(`👤 Total Users: ${users.length}`);
+    console.log(`👜 Total Wallets in DB: ${allWalletIds.length}`);
+    console.log(`🔗 Wallets referenced by Users: ${usedWalletIds.length}`);
+
+    // 3️⃣ Orphan wallets (not linked to user)
+    const orphanWallets = allWallets.filter(
+      (w) => !usedWalletIds.includes(w._id.toString())
+    );
+
+    console.log(`❗ Orphan Wallets (no user linked): ${orphanWallets.length}`);
+
+    // 4️⃣ Duplicate wallet references
+    const walletCountMap = {};
+    users.forEach((u) => {
+      if (u.Wallet) {
+        const wid = u.Wallet.toString();
+        walletCountMap[wid] = (walletCountMap[wid] || 0) + 1;
+      }
+    });
+
+    const duplicateWallets = Object.entries(walletCountMap)
+      .filter(([wid, count]) => count > 1)
+      .map(([wid, count]) => ({ walletId: wid, userCount: count }));
+
+    console.log(
+      `⚠ Duplicate Wallet IDs (shared by multiple users): ${duplicateWallets.length}`
+    );
+
+    // 5️⃣ Users missing wallet assignment
+    const usersWithoutWallet = users.filter((u) => !u.Wallet);
+
+    console.log(
+      `🚫 Users without wallet assigned: ${usersWithoutWallet.length}`
+    );
+
+    // 6️⃣ Filter SAFE orphan wallets that CAN be deleted
+    const safeToDeleteOrphans = orphanWallets.filter((w) => {
+      return (
+        (w.balance || 0) === 0 &&
+        (w.holdAmount || 0) === 0 &&
+        (!w.transactions || w.transactions.length === 0) &&
+        (!w.walletHistory || w.walletHistory.length === 0)
+      );
+    });
+
+    console.log(
+      `\n🟢 Safe orphan wallets to delete (zero amount + no history): ${safeToDeleteOrphans.length}`
+    );
+
+    console.log(
+      "Wallet IDs to be deleted:",
+      safeToDeleteOrphans.map((w) => w._id.toString())
+    );
+
+    // 7️⃣ DELETE ONLY safe orphan wallets
+    const deleteResult = await Wallet.deleteMany({
+      _id: { $in: safeToDeleteOrphans.map((w) => w._id) },
+    });
+
+    console.log(
+      `\n🗑 Deleted Wallet Count: ${deleteResult.deletedCount} (only safe orphans)`
+    );
+
+    console.log("\n==================== END REPORT ====================\n");
+  } catch (err) {
+    console.error("❌ Error generating report:", err);
+  }
+}
+
+// Run the function
+// generateWalletReport();
 
 const updateApiAccess = async (req, res) => {
   try {
