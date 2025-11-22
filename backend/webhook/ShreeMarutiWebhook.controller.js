@@ -75,12 +75,11 @@ const ShreeMarutiWebhook = async (req, res) => {
         order.status = "RTO Delivered";
         order.ndrStatus = "RTO Delivered";
       }
-    }
+    } else {
 
     /* ========================================================
        ==============   FORWARD FLOW HANDLING   ===============
        ======================================================== */
-    else {
       if (status === "NEW") order.status = "Booked";
 
       if (status === "NOT_PICKED_UP") order.status = "Not Picked";
@@ -134,7 +133,10 @@ const ShreeMarutiWebhook = async (req, res) => {
             new Date(normalizedData.StatusDateTime).toDateString()
           );
         });
-
+        order.ndrReason = {
+          date: normalizedData.StatusDateTime,
+          reason: normalizedData.StrRemarks,
+        };
         if (!alreadyExists && attemptCount <= 2) {
           order.ndrHistory.push({
             actions: [

@@ -217,16 +217,25 @@ const trackSingleOrder = async (order) => {
             order.status = "RTO";
           }
           if (dbMapping.code === "SETRTO") {
-            order.reattempt = true;
+            if (order.ndrStatus !== "Action_Requested") {
+              order.reattempt = true;
+            } else {
+              order.reattempt = false;
+            }
           } else {
             order.reattempt = false;
           }
           // console.log("db mapping",dbMapping.sy_status)
           // Only set ndrStatus for actual NDR-related states
           if (
-            ["Our for Delivery", "RTO", "Undelivered","In-transit","RTO In-transit","RTO Delivered"].includes(
-              dbMapping.sy_status
-            )
+            [
+              "Our for Delivery",
+              "RTO",
+              "Undelivered",
+              "In-transit",
+              "RTO In-transit",
+              "RTO Delivered",
+            ].includes(dbMapping.sy_status)
           ) {
             order.ndrStatus = dbMapping.sy_status;
           }
@@ -275,7 +284,11 @@ const trackSingleOrder = async (order) => {
           }
 
           if (normalizedData.Status === "SETRTO") {
-            order.reattempt = true;
+            if (order.ndrStatus !== "Action_Requested") {
+              order.reattempt = true;
+            } else {
+              order.reattempt = false;
+            }
           } else {
             order.reattempt = false;
           }
@@ -376,50 +389,51 @@ const trackSingleOrder = async (order) => {
         if (
           normalizedData.Instructions === "DeliveryAttempted" ||
           wasPreviousDeliveryAttempted
-        ) {
-          order.status = "Undelivered";
-          order.ndrStatus = "Undelivered";
-          order.reattempt = true;
-          updateNdrHistoryByAwb(order.awb_number);
+        )
+          if (order.ndrStatus !== "Action_Requested") {
+            order.status = "Undelivered";
+            order.ndrStatus = "Undelivered";
+            order.reattempt = true;
+            updateNdrHistoryByAwb(order.awb_number);
 
-          order.ndrReason = {
-            date: normalizedData.StatusDateTime,
-            reason: normalizedData.StrRemarks,
-          };
-
-          const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
-          const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
-
-          const lastEntryDate = lastAction?.date
-            ? new Date(lastAction.date).toDateString()
-            : null;
-
-          const currentStatusDate = new Date(
-            normalizedData.StatusDateTime
-          ).toDateString();
-
-          if (
-            (order.ndrHistory.length === 0 ||
-              lastEntryDate !== currentStatusDate) &&
-            order.ndrHistory.length <= 2
-          ) {
-            const attemptCount = order.ndrHistory?.length + 1 || 0;
-            // Create a new NDR history entry with one action
-            const newHistoryEntry = {
-              actions: [
-                {
-                  action: `NDR ${attemptCount} Raised`,
-                  actionBy: order.courierServiceName,
-                  remark: normalizedData.StrRemarks,
-                  source: order.provider,
-                  date: normalizedData.StatusDateTime,
-                },
-              ],
+            order.ndrReason = {
+              date: normalizedData.StatusDateTime,
+              reason: normalizedData.StrRemarks,
             };
 
-            order.ndrHistory.push(newHistoryEntry);
+            const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+            const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+
+            const lastEntryDate = lastAction?.date
+              ? new Date(lastAction.date).toDateString()
+              : null;
+
+            const currentStatusDate = new Date(
+              normalizedData.StatusDateTime
+            ).toDateString();
+
+            if (
+              (order.ndrHistory.length === 0 ||
+                lastEntryDate !== currentStatusDate) &&
+              order.ndrHistory.length <= 2
+            ) {
+              const attemptCount = order.ndrHistory?.length + 1 || 0;
+              // Create a new NDR history entry with one action
+              const newHistoryEntry = {
+                actions: [
+                  {
+                    action: `NDR ${attemptCount} Raised`,
+                    actionBy: order.courierServiceName,
+                    remark: normalizedData.StrRemarks,
+                    source: order.provider,
+                    date: normalizedData.StatusDateTime,
+                  },
+                ],
+              };
+
+              order.ndrHistory.push(newHistoryEntry);
+            }
           }
-        }
       } else {
         // RTO flow
         if (
@@ -786,9 +800,14 @@ const trackSingleOrder = async (order) => {
           // order.ndrStatus=dbMapping.sy_status
           // Only set ndrStatus for actual NDR-related states
           if (
-            ["Our for Delivery", "RTO", "Undelivered","In-transit","RTO In-transit","RTO Delivered"].includes(
-              dbMapping.sy_status
-            )
+            [
+              "Our for Delivery",
+              "RTO",
+              "Undelivered",
+              "In-transit",
+              "RTO In-transit",
+              "RTO Delivered",
+            ].includes(dbMapping.sy_status)
           ) {
             order.ndrStatus = dbMapping.sy_status;
           }
@@ -1089,10 +1108,10 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      provider:{$nin:["Shree Maruti"]},
+      provider: { $nin: ["Shree Maruti"] },
       // ndrStatus: "Undelivered",
       // provider: "Delhivery",
-      // awb_number: "35973710046480",
+      awb_number: "365195544990",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1493,4 +1512,11 @@ function isReAttemptEligible(order, normalizedData) {
 
 // updateNdrHistoryByAwb("362413842319");
 
-module.exports = { trackSingleOrder, startTrackingLoop,formatShreeMarutiDate,updateNdrHistoryByAwb,formatAmazonDate,formatDTDCDateTime };
+module.exports = {
+  trackSingleOrder,
+  startTrackingLoop,
+  formatShreeMarutiDate,
+  updateNdrHistoryByAwb,
+  formatAmazonDate,
+  formatDTDCDateTime,
+};
