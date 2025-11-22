@@ -58,6 +58,7 @@ const CourierRouter=require("./routes/courier.router")
 const referralRoute=require("./Referral/referal.router")
 const Notification=require("./notification/notification.router")
 const webhook=require("./webhook/webhook.router")
+const Invoice=require("./Invoice/invoice.router")
 
 router.use("/notification",Notification);
 
@@ -66,6 +67,7 @@ router.use("/courier",CourierRouter);
 router.use("/statusMap",statusMap);
 router.use("/EDD",EDDMap)
 router.use("/webhook",webhook)
+router.use("/invoice",Invoice);
 
 
 router.use("/label", LabelSettings);
