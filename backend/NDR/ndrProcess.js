@@ -8,6 +8,7 @@ const {
   submitNdrToDtdc,
   submitNdrToAmazon,
   submitNdrToZipypost,
+  submitNdrToShreeMaruti,
 } = require("../services/ndrService");
 const Order = require("../models/newOrder.model");
 
@@ -80,6 +81,15 @@ const ndrProcessController = async (req, res) => {
         next_attempt_date,
         phone
       );
+    } else if (orderDetails.provider === "Shree Maruti") {
+      const payload = {
+        awb_number,
+        actionType: action,
+        remarks: comments,
+        consignee_address,
+        phone,
+      };
+      response = await submitNdrToShreeMaruti(payload);
     } else if (orderDetails.partner === "ZipyPost") {
       // Implement ZipyPost NDR API call here
       // console.log("zipypost",req.body);
@@ -107,7 +117,7 @@ const ndrProcessController = async (req, res) => {
 const ndrBulkProcessController = async (req, res) => {
   try {
     const { payloads } = req.body;
-
+// console.log("Bulk NDR Payloads:", payloads);
     if (!payloads || !Array.isArray(payloads) || payloads.length === 0) {
       return res
         .status(400)
@@ -204,6 +214,15 @@ const ndrBulkProcessController = async (req, res) => {
             scheduledDate,
             phone
           );
+        } else if (provider === "Shree Maruti") {
+          const payload = {
+            awb_number,
+            actionType: action,
+            remarks: remarks,
+            consignee_address:address1,
+            phone,
+          };
+          apiResponse = await submitNdrToShreeMaruti(payload);
         } else if (partner === "ZipyPost") {
           const customAction =
             action === "RE-ATTEMPT"
@@ -222,7 +241,7 @@ const ndrBulkProcessController = async (req, res) => {
             address2,
             provider,
           };
-          console.log("payload", payload);
+          // console.log("payload", payload);
           apiResponse = await submitNdrToZipypost(awb_number, payload);
         } else {
           apiResponse = { success: false, message: "Unsupported provider" };
