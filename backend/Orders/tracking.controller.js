@@ -901,6 +901,9 @@ const trackSingleOrder = async (order) => {
       // console.log("ZipyPost scanCode", scanCode, instruction, statusText);
       // Map status using ZipyPostScanCodeMapping
       order.status = ZipyPostScanCodeMapping[scanCode];
+      if (order.ndrStatus !== "Action_Requested") {
+        order.ndrStatus = ZipyPostScanCodeMapping[scanCode];
+      }
 
       // --- Handle RTO logic ---
       if (order.status === "RTO" || order.status === "RTO In-transit") {
@@ -951,25 +954,27 @@ const trackSingleOrder = async (order) => {
         // Avoid duplicate same-day entries & limit history entries
         if (
           (order.ndrHistory.length === 0 ||
-            lastEntryDate !== currentStatusDate) &&
+            lastEntryDate < currentStatusDate) &&
           order.ndrHistory.length <= 2
         ) {
-          order.ndrStatus = "Undelivered";
-          const attemptCount = order.ndrHistory?.length + 1 || 0;
-          order.reattempt = true;
-          const newHistoryEntry = {
-            actions: [
-              {
-                action: `NDR ${attemptCount} Raised`,
-                actionBy: order.courierServiceName,
-                remark: normalizedData.Instructions,
-                source: order.provider,
-                date: normalizedData.StatusDateTime,
-              },
-            ],
-          };
+          if (order.ndrStatus !== "Action_Requested") {
+            order.ndrStatus = "Undelivered";
+            const attemptCount = order.ndrHistory?.length + 1 || 0;
+            order.reattempt = true;
+            const newHistoryEntry = {
+              actions: [
+                {
+                  action: `NDR ${attemptCount} Raised`,
+                  actionBy: order.courierServiceName,
+                  remark: normalizedData.Instructions,
+                  source: order.provider,
+                  date: normalizedData.StatusDateTime,
+                },
+              ],
+            };
 
-          order.ndrHistory.push(newHistoryEntry);
+            order.ndrHistory.push(newHistoryEntry);
+          }
         }
       }
 
@@ -1110,8 +1115,8 @@ const trackOrders = async () => {
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti"] },
       // ndrStatus: "Undelivered",
-      // provider: "Delhivery",
-      awb_number: "365195544990",
+      // provider: "Bluedart",
+      // awb_number: "78093387153",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
