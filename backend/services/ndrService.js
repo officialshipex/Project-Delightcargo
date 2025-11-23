@@ -5,6 +5,9 @@ const Order = require("../models/newOrder.model");
 const moment = require("moment");
 const FormData = require("form-data");
 const {
+  getToken,
+} = require("../AllCouriers/ShreeMaruti/Authorize/shreeMaruti.controller");
+const {
   getAuthToken,
 } = require("../AllCouriers/Zipypost/Authorize/zipyPost.controller");
 const {
@@ -468,7 +471,7 @@ const submitNdrToDtdc = async (
   remarks
 ) => {
   const failedOrders = [];
-// console.log("awb",awb_number,rtoAction)
+  // console.log("awb",awb_number,rtoAction)
   // Validation
   if (!awb_number || !rtoAction) {
     return {
@@ -619,6 +622,174 @@ const submitNdrToDtdc = async (
       status: 500,
       success: false,
       error: "Error occurred while submitting NDR to DTDC",
+      details: error?.response?.data || error.message,
+    };
+  }
+};
+
+const submitNdrToShreeMaruti = async ({
+  awb_number,
+  actionType,
+  remarks,
+  consignee_address,
+  phone,
+}) => {
+  try {
+    let failedOrders = [];
+    // console.log(
+    //   "shree maruti",
+    //   awb_number,
+    //   actionType,
+    //   remarks,
+    //   consignee_address,
+    //   phone
+    // );
+    // --- Validation ---
+    if (!awb_number || !actionType) {
+      return {
+        status: 400,
+        error: "Missing required fields",
+        failedOrders: [{ awb_number, error: "Required fields are missing" }],
+      };
+    }
+    const actionTypeValue =
+      actionType === "RE-ATTEMPT"
+        ? "RE-ATTEMPT"
+        : actionType === "RTO"
+        ? "RTO"
+        : actionType;
+
+    if (actionType === "RE-ATTEMPT" && (!remarks || !remarks.trim())) {
+      return {
+        status: 400,
+        error: "Remarks required for Re-attempt",
+        failedOrders: [
+          { awb_number, error: "Remarks required for Re-attempt" },
+        ],
+      };
+    }
+
+    // --- Fetch Order ---
+    const orderInDb = await Order.findOne({ awb_number });
+
+    if (!orderInDb) {
+      return {
+        status: 404,
+        error: "Order not found in DB",
+        failedOrders,
+      };
+    }
+
+    const receiver = orderInDb.receiverAddress || {};
+
+    // ZIP -- ALWAYS FROM ORDER
+    const zip = receiver.pinCode;
+
+    // Other fields from params → fallback to order if not provided
+    const address1 =
+      consignee_address && consignee_address.trim() !== ""
+        ? consignee_address
+        : receiver.address;
+
+    const phoneNumber =
+      phone && phone.trim() !== "" ? phone : receiver.phoneNumber;
+
+    // --- Payload ---
+    const payload = {
+      shippingAddress: {
+        address1,
+        phone: phoneNumber,
+        zip,
+      },
+    };
+    const token = await getToken();
+    // --- Shree Maruti API URL ---
+    const url = `https://apis.delcaper.com/fulfillment/shipper/order/rto-initiate-byseller?awbNumber=${awb_number}&actiontype=${actionTypeValue}`;
+
+    const response = await axios.patch(url, payload, {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const result = response.data;
+    console.log("Shree Maruti NDR Response:", result);
+
+    // --- Handle Failed Response ---
+    if (!result || result.success === false) {
+      failedOrders.push({
+        awb_number,
+        error: "Shree Maruti returned failure response",
+        details: result,
+      });
+
+      return {
+        status: 422,
+        success: false,
+        failedOrders,
+        shreeMarutiResponse: result,
+      };
+    }
+
+    // --- SUCCESS ---
+    if (result.success === true) {
+      const entry = {
+        action: actionType,
+        actionBy: "Shree Maruti",
+        remark: remarks || "NDR Action Requested",
+        source: "Shree Maruti",
+        date: new Date(),
+      };
+
+      if (!Array.isArray(orderInDb.ndrHistory)) {
+        orderInDb.ndrHistory = [];
+      }
+
+      // Same DTDC logic
+      if (orderInDb.ndrHistory.length === 0) {
+        orderInDb.ndrHistory.push({ actions: [entry] });
+      } else {
+        const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
+
+        if (latest.actions.length < 2) {
+          latest.actions.push(entry);
+        } else {
+          orderInDb.ndrHistory.push({ actions: [entry] });
+        }
+      }
+
+      orderInDb.ndrStatus = "Action_Requested";
+      orderInDb.status = "Undelivered";
+
+      await orderInDb.save();
+
+      return {
+        status: 200,
+        success: true,
+        message: "Shree Maruti NDR submission successful",
+        failedOrders,
+        shreeMarutiResponse: result,
+      };
+    }
+
+    return {
+      status: 422,
+      success: false,
+      error: "NDR not accepted by Shree Maruti",
+      failedOrders,
+      shreeMarutiResponse: result,
+    };
+  } catch (error) {
+    console.error(
+      "Shree Maruti NDR Error:",
+      error?.response?.data || error.message
+    );
+
+    return {
+      status: 500,
+      success: false,
+      error: "An error occurred while submitting NDR to Shree Maruti",
       details: error?.response?.data || error.message,
     };
   }
@@ -866,10 +1037,7 @@ const submitNdrToZipypost = async (awb, payload) => {
       zipyResponse: response.data,
     };
   } catch (error) {
-    console.error(
-      "❌ ZipyPost NDR Submission Errororo:",
-      error
-    );
+    console.error("❌ ZipyPost NDR Submission Errororo:", error);
 
     return {
       status: error?.response?.status || 500,
@@ -892,4 +1060,5 @@ module.exports = {
   submitNdrToAmazon,
   callSmartshipNdrApi,
   submitNdrToZipypost,
+  submitNdrToShreeMaruti,
 };

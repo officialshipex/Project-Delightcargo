@@ -76,8 +76,7 @@ const ShreeMarutiWebhook = async (req, res) => {
         order.ndrStatus = "RTO Delivered";
       }
     } else {
-
-    /* ========================================================
+      /* ========================================================
        ==============   FORWARD FLOW HANDLING   ===============
        ======================================================== */
       if (status === "NEW") order.status = "Booked";
@@ -121,23 +120,70 @@ const ShreeMarutiWebhook = async (req, res) => {
       if (status === "UNDELIVERED") {
         order.status = "Undelivered";
         order.ndrStatus = "Undelivered";
-        order.reattempt = true;
+        const currentDate = new Date(normalizedData.StatusDateTime);
+
+        // fetch last NDR attempt date (if any)
+        let lastNdrDate = null;
+        if (order.ndrHistory.length > 0) {
+          const lastHistory = order.ndrHistory[order.ndrHistory.length - 1];
+          const lastAction =
+            lastHistory.actions[lastHistory.actions.length - 1];
+          lastNdrDate = new Date(lastAction.date);
+        }
 
         const attemptCount = order.ndrHistory.length + 1;
 
-        // avoid duplicate entry for same day
-        const alreadyExists = order.ndrHistory.some((h) => {
-          const lastAction = h.actions[h.actions.length - 1];
-          return (
-            new Date(lastAction.date).toDateString() ===
-            new Date(normalizedData.StatusDateTime).toDateString()
-          );
-        });
+        // store reason always
         order.ndrReason = {
           date: normalizedData.StatusDateTime,
           reason: normalizedData.StrRemarks,
         };
-        if (!alreadyExists && attemptCount <= 2) {
+
+        /* 
+    ───────────────────────────────────────────────
+    BLOCK WRONG NDR UPDATES:
+    If NDR was already raised → ndrStatus = Action_Requested
+    And new event is same or older → ignore
+    ───────────────────────────────────────────────
+  */
+        if (
+          order.ndrStatus === "Action_Requested" &&
+          lastNdrDate &&
+          currentDate <= lastNdrDate
+        ) {
+          console.log("NDR IGNORE: Duplicate or older UNDELIVERED update");
+
+          // do NOT change ndrStatus
+          // do NOT set reattempt true
+          // do NOT push NDR history again
+
+          // only save tracking
+          order.tracking.push({
+            Instructions: normalizedData.Instructions,
+            Status: normalizedData.Status,
+            StatusDateTime: normalizedData.StatusDateTime,
+            StatusLocation: data.location || "Unknown",
+          });
+          await order.save();
+          return res.status(200).json({
+            success: true,
+            message: "Webhook processed (ignored duplicate NDR)",
+          });
+        }
+
+        /*
+    ───────────────────────────────────────────────
+    VALID NDR CASE:
+    Only if:
+    - ndrStatus is NOT Action_Requested
+    - currentDate > lastNdrDate
+    - attemptCount <= 2
+    ───────────────────────────────────────────────
+  */
+
+        if (attemptCount <= 2 && (!lastNdrDate || currentDate > lastNdrDate)) {
+          order.reattempt = true;
+
           order.ndrHistory.push({
             actions: [
               {
