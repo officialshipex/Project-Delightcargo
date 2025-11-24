@@ -657,24 +657,9 @@ const getDashboardOverview = async (req, res) => {
     let { startDate, endDate } = req.query;
     // If not provided, take today's date
     if (!startDate || !endDate) {
-      const now = new Date();
-      const start = new Date(
-        Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0)
-      );
-      const end = new Date(
-        Date.UTC(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate(),
-          23,
-          59,
-          59,
-          999
-        )
-      );
-
-      startDate = start;
-      endDate = end;
+      const today = new Date();
+      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
+      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
     }
 
     // console.log("startDate,endDate", startDate, endDate);
