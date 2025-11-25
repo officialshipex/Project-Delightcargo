@@ -210,6 +210,7 @@ const trackSingleOrder = async (order) => {
         if (dbMapping) {
           console.log("maped dtdc status",dbMapping.sy_status)
           order.status = dbMapping.sy_status;
+          order.ndrStatus = dbMapping.sy_status;
           if (
             dbMapping.sy_status === "Cancelled" &&
             order.tracking.length > 3
@@ -349,6 +350,7 @@ const trackSingleOrder = async (order) => {
       if (normalizedData.ShipmentType === "FORWARD") {
         if (normalizedData.Instructions === "ReadyForReceive") {
           order.status = "Ready To Ship";
+          order.ndrStatus = "Ready To Ship";
         }
 
         if (
@@ -357,6 +359,7 @@ const trackSingleOrder = async (order) => {
           normalizedData.Instructions === "Departed"
         ) {
           order.status = "In-transit";
+          order.ndrStatus = "In-transit";
         }
 
         if (normalizedData.Instructions === "OutForDelivery") {
@@ -797,7 +800,7 @@ const trackSingleOrder = async (order) => {
         if (dbMapping) {
           // console.log("maped delhivery status", dbMapping.sy_status);
           order.status = dbMapping.sy_status; // fallback if not mapped
-          // order.ndrStatus=dbMapping.sy_status
+          order.ndrStatus=dbMapping.sy_status
           // Only set ndrStatus for actual NDR-related states
           if (
             [
@@ -1115,7 +1118,7 @@ const trackOrders = async () => {
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti"] },
       // ndrStatus: "Undelivered",
-      // provider: "Bluedart",
+      // provider: "Amazon Shipping",
       // awb_number: "78093387153",
     });
 
