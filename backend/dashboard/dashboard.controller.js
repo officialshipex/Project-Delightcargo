@@ -267,7 +267,8 @@ const getBusinessInsights = async (req, res) => {
     const isAdminView = userData?.isAdmin && userData?.adminTab;
 
     // Dates
-    const startOfToday = moment().startOf("day").toDate();
+    const today = new Date();
+    const startOfToday = new Date(today.setHours(0, 0, 0, 0));
     const last30Days = moment().subtract(30, "days").toDate();
     const prev30Days = moment().subtract(60, "days").toDate();
     const startOfWeek = moment().startOf("week").toDate();
