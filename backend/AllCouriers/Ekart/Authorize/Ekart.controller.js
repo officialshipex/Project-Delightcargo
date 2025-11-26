@@ -9,7 +9,7 @@ const getAccessToken = async () => {
     username: USERNAME,
     password: PASSWORD,
   };
-  console.log("Credentials:", credentials, EKART_CLIENT_ID);
+  // console.log("Credentials:", credentials, EKART_CLIENT_ID);
   // const client_id = "EKART_67a48734b43c30b894d7fda2";
   try {
     const response = await axios.post(
@@ -19,7 +19,7 @@ const getAccessToken = async () => {
         headers: { "Content-Type": "application/json" },
       }
     );
-    console.log("Access Token:", response.data.access_token);
+    // console.log("Access Token:", response.data.access_token);
     return response.data.access_token;
   } catch (error) {
     console.error("Token Error:", error.response?.data || error.message);

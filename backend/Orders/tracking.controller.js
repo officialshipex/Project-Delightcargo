@@ -904,9 +904,9 @@ const trackSingleOrder = async (order) => {
       // console.log("ZipyPost scanCode", scanCode, instruction, statusText);
       // Map status using ZipyPostScanCodeMapping
       order.status = ZipyPostScanCodeMapping[scanCode];
-      if (order.ndrStatus !== "Action_Requested") {
-        order.ndrStatus = ZipyPostScanCodeMapping[scanCode];
-      }
+      // if (order.ndrStatus !== "Action_Requested") {
+      //   order.ndrStatus = ZipyPostScanCodeMapping[scanCode];
+      // }
 
       // --- Handle RTO logic ---
       if (order.status === "RTO" || order.status === "RTO In-transit") {
@@ -960,7 +960,7 @@ const trackSingleOrder = async (order) => {
             lastEntryDate < currentStatusDate) &&
           order.ndrHistory.length <= 2
         ) {
-          if (order.ndrStatus !== "Action_Requested") {
+          // if (order.ndrStatus !== "Action_Requested") {
             order.ndrStatus = "Undelivered";
             const attemptCount = order.ndrHistory?.length + 1 || 0;
             order.reattempt = true;
@@ -977,7 +977,7 @@ const trackSingleOrder = async (order) => {
             };
 
             order.ndrHistory.push(newHistoryEntry);
-          }
+          // }
         }
       }
 
@@ -1116,9 +1116,9 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      provider: { $nin: ["Shree Maruti"] },
+      provider: { $nin: ["Shree Maruti","Dtdc"] },
       // ndrStatus: "Undelivered",
-      // provider: "Amazon Shipping",
+      // provider: "Bluedart",
       // awb_number: "78093387153",
     });
 

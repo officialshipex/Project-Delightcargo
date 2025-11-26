@@ -31,7 +31,6 @@ const DTDCWebhook = async (req, res) => {
       return res.status(404).send("Order not found");
     }
 
-    // Normalize webhook status object
     const statusObj = shipmentStatus[0];
 
     const normalizedData = {
@@ -52,7 +51,6 @@ const DTDCWebhook = async (req, res) => {
       StatusDateTime: normalizedData.StatusDateTime,
       StatusLocation: normalizedData.StatusLocation,
       Instructions: normalizedData.Instructions,
-      remark: normalizedData.StrRemarks,
     });
 
     // Load status mapping for DTDC
@@ -70,78 +68,38 @@ const DTDCWebhook = async (req, res) => {
       );
 
       if (dbMapping) {
-        // ----------------------------------------------
-        // 1. Default: Update main status
-        // ----------------------------------------------
+        // Update main status
         order.status = dbMapping.sy_status;
 
-        // ----------------------------------------------
-        // 2. RTO Special Cases
-        // ----------------------------------------------
-        if (dbMapping.sy_status === "Cancelled" && order.tracking.length > 3) {
-          order.status = "RTO";
-        }
+        // ------------------------------
+        // ✔ PURE NDR: only if SETRTO
+        // ------------------------------
+        const isPureNDREligible =
+          normalizedData.Status === "SETRTO" &&
+          order.ndrStatus !== "Action_Requested";
 
-        // ----------------------------------------------
-        // 3. Update NDR Status
-        // ----------------------------------------------
-        if (
-          ["Undelivered", "RTO", "RTO In-transit", "RTO Delivered"].includes(
-            dbMapping.sy_status
-          )
-        ) {
-          order.ndrStatus = dbMapping.sy_status;
-        }
-
-        // ----------------------------------------------
-        // 4. Handling Delivered Status
-        // ----------------------------------------------
-        if (dbMapping.code === "DLV") {
-          if (order.ndrHistory.length > 0) {
-            // Delivered AFTER NDR → mark both
-            order.status = "Delivered";
-            order.ndrStatus = "Delivered";
-          } else {
-            // Delivered normally
-            order.status = "Delivered";
-            order.ndrStatus = null;
-          }
-
-          order.reattempt = false;
-        }
-
-        // ----------------------------------------------
-        // 5. Pure NDR raising (Undelivered)
-        // ----------------------------------------------
-        if (
-          dbMapping.sy_status === "Undelivered" ||
-          dbMapping.code === "RTONONDLV"
-        ) {
+        // ------------------------------
+        // ✔ ANY UNDELIVERED STATUS
+        // SETRTO or Regular Undelivered
+        // ------------------------------
+        if (dbMapping.sy_status === "Undelivered") {
           order.status = "Undelivered";
           order.ndrStatus = "Undelivered";
-          order.ndrReason = {
-            date: normalizedData.StatusDateTime,
-            reason: normalizedData.StrRemarks,
-          };
 
-          // Add NDR history entry (max 3)
+          // Prevent duplicate NDR entry by comparing timestamps
+          const newDate = new Date(normalizedData.StatusDateTime);
+
           const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
           const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+          const lastDate = lastAction ? new Date(lastAction.date) : null;
 
-          const lastDate = lastAction?.date
-            ? new Date(lastAction.date).toDateString()
-            : null;
-          const currentDate = new Date(
-            normalizedData.StatusDateTime
-          ).toDateString();
+          const canAddNewEntry =
+            !lastDate || newDate.getTime() > lastDate.getTime();
 
-          if (
-            (lastDate !== currentDate || order.ndrHistory.length === 0) &&
-            order.ndrHistory.length < 3
-          ) {
+          if (canAddNewEntry) {
             const attempt = order.ndrHistory.length + 1;
 
-            const newEntry = {
+            order.ndrHistory.push({
               actions: [
                 {
                   action: `NDR ${attempt} Raised`,
@@ -151,15 +109,34 @@ const DTDCWebhook = async (req, res) => {
                   date: normalizedData.StatusDateTime,
                 },
               ],
-            };
+            });
+          }
 
-            order.ndrHistory.push(newEntry);
+          // SETRTO → eligible for NDR
+          if (isPureNDREligible) {
+            order.reattempt = true;
+          } else {
+            order.reattempt = false;
           }
         }
 
-        // ----------------------------------------------
-        // 6. Wallet refund logic (Cancelled with condition)
-        // ----------------------------------------------
+        // ------------------------------
+        // ✔ Delivered Logic
+        // ------------------------------
+        if (dbMapping.code === "DLV") {
+          if (order.ndrHistory.length > 0) {
+            order.status = "Delivered";
+            order.ndrStatus = "Delivered";
+          } else {
+            order.status = "Delivered";
+            order.ndrStatus = null;
+          }
+          order.reattempt = false;
+        }
+
+        // ------------------------------
+        // ✔ Refund logic
+        // ------------------------------
         if (
           normalizedData.Instructions === "Return as per client instruction." &&
           order.tracking.length <= 3
@@ -175,11 +152,12 @@ const DTDCWebhook = async (req, res) => {
           shouldUpdateWallet = true;
         }
 
-        // ----------------------------------------------
-        // 7. Final reattempt logic (pure NDR)
-        // ----------------------------------------------
-        order.reattempt =
-          order.ndrHistory.length > 0 && order.status === "Undelivered";
+        // ------------------------------
+        // ✔ All non-NDR, non-Undelivered statuses
+        // ------------------------------
+        if (dbMapping.sy_status !== "Undelivered" && !isPureNDREligible) {
+          order.reattempt = false;
+        }
       }
     }
 

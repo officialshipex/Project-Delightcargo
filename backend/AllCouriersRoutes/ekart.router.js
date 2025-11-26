@@ -2,7 +2,7 @@ const express = require('express');
 
 
 const  {saveEkart}= require('../AllCouriers/Ekart/Authorize/Ekart.controller');
-// const { orderRegistrationOneStep } = require('../AllCouriers/SmartShip/Couriers/couriers.controller');
+const { orderCreationEkart } = require('../AllCouriers/Ekart/Couriers/couriers.controller');
 
 const router = express.Router();
 
@@ -10,7 +10,7 @@ const router = express.Router();
 
 
 router.post("/authorize",saveEkart);
-// router.post("/createShipment",orderRegistrationOneStep);
+router.post("/createShipment",orderCreationEkart);
 
 
 module.exports = router;

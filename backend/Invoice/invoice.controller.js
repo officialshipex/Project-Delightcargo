@@ -3,8 +3,9 @@ const mongoose = require("mongoose");
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { uploads, s3 } = require("../config/s3");
 const cron = require("node-cron");
+const { PutObjectCommand } = require("@aws-sdk/client-s3");
 
 const Wallet = require("../models/wallet"); // adjust path
 const Order = require("../models/newOrder.model"); // adjust path
@@ -12,11 +13,6 @@ const Invoice = require("./invoice.model"); // adjust path
 const User = require("../models/User.model"); // adjust path
 
 const GST_RATE = 0.18;
-const S3 = new S3Client({ region: process.env.AWS_REGION });
-
-/* -------------------------
-   Helpers
-   -------------------------*/
 
 // Prefer transaction.awb_number, fallback to regex on description
 function extractAwbFromTransaction(txn) {
@@ -75,11 +71,9 @@ async function generateInvoicePDF(invoice, userDetails = {}) {
       doc.pipe(stream);
 
       // Header: Company (left) + TAX INVOICE (right)
-      doc
-        .fontSize(14)
-        .text(userDetails.companyName || "Your Company Name", {
-          align: "left",
-        });
+      doc.fontSize(14).text(userDetails.companyName || "Your Company Name", {
+        align: "left",
+      });
       doc.fontSize(18).text("TAX INVOICE", { align: "right" });
       doc.moveDown(0.5);
 
@@ -207,17 +201,18 @@ async function generateInvoicePDF(invoice, userDetails = {}) {
 // Upload to S3 and return public URL
 async function uploadToS3(localPath, key) {
   const fileContent = fs.readFileSync(localPath);
-  await S3.send(
+
+  await s3.send(
     new PutObjectCommand({
-      Bucket: process.env.INVOICE_BUCKET,
+      Bucket: process.env.AWS_BUCKET_NAME, // from your existing config
       Key: key,
       Body: fileContent,
       ContentType: "application/pdf",
-      ACL: "private",
+      ACL: "private", // or remove if your bucket blocks ACL
     })
   );
-  // Construct S3 URL (adjust if you use cloudfront or different style)
-  return `https://${process.env.INVOICE_BUCKET}.s3.${
+
+  return `https://${process.env.AWS_BUCKET_NAME}.s3.${
     process.env.AWS_REGION
   }.amazonaws.com/${encodeURIComponent(key)}`;
 }
@@ -281,12 +276,11 @@ async function buildChargesFromWalletTransactions(
 /* -------------------------
    Controller: Generate monthly invoice for single user
    -------------------------*/
+
 async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
-  // gather previously invoiced AWBs for this user
   const prevInvoices = await Invoice.find({ userId }, { includedAwbs: 1 });
   const prevAwbs = prevInvoices.flatMap((i) => i.includedAwbs || []);
 
-  // Build charges (allowed descriptions + AWB check + exclude prev)
   const { taxableValue, tax, total, txns } =
     await buildChargesFromWalletTransactions(
       userId,
@@ -295,13 +289,12 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
       prevAwbs
     );
 
-  // if no chargeable txns -> skip
   if (!txns || txns.length === 0) {
     return { skipped: true, reason: "No chargeable transactions" };
   }
 
-  // prepare invoice doc
   const invoiceNumber = generateInvoiceNumber();
+
   const invoice = new Invoice({
     userId,
     periodStart,
@@ -317,10 +310,8 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     status: "UNPAID",
   });
 
-  // Auto-apply wallet
   const wallet = await Wallet.findOne({ userId });
   if (!wallet) {
-    // still save invoice as unpaid (or you can skip saving) — here we save and return
     await invoice.save();
     return { saved: true, invoice, applied: 0, note: "Wallet not found" };
   }
@@ -355,11 +346,9 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     await wallet.save();
   }
 
-  // Save invoice
   await invoice.save();
 
-  // Generate PDF
-  // Optional: fetch user details for header
+  // PDF build
   const user = await User.findById(userId).select("fullname email company");
   const pdfPath = await generateInvoicePDF(invoice, {
     fullname: user?.fullname,
@@ -367,22 +356,19 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     companyName: user?.company || "Your Company Name",
   });
 
-  // Upload to S3
   const s3Key = `invoices/${userId}/${invoice.invoiceNumber}.pdf`;
+
   const s3Url = await uploadToS3(pdfPath, s3Key);
 
-  // Save S3 url
   invoice.s3Url = s3Url;
+  invoice.isFinalized = true;
   await invoice.save();
 
-  // Delete local PDF
   try {
     fs.unlinkSync(pdfPath);
-  } catch (e) {
-    /* ignore */
-  }
+  } catch (e) {}
 
-  return { saved: true, invoice, pdfPath, s3Url, applied: toDeduct || 0 };
+  return { saved: true, invoice, s3Url, applied: toDeduct || 0 };
 }
 
 /* -------------------------
@@ -390,7 +376,8 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
    -------------------------*/
 async function generateInvoicesForPeriod(periodStart, periodEnd) {
   // Fetch all users who have wallet or active users (change criteria as needed)
-  const users = await User.find({}, { _id: 1 });
+  // const users = await User.find({}, { _id: 1 });
+  const users=await User.findOne({userId:17333})
 
   const results = [];
   for (const u of users) {
@@ -411,9 +398,10 @@ async function generateInvoicesForPeriod(periodStart, periodEnd) {
 /* -------------------------
    Cron: run daily at 23:59 and trigger generation if tomorrow is 1st (i.e. last day behavior)
    -------------------------*/
-function scheduleMonthlyInvoiceCron() {
+async function scheduleMonthlyInvoiceCron() {
   // Runs at 23:59 server time every day
-  cron.schedule("59 23 * * *", async () => {
+  // cron.schedule("59 23 * * *", async () => {
+    console.log("Running monthly invoice cron check...");
     try {
       const now = new Date();
       const tomorrow = new Date(now);
@@ -443,8 +431,10 @@ function scheduleMonthlyInvoiceCron() {
     } catch (err) {
       console.error("Monthly invoice cron error:", err);
     }
-  });
+  // });
 }
+
+scheduleMonthlyInvoiceCron()
 
 /* -------------------------------------------------------
    Helper: Build Query From req.query

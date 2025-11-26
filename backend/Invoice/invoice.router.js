@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const { adminGetInvoices, userGetInvoices } = require("./invoice.controller");
-const {isAuthorized} = require("../middleware/auth.middleware"); // must use your auth middleware
+const { adminGetInvoices, userGetInvoices,scheduleMonthlyInvoiceCron } = require("./invoice.controller");
+const {isAuthorized} = require("../middleware/auth.middleware");
 
 // Admin route
 router.get("/adminGetInvoices", isAuthorized, adminGetInvoices);
