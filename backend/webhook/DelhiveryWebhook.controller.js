@@ -2,7 +2,6 @@ const Order = require("../models/newOrder.model");
 const statusMap = require("../statusMap/StatusMap.model");
 const { isReAttemptEligible } = require("../Orders/tracking.controller");
 
-
 const DELHIVERY_WEBHOOK_TOKEN = process.env.DELHIVERY_WEBHOOK_TOKEN;
 
 const DelhiveryWebhook = async (req, res) => {
@@ -31,7 +30,7 @@ const DelhiveryWebhook = async (req, res) => {
       StatusType: statusObj.StatusType,
       StatusLocation: statusObj.StatusLocation,
       Instructions: statusObj.Instructions,
-      StatusCode: body.NSLCode
+      StatusCode: body.NSLCode,
     };
 
     // Find Order
@@ -41,6 +40,12 @@ const DelhiveryWebhook = async (req, res) => {
       return res.status(200).send("Order Not Found");
     }
 
+    if (["new", "Cancelled"].includes(order.status)) {
+      console.log(
+        `Skipping Delhivery Webhook for AWB ${awb} because order status is "${order.status}"`
+      );
+      return res.status(200).send("Ignored (Order Not Yet Shipped)");
+    }
     const provider = "Delhivery";
 
     // -------------------------------
@@ -58,16 +63,16 @@ const DelhiveryWebhook = async (req, res) => {
 
       const dbMapping = statusDoc.data.find(
         (d) =>
-          normalizeString(d.scan_type) === normalizeString(normalizedData.StatusType) &&
+          normalizeString(d.scan_type) ===
+            normalizeString(normalizedData.StatusType) &&
           normalizeString(d.scan) === normalizeString(normalizedData.Status) &&
-          normalizeString(d.instructions) === normalizeString(normalizedData.Instructions)
+          normalizeString(d.instructions) ===
+            normalizeString(normalizedData.Instructions)
       );
 
       if (dbMapping) {
         order.status = dbMapping.sy_status;
         order.ndrStatus = dbMapping.sy_status;
-
-        
 
         if (order.status === "RTO Delivered") order.ndrStatus = "RTO Delivered";
 
@@ -80,9 +85,7 @@ const DelhiveryWebhook = async (req, res) => {
     // -----------------------------------------------
     // 2️⃣ DELIVERED CASE HANDLING (WITH NDR HISTORY)
     // -----------------------------------------------
-    if (
-      normalizedData.Status === "Delivered"
-    ) {
+    if (normalizedData.Status === "Delivered") {
       if (order.ndrHistory.length > 0) {
         order.status = "Delivered";
         order.ndrStatus = "Delivered";
@@ -95,28 +98,40 @@ const DelhiveryWebhook = async (req, res) => {
     // 3️⃣ NDR ELIGIBILITY BASED ON NSL
     // --------------------------------
     const eligibleNSLCodes = [
-      "EOD-74","EOD-15","EOD-104","EOD-43",
-      "EOD-86","EOD-11","EOD-69","EOD-6"
+      "EOD-74",
+      "EOD-15",
+      "EOD-104",
+      "EOD-43",
+      "EOD-86",
+      "EOD-11",
+      "EOD-69",
+      "EOD-6",
     ];
 
     const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
     const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
 
-    const lastEntryDate = lastAction?.date ? new Date(lastAction.date).toDateString() : null;
-    const currentStatusDate = new Date(normalizedData.StatusDateTime).toDateString();
+    const lastEntryDate = lastAction?.date
+      ? new Date(lastAction.date).toDateString()
+      : null;
+    const currentStatusDate = new Date(
+      normalizedData.StatusDateTime
+    ).toDateString();
 
     if (
       (order.ndrHistory.length === 0 || lastEntryDate < currentStatusDate) &&
       order.ndrHistory.length <= 2
     ) {
-      if (normalizedData.StatusCode && eligibleNSLCodes.includes(normalizedData.StatusCode)) {
+      if (
+        normalizedData.StatusCode &&
+        eligibleNSLCodes.includes(normalizedData.StatusCode)
+      ) {
         order.ndrStatus = "Undelivered";
         order.status = "Undelivered";
 
-
         order.ndrReason = {
           date: normalizedData.StatusDateTime,
-          reason: normalizedData.Instructions
+          reason: normalizedData.Instructions,
         };
 
         const attemptCount = order.ndrHistory.length + 1;
@@ -128,14 +143,20 @@ const DelhiveryWebhook = async (req, res) => {
               actionBy: order.courierServiceName,
               remark: normalizedData.Instructions,
               source: order.provider,
-              date: normalizedData.StatusDateTime
-            }
-          ]
+              date: normalizedData.StatusDateTime,
+            },
+          ],
         };
 
         order.ndrHistory.push(newHistoryEntry);
       }
     }
+    order.tracking.push({
+      Status: normalizedData.Status,
+      StatusDateTime: normalizedData.StatusDateTime,
+      StatusLocation: normalizedData.StatusLocation,
+      Instructions: normalizedData.Instructions,
+    });
 
     // ------------------------
     // 4️⃣ SET REATTEMPT FLA G
@@ -152,7 +173,6 @@ const DelhiveryWebhook = async (req, res) => {
 };
 
 module.exports = { DelhiveryWebhook };
-
 
 //  Webhook Scan Received from Delhivery: {
 //    Shipment: {

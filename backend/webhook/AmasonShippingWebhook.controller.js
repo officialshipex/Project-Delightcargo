@@ -25,6 +25,13 @@ const AmazonShippingWebhook = async (req, res) => {
     const order = await Order.findOne({ awb_number: trackingId });
     if (!order) return res.status(404).send("Order not found");
 
+    if (["new", "Cancelled"].includes(order.status)) {
+      console.log(
+        `Skipping Amazon Webhook for AWB ${awb} because order status is "${order.status}"`
+      );
+      return res.status(200).send("Ignored (Order Not Yet Shipped)");
+    }
+
     const eventCode = detail.eventCode; // e.g. ReadyForReceive
     const eventTime = formatAmazonDate(detail.eventTime);
     const shipmentType = detail.shipmentType; // FORWARD / RETURNS

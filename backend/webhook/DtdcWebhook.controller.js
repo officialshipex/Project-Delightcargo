@@ -31,6 +31,13 @@ const DTDCWebhook = async (req, res) => {
       return res.status(404).send("Order not found");
     }
 
+    if (["new", "Cancelled"].includes(order.status)) {
+      console.log(
+        `Skipping Dtdc Webhook for AWB ${awb} because order status is "${order.status}"`
+      );
+      return res.status(200).send("Ignored (Order Not Yet Shipped)");
+    }
+
     const statusObj = shipmentStatus[0];
 
     const normalizedData = {
@@ -47,7 +54,7 @@ const DTDCWebhook = async (req, res) => {
 
     // Add tracking entry
     order.tracking.push({
-      status: normalizedData.Status,
+      Status: normalizedData.Status,
       StatusDateTime: normalizedData.StatusDateTime,
       StatusLocation: normalizedData.StatusLocation,
       Instructions: normalizedData.Instructions,
