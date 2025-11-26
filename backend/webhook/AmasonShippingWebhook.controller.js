@@ -36,12 +36,6 @@ const AmazonShippingWebhook = async (req, res) => {
     const eventTime = formatAmazonDate(detail.eventTime);
     const shipmentType = detail.shipmentType; // FORWARD / RETURNS
 
-    console.log("Processing Amazon Webhook:", {
-      trackingId,
-      eventCode,
-      shipmentType,
-    });
-
     // ---------------------------
     // FORWARD FLOW
     // ---------------------------
@@ -84,14 +78,35 @@ const AmazonShippingWebhook = async (req, res) => {
       if (eventCode === "Rejected" || eventCode === "Undeliverable") {
         order.status = "Undelivered";
         order.ndrStatus = "Undelivered";
-        order.reattempt = true;
 
-        order.ndrReason = {
-          date: eventTime,
-          reason: eventCode,
-        };
+        const newDate = new Date(eventTime);
 
-        updateNdrHistoryByAwb(order.awb_number);
+        const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+        const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+        const lastDate = lastAction ? new Date(lastAction.date) : null;
+
+        const canAddNewEntry =
+          !lastDate || newDate.getTime() > lastDate.getTime();
+        if (canAddNewEntry) {
+          const attempt = order.ndrHistory.length + 1;
+          order.ndrHistory.push({
+            actions: [
+              {
+                action: `NDR ${attempt} Raised`,
+                actionBy: order.provider,
+                remark: eventCode,
+                source: order.provider,
+                date: eventTime,
+              },
+            ],
+          });
+          order.reattempt = true;
+
+          order.ndrReason = {
+            date: eventTime,
+            reason: eventCode,
+          };
+        }
       }
     }
 

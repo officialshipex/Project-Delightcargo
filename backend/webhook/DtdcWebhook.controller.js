@@ -105,14 +105,17 @@ const DTDCWebhook = async (req, res) => {
 
           if (canAddNewEntry) {
             const attempt = order.ndrHistory.length + 1;
-
+            order.ndrReason = {
+              date: normalizedData.StatusDateTime,
+              reason: normalizedData.StrRemarks,
+            };
             order.ndrHistory.push({
               actions: [
                 {
                   action: `NDR ${attempt} Raised`,
-                  actionBy: order.courierServiceName,
+                  actionBy: order.provider,
                   remark: normalizedData.StrRemarks,
-                  source: "DTDC",
+                  source: order.provider,
                   date: normalizedData.StatusDateTime,
                 },
               ],
