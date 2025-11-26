@@ -140,7 +140,7 @@ const DelhiveryWebhook = async (req, res) => {
           actions: [
             {
               action: `NDR ${attemptCount} Raised`,
-              actionBy: order.courierServiceName,
+              actionBy: order.provider,
               remark: normalizedData.Instructions,
               source: order.provider,
               date: normalizedData.StatusDateTime,
