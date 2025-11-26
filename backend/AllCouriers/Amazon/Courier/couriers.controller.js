@@ -296,7 +296,7 @@ const cancelShipment = async (shipmentId) => {
     // );
 
     if (response.data.payload) {
-      console.log("Shipment Cancelled Successfully", response);
+      console.log("Shipment Cancelled Successfully", response.data);
       return {
         data: response.data,
         code: 201,
