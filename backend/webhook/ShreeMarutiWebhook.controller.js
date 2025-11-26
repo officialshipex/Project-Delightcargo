@@ -85,11 +85,17 @@ const ShreeMarutiWebhook = async (req, res) => {
 
       if (status === "READY_FOR_DISPATCH") order.status = "Ready To Ship";
 
-      if (status === "PICKED_UP") order.status = "In-transit";
-
-      if (status === "IN_PROCESS" || status === "IN_TRANSIT")
+      if (status === "PICKED_UP") {
         order.status = "In-transit";
+        order.ndrStatus = "In-transit";
+        order.reattempt = false;
+      }
 
+      if (status === "IN_PROCESS" || status === "IN_TRANSIT") {
+        order.status = "In-transit";
+        order.ndrStatus = "In-transit";
+        order.reattempt = false;
+      }
       if (status === "OUT_FOR_DELIVERY" || status === "READY_FOR_DELIVERY") {
         order.status = "Out for Delivery";
         order.ndrStatus = "Out for Delivery";

@@ -21,6 +21,10 @@ const pickupAddress = new mongoose.Schema({
     type:String,
     default:""
   },
+  ekartAlias:{
+    type:String,
+    default:""
+  },
   createdAt: {
     type: Date,
     default: Date.now,

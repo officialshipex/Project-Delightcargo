@@ -106,10 +106,10 @@ const saveRate = async (req, res) => {
       savedRateCard = await rcard.save();
 
       // Update courier service with new rate card
-      await CourierServiceSecond.updateOne(
-        { courierProviderServiceName: courierServiceName },
-        { $push: { rateCards: savedRateCard } }
-      );
+      // await CourierServiceSecond.updateOne(
+      //   { courierProviderServiceName: courierServiceName },
+      //   { $push: { rateCards: savedRateCard } }
+      // );
 
       res.status(201).json({
         message: `${plan} rate card has been added successfully for service ${courierServiceName} under provider ${courierProviderName}`,
