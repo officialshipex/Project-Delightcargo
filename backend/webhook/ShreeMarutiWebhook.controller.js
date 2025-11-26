@@ -28,6 +28,13 @@ const ShreeMarutiWebhook = async (req, res) => {
       });
     }
 
+    if (["new", "Cancelled"].includes(order.status)) {
+      console.log(
+        `Skipping Shree Maruti Webhook for AWB ${awb} because order status is "${order.status}"`
+      );
+      return res.status(200).send("Ignored (Order Not Yet Shipped)");
+    }
+
     // Normalize
     const normalizedData = {
       Status: event,
