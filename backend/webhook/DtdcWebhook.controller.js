@@ -169,7 +169,7 @@ const DTDCWebhook = async (req, res) => {
     }
 
     await order.save();
-
+    console.log("DTDC Webhook Processed for AWB:", awb);
     return res.status(200).send("Webhook Processed");
   } catch (err) {
     console.error("DTDC Webhook Error:", err.message);
