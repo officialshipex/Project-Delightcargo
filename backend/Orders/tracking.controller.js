@@ -1116,7 +1116,7 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      provider: { $nin: ["Shree Maruti","Dtdc","DTDC"] },
+      provider: { $nin: ["Shree Maruti","Dtdc","DTDC","Delhivery"] },
       // ndrStatus: "Undelivered",
       // provider: "Bluedart",
       // awb_number: "78093387153",
@@ -1527,4 +1527,5 @@ module.exports = {
   updateNdrHistoryByAwb,
   formatAmazonDate,
   formatDTDCDateTime,
+  isReAttemptEligible
 };
