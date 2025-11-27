@@ -1125,7 +1125,7 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery"] },
+      provider: { $nin: ["Shree Maruti","Dtdc", "DTDC", "Delhivery"] },
       // ndrStatus: "Undelivered",
       // provider: "Bluedart",
       // awb_number: "76705666343",
@@ -1311,7 +1311,7 @@ const mapTrackingResponse = (data, provider, remark) => {
 };
 
 const formatDTDCDateTime = (dateStr, timeStr) => {
-  if (!dateStr || !timeStr || dateStr.length !== 8 || timeStr.length !== 4) {
+  if (!dateStr || dateStr.length !== 8 ) {
     return null; // Handle invalid inputs
   }
 

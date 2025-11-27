@@ -1927,7 +1927,7 @@ const CodRemittanceOrder = async (req, res) => {
     const pendingCODAmount = filteredOrders
       .filter((o) => o.status === "Pending")
       .reduce((sum, o) => sum + (o.codAmountNum || 0), 0);
-    console.log("pagin", paginatedData);
+    // console.log("pagin", paginatedData);
     return res.status(200).json({
       success: true,
       message: "COD remittance orders retrieved successfully",
@@ -2260,7 +2260,7 @@ const validateCODTransfer = async (req, res) => {
       .lean();
 
     const pendingIds = pendingRemittances.map((r) => r.remitanceId);
-    console.log("Pending remittance IDs for user:", pendingIds);
+    // console.log("Pending remittance IDs for user:", pendingIds);
     // Step 4: Compare arrays strictly (both must match exactly)
     const sortArray = (arr) => arr.map(String).sort(); // ensure same type & sorted
     const reqSorted = sortArray(remittanceIds);

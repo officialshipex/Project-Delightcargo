@@ -189,3 +189,34 @@ const DTDCWebhook = async (req, res) => {
 };
 
 module.exports = { DTDCWebhook };
+
+
+// {
+//   "shipment": {
+//     "strRefNo": "579511",
+//     "strOrigin": "INDORE",
+//     "strWeight": "0.5",
+//     "strBookedOn": "27112025",
+//     "strCNProduct": "PRIORITY",
+//     "strRtoNumber": "",
+//     "strCNTypeCode": "GL9711",
+//     "strShipmentNo": "7X105009916",
+//     "strExpectedDeliveryDate": "",
+//     "strRevExpectedDeliveryDate": ""
+//   },
+
+//   "shipmentStatus": [
+//     {
+//       "strAction": "PCSC",
+//       "strOrigin": "INDORE VIJAYNAGAR BRANCH , INDORE",
+//       "strRemarks": "",
+//       "strLatitude": "",
+//       "strLongitude": "",
+//       "strActionDate": "27112025",
+//       "strActionDesc": "Pickup Scheduled",
+//       "strActionTime": "133952",
+//       "strManifestNo": "7641991541779"
+//     }
+//   ]
+// }
+
