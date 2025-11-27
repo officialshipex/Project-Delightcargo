@@ -360,15 +360,18 @@ const trackSingleOrder = async (order) => {
         ) {
           order.status = "In-transit";
           order.ndrStatus = "In-transit";
+          order.reattempt = false;
         }
 
         if (normalizedData.Instructions === "OutForDelivery") {
           order.status = "Out for Delivery";
           order.ndrStatus = "Out for Delivery";
+          order.reattempt = false;
         }
-
+        console.log("amazon", normalizedData);
         if (normalizedData.Instructions === "Delivered") {
           order.status = "Delivered";
+          order.reattempt = false;
         }
 
         if (
@@ -378,6 +381,7 @@ const trackSingleOrder = async (order) => {
           normalizedData.Instructions === "Delivered"
         ) {
           order.ndrStatus = "Delivered";
+          order.reattempt = false;
         }
 
         // Detect Delivery Attempted
@@ -390,13 +394,13 @@ const trackSingleOrder = async (order) => {
           secondLastTracking?.Instructions === "DeliveryAttempted";
 
         if (
-          normalizedData.Instructions === "DeliveryAttempted" ||
-          wasPreviousDeliveryAttempted
+          normalizedData.Instructions === "DeliveryAttempted"
+          // wasPreviousDeliveryAttempted
         )
           if (order.ndrStatus !== "Action_Requested") {
             order.status = "Undelivered";
             order.ndrStatus = "Undelivered";
-            order.reattempt = true;
+
             updateNdrHistoryByAwb(order.awb_number);
 
             order.ndrReason = {
@@ -420,6 +424,7 @@ const trackSingleOrder = async (order) => {
                 lastEntryDate !== currentStatusDate) &&
               order.ndrHistory.length <= 2
             ) {
+              order.reattempt = true;
               const attemptCount = order.ndrHistory?.length + 1 || 0;
               // Create a new NDR history entry with one action
               const newHistoryEntry = {
@@ -800,7 +805,7 @@ const trackSingleOrder = async (order) => {
         if (dbMapping) {
           // console.log("maped delhivery status", dbMapping.sy_status);
           order.status = dbMapping.sy_status; // fallback if not mapped
-          order.ndrStatus=dbMapping.sy_status
+          order.ndrStatus = dbMapping.sy_status;
           // Only set ndrStatus for actual NDR-related states
           if (
             [
@@ -911,6 +916,7 @@ const trackSingleOrder = async (order) => {
       // --- Handle RTO logic ---
       if (order.status === "RTO" || order.status === "RTO In-transit") {
         order.ndrStatus = "RTO";
+        order.reattempt = false;
       }
 
       if (
@@ -919,6 +925,7 @@ const trackSingleOrder = async (order) => {
       ) {
         order.status = "RTO Delivered";
         order.ndrStatus = "RTO Delivered";
+        order.reattempt = false;
       }
 
       // --- Mark Delivered ---
@@ -928,11 +935,13 @@ const trackSingleOrder = async (order) => {
       ) {
         order.status = "Delivered";
         order.ndrStatus = "Delivered";
+        order.reattempt = false;
       }
 
       // --- Handle Out for Delivery ---
       if (normalizedData.scanCode === 4) {
         order.ndrStatus = "Out for Delivery";
+        order.reattempt = false;
       }
 
       // --- Handle Undelivered / NDR Cases ---
@@ -961,22 +970,22 @@ const trackSingleOrder = async (order) => {
           order.ndrHistory.length <= 2
         ) {
           // if (order.ndrStatus !== "Action_Requested") {
-            order.ndrStatus = "Undelivered";
-            const attemptCount = order.ndrHistory?.length + 1 || 0;
-            order.reattempt = true;
-            const newHistoryEntry = {
-              actions: [
-                {
-                  action: `NDR ${attemptCount} Raised`,
-                  actionBy: order.courierServiceName,
-                  remark: normalizedData.Instructions,
-                  source: order.provider,
-                  date: normalizedData.StatusDateTime,
-                },
-              ],
-            };
+          order.ndrStatus = "Undelivered";
+          const attemptCount = order.ndrHistory?.length + 1 || 0;
+          order.reattempt = true;
+          const newHistoryEntry = {
+            actions: [
+              {
+                action: `NDR ${attemptCount} Raised`,
+                actionBy: order.courierServiceName,
+                remark: normalizedData.Instructions,
+                source: order.provider,
+                date: normalizedData.StatusDateTime,
+              },
+            ],
+          };
 
-            order.ndrHistory.push(newHistoryEntry);
+          order.ndrHistory.push(newHistoryEntry);
           // }
         }
       }
@@ -1116,10 +1125,10 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      provider: { $nin: ["Shree Maruti","Dtdc","DTDC","Delhivery"] },
+      provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery"] },
       // ndrStatus: "Undelivered",
       // provider: "Bluedart",
-      // awb_number: "78093387153",
+      // awb_number: "76705666343",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1527,5 +1536,5 @@ module.exports = {
   updateNdrHistoryByAwb,
   formatAmazonDate,
   formatDTDCDateTime,
-  isReAttemptEligible
+  isReAttemptEligible,
 };

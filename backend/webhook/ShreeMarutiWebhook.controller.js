@@ -106,6 +106,7 @@ const ShreeMarutiWebhook = async (req, res) => {
       if (status === "OUT_FOR_DELIVERY" || status === "READY_FOR_DELIVERY") {
         order.status = "Out for Delivery";
         order.ndrStatus = "Out for Delivery";
+        order.reattempt = false;
       }
 
       /* ========================================================
