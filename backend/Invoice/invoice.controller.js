@@ -208,7 +208,6 @@ async function uploadToS3(localPath, key) {
       Key: key,
       Body: fileContent,
       ContentType: "application/pdf",
-      ACL: "private", // or remove if your bucket blocks ACL
     })
   );
 
@@ -226,7 +225,8 @@ async function buildChargesFromWalletTransactions(
   periodEnd,
   previousAwbs = []
 ) {
-  const wallet = await Wallet.findOne({ userId });
+  const user = await User.findById(userId);
+  const wallet = await Wallet.findOne({ _id: user.Wallet });
   if (!wallet) return { taxableValue: 0, tax: 0, total: 0, txns: [] };
 
   // Filter debit txns in period with allowed descriptions
@@ -268,7 +268,7 @@ async function buildChargesFromWalletTransactions(
 
   const taxableValue = validTxns.reduce((s, x) => s + x.amount, 0);
   const tax = Number((taxableValue * GST_RATE).toFixed(2));
-  const total = Number((taxableValue + tax).toFixed(2));
+  const total = tax;
 
   return { taxableValue, tax, total, txns: validTxns };
 }
@@ -288,7 +288,14 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
       periodEnd,
       prevAwbs
     );
-
+  console.log("Invoice generation for user:", userId, {
+    periodStart,
+    periodEnd,
+    taxableValue,
+    tax,
+    total,
+    txnsCount: txns.length,
+  });
   if (!txns || txns.length === 0) {
     return { skipped: true, reason: "No chargeable transactions" };
   }
@@ -309,8 +316,10 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     includedAwbs: txns.map((t) => t.awb),
     status: "UNPAID",
   });
-
-  const wallet = await Wallet.findOne({ userId });
+  const user = await User.findById(userId).select(
+    "fullname email company Wallet"
+  );
+  const wallet = await Wallet.findOne({ _id: user.Wallet });
   if (!wallet) {
     await invoice.save();
     return { saved: true, invoice, applied: 0, note: "Wallet not found" };
@@ -331,6 +340,7 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
       category: "debit",
       amount: toDeduct,
       balanceAfterTransaction: wallet.balance,
+      channelOrderId: invoiceNumber,
       date: new Date(),
       description: `Auto deduction for invoice ${invoice.invoiceNumber}`,
     });
@@ -349,7 +359,7 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
   await invoice.save();
 
   // PDF build
-  const user = await User.findById(userId).select("fullname email company");
+
   const pdfPath = await generateInvoicePDF(invoice, {
     fullname: user?.fullname,
     email: user?.email,
@@ -377,7 +387,7 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
 async function generateInvoicesForPeriod(periodStart, periodEnd) {
   // Fetch all users who have wallet or active users (change criteria as needed)
   // const users = await User.find({}, { _id: 1 });
-  const users=await User.findOne({userId:17333})
+  const users = await User.find({ userId: 17333 });
 
   const results = [];
   for (const u of users) {
@@ -401,40 +411,41 @@ async function generateInvoicesForPeriod(periodStart, periodEnd) {
 async function scheduleMonthlyInvoiceCron() {
   // Runs at 23:59 server time every day
   // cron.schedule("59 23 * * *", async () => {
-    console.log("Running monthly invoice cron check...");
-    try {
-      const now = new Date();
-      const tomorrow = new Date(now);
-      tomorrow.setDate(now.getDate() + 1);
-      if (tomorrow.getDate() !== 1) {
-        // not month-end
-        return;
-      }
+  console.log("Running monthly invoice cron check...");
+  try {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    // if (tomorrow.getDate() !== 1) {
 
-      // generate for current month (i.e. month that just finished)
-      const year = now.getFullYear();
-      const month = now.getMonth(); // current month index
-      const periodStart = new Date(year, month, 1);
-      const periodEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    //   return;
+    // }
 
-      console.log(
-        "Running monthly invoice generation for:",
-        periodStart,
-        periodEnd
-      );
-      const results = await generateInvoicesForPeriod(periodStart, periodEnd);
-      console.log(
-        "Monthly invoice results:",
-        results.filter((r) => r.result || r.error).slice(0, 10)
-      );
-      // Consider logging results to DB or file for auditing
-    } catch (err) {
-      console.error("Monthly invoice cron error:", err);
-    }
+    // generate for current month (i.e. month that just finished)
+    const year = now.getFullYear();
+    const month = now.getMonth(); // current month index
+    const periodStart = new Date(year, month, 1);
+    const periodEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    // console.log("Monthly invoice cron triggered for period:", periodStart, periodEnd);
+    console.log(
+      "Running monthly invoice generation for:",
+      periodStart,
+      periodEnd
+    );
+    const results = await generateInvoicesForPeriod(periodStart, periodEnd);
+    console.log(
+      "Monthly invoice results:",
+      results.filter((r) => r.result || r.error).slice(0, 10)
+    );
+    // Consider logging results to DB or file for auditing
+  } catch (err) {
+    console.error("Monthly invoice cron error:", err);
+  }
   // });
 }
 
-scheduleMonthlyInvoiceCron()
+// scheduleMonthlyInvoiceCron()
+// console.log("Monthly invoice cron scheduled.");
 
 /* -------------------------------------------------------
    Helper: Build Query From req.query

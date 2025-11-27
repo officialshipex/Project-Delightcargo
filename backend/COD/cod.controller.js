@@ -430,15 +430,14 @@ const processAndRemit = async (plan) => {
     orderDetails: plan.orderDetails,
   };
   // Actual payout to client (deduct charges here)
-  const payoutToClient = Number(
-    (codToBeDeducted - charges - creditedAmount).toFixed(2)
-  );
+  const payoutToClient = Number((remainingRecharge - charges).toFixed(2));
+
   // Update codRemittance
   await codRemittance.findOneAndUpdate(
     { userId: plan.userId, CODToBeRemitted: { $gte: codToBeDeducted } }, // ensure enough COD
     {
       $inc: {
-        CODToBeRemitted: -codToBeDeducted,
+        CODToBeRemitted: -remainingRecharge,
         RemittanceInitiated: payoutToClient,
         TotalDeductionfromCOD: TotalDeduction,
       },

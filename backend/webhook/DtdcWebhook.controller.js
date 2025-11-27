@@ -22,10 +22,8 @@ const DTDCWebhook = async (req, res) => {
       return res.status(400).send("Invalid Webhook Format");
     }
 
-    // Extract AWB No.
     const awb = shipment.strShipmentNo.trim();
 
-    // Find order
     const order = await Order.findOne({ awb_number: awb });
     if (!order) {
       return res.status(404).send("Order not found");
@@ -38,29 +36,14 @@ const DTDCWebhook = async (req, res) => {
       return res.status(200).send("Ignored (Order Not Yet Shipped)");
     }
 
-    const statusObj = shipmentStatus[0];
+    // ✔ SORT ALL EVENTS BY DATETIME
+    const sortedEvents = shipmentStatus
+      .map((ev) => ({
+        ...ev,
+        fullDate: formatDTDCDateTime(ev.strActionDate, ev.strActionTime),
+      }))
+      .sort((a, b) => new Date(a.fullDate) - new Date(b.fullDate));
 
-    const normalizedData = {
-      Status: statusObj.strAction || "",
-      StatusDateTime: formatDTDCDateTime(
-        statusObj.strActionDate,
-        statusObj.strActionTime
-      ),
-      Instructions: statusObj.strActionDesc || "",
-      StatusLocation: statusObj.strOrigin || "",
-      StrRemarks:
-        statusObj.strRemarks === "null" ? "" : statusObj.strRemarks || "",
-    };
-
-    // Add tracking entry
-    order.tracking.push({
-      Status: normalizedData.Status,
-      StatusDateTime: normalizedData.StatusDateTime,
-      StatusLocation: normalizedData.StatusLocation,
-      Instructions: normalizedData.Instructions,
-    });
-
-    // Load status mapping for DTDC
     const statusDoc = await statusMap.findOne(
       { partnerName: "DTDC" },
       { data: 1 }
@@ -69,109 +52,126 @@ const DTDCWebhook = async (req, res) => {
     let shouldUpdateWallet = false;
     let balanceTobeAdded = 0;
 
-    if (statusDoc) {
+    // -------------------------------------------
+    // ✔ PROCESS EACH TRACKING EVENT ONE BY ONE
+    // -------------------------------------------
+    for (const ev of sortedEvents) {
+      const normalizedData = {
+        Status: ev.strAction || "",
+        StatusDateTime: formatDTDCDateTime(
+          ev.strActionDate,
+          ev.strActionTime
+        ),
+        Instructions: ev.strActionDesc || "",
+        StatusLocation: ev.strOrigin || "",
+        StrRemarks: ev.strRemarks === "null" ? "" : ev.strRemarks || "",
+      };
+
+      // Add into tracking history
+      order.tracking.push({
+        Status: normalizedData.Status,
+        StatusDateTime: normalizedData.StatusDateTime,
+        StatusLocation: normalizedData.StatusLocation,
+        Instructions: normalizedData.Instructions,
+      });
+
+      if (!statusDoc) continue;
+
       const dbMapping = statusDoc.data.find(
-        (d) => d.code?.toLowerCase() === normalizedData.Status?.toLowerCase()
+        (d) =>
+          d.code?.toLowerCase() === normalizedData.Status?.toLowerCase()
       );
 
-      if (dbMapping) {
-        // Update main status
-        order.status = dbMapping.sy_status;
+      if (!dbMapping) continue;
 
-        // ------------------------------
-        // ✔ PURE NDR: only if SETRTO
-        // ------------------------------
-        const isPureNDREligible =
-          normalizedData.Status === "SETRTO" &&
-          order.ndrStatus !== "Action_Requested";
+      // Update main mapped status
+      order.status = dbMapping.sy_status;
 
-        // ------------------------------
-        // ✔ ANY UNDELIVERED STATUS
-        // SETRTO or Regular Undelivered
-        // ------------------------------
-        if (dbMapping.sy_status === "Undelivered") {
-          order.status = "Undelivered";
-          order.ndrStatus = "Undelivered";
+      const isPureNDREligible =
+        normalizedData.Status === "SETRTO" &&
+        order.ndrStatus !== "Action_Requested";
 
-          // Prevent duplicate NDR entry by comparing timestamps
-          const newDate = new Date(normalizedData.StatusDateTime);
+      // -------------------------------------------
+      // ✔ UNDELIVERED (any code including SETRTO)
+      // -------------------------------------------
+      if (dbMapping.sy_status === "Undelivered") {
+        order.status = "Undelivered";
+        order.ndrStatus = "Undelivered";
 
-          const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
-          const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
-          const lastDate = lastAction ? new Date(lastAction.date) : null;
+        const newDate = new Date(normalizedData.StatusDateTime);
+        const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+        const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+        const lastDate = lastAction ? new Date(lastAction.date) : null;
 
-          const canAddNewEntry =
-            !lastDate || newDate.getTime() > lastDate.getTime();
+        const canAddNewEntry =
+          !lastDate || newDate.getTime() > lastDate.getTime();
 
-          if (canAddNewEntry) {
-            const attempt = order.ndrHistory.length + 1;
-            order.ndrReason = {
-              date: normalizedData.StatusDateTime,
-              reason: normalizedData.StrRemarks,
-            };
-            order.ndrHistory.push({
-              actions: [
-                {
-                  action: `NDR ${attempt} Raised`,
-                  actionBy: order.provider,
-                  remark: normalizedData.StrRemarks,
-                  source: order.provider,
-                  date: normalizedData.StatusDateTime,
-                },
-              ],
-            });
-          }
-
-          // SETRTO → eligible for NDR
-          if (isPureNDREligible) {
-            order.reattempt = true;
-          } else {
-            order.reattempt = false;
-          }
+        if (canAddNewEntry) {
+          const attempt = order.ndrHistory.length + 1;
+          order.ndrReason = {
+            date: normalizedData.StatusDateTime,
+            reason: normalizedData.StrRemarks,
+          };
+          order.ndrHistory.push({
+            actions: [
+              {
+                action: `NDR ${attempt} Raised`,
+                actionBy: order.provider,
+                remark: normalizedData.StrRemarks,
+                source: order.provider,
+                date: normalizedData.StatusDateTime,
+              },
+            ],
+          });
         }
 
-        // ------------------------------
-        // ✔ Delivered Logic
-        // ------------------------------
-        if (dbMapping.code === "DLV") {
-          if (order.ndrHistory.length > 0) {
-            order.status = "Delivered";
-            order.ndrStatus = "Delivered";
-          } else {
-            order.status = "Delivered";
-            order.ndrStatus = null;
-          }
-          order.reattempt = false;
+        order.reattempt = isPureNDREligible ? true : false;
+      }
+
+      // -------------------------------------------
+      // ✔ Delivered
+      // -------------------------------------------
+      if (dbMapping.code === "DLV") {
+        if (order.ndrHistory.length > 0) {
+          order.status = "Delivered";
+          order.ndrStatus = "Delivered";
+        } else {
+          order.status = "Delivered";
+          order.ndrStatus = null;
         }
+        order.reattempt = false;
+      }
 
-        // ------------------------------
-        // ✔ Refund logic
-        // ------------------------------
-        if (
-          normalizedData.Instructions === "Return as per client instruction." &&
-          order.tracking.length <= 3
-        ) {
-          order.status = "Cancelled";
-          order.ndrStatus = "Cancelled";
+      // -------------------------------------------
+      // ✔ Refund Logic
+      // -------------------------------------------
+      if (
+        normalizedData.Instructions ===
+          "Return as per client instruction." &&
+        order.tracking.length <= 3
+      ) {
+        order.status = "Cancelled";
+        order.ndrStatus = "Cancelled";
 
-          balanceTobeAdded =
-            order.totalFreightCharges === "N/A"
-              ? 0
-              : parseInt(order.totalFreightCharges);
+        balanceTobeAdded =
+          order.totalFreightCharges === "N/A"
+            ? 0
+            : parseInt(order.totalFreightCharges);
 
-          shouldUpdateWallet = true;
-        }
+        shouldUpdateWallet = true;
+      }
 
-        // ------------------------------
-        // ✔ All non-NDR, non-Undelivered statuses
-        // ------------------------------
-        if (dbMapping.sy_status !== "Undelivered" && !isPureNDREligible) {
-          order.reattempt = false;
-        }
+      // -------------------------------------------
+      // ✔ Default: Not eligible for NDR
+      // -------------------------------------------
+      if (dbMapping.sy_status !== "Undelivered" && !isPureNDREligible) {
+        order.reattempt = false;
       }
     }
 
-    // Refund wallet if needed
+    // -------------------------------------------
+    // ✔ Update Wallet if needed
+    // -------------------------------------------
     if (shouldUpdateWallet && balanceTobeAdded > 0) {
       await Wallet.findByIdAndUpdate(order.walletId, {
         $inc: { balance: balanceTobeAdded },
@@ -179,6 +179,7 @@ const DTDCWebhook = async (req, res) => {
     }
 
     await order.save();
+
     console.log("DTDC Webhook Processed for AWB:", awb);
     return res.status(200).send("Webhook Processed");
   } catch (err) {
