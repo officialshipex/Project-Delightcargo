@@ -186,6 +186,7 @@ const codToBeRemitteds = async () => {
     console.error("❌ Error in COD to be remitted:", error);
   }
 };
+
 if (process.env.NODE_ENV === "production") {
   cron.schedule("1 1 * * *", () => {
     console.log(
@@ -2233,56 +2234,57 @@ const exportOrderInRemittance = async (req, res) => {
 const validateCODTransfer = async (req, res) => {
   try {
     const remittanceIds = req.body.remittanceIds;
-    console.log("Validating remittance IDs:", remittanceIds);
+
     if (!Array.isArray(remittanceIds) || remittanceIds.length === 0) {
       return res.status(400).json({ message: "Remittance IDs are required." });
     }
 
-    // Step 1: Take the first remittanceId
-    const firstRemittanceId = remittanceIds[0];
-    // console.log("First remittance ID for user check:", firstRemittanceId);
-
-    // Step 2: Find remittance by first ID
-    const firstRemittance = await adminCodRemittance
-      .findOne({ remitanceId: firstRemittanceId })
+    // Step 1: Fetch all selected remittances
+    const remittances = await adminCodRemittance
+      .find({ remitanceId: { $in: remittanceIds } })
       .lean();
 
-    if (!firstRemittance) {
-      return res.status(404).json({ message: "First remittance not found." });
-    }
-    // console.log("First remittance found:", firstRemittance);
-
-    const userId = firstRemittance.userId;
-
-    // Step 3: Get all pending remittances for that user
-    const pendingRemittances = await adminCodRemittance
-      .find({ userId: userId, status: "Pending" })
-      .lean();
-
-    const pendingIds = pendingRemittances.map((r) => r.remitanceId);
-    // console.log("Pending remittance IDs for user:", pendingIds);
-    // Step 4: Compare arrays strictly (both must match exactly)
-    const sortArray = (arr) => arr.map(String).sort(); // ensure same type & sorted
-    const reqSorted = sortArray(remittanceIds);
-    const pendingSorted = sortArray(pendingIds);
-
-    const isExactMatch =
-      reqSorted.length === pendingSorted.length &&
-      reqSorted.every((id, idx) => id === pendingSorted[idx]);
-
-    if (!isExactMatch) {
+    // Step 2: Validate all selected IDs exist
+    if (remittances.length !== remittanceIds.length) {
       return res.status(400).json({
-        message: "Please select all the pending remittance for same user",
-        requiredPendingIds: pendingIds,
-        providedIds: remittanceIds,
+        message: "Some remittance IDs are invalid.",
       });
     }
 
-    // ✅ If exact match
+    // ❗ Step 3: Check if any selected remittance is already paid
+    const alreadyPaid = remittances.filter((r) => r.status === "Paid");
+
+    if (alreadyPaid.length > 0) {
+      return res.status(400).json({
+        message: "One or more selected remittances are already paid.",
+        paidRemittances: alreadyPaid.map((r) => r.remitanceId),
+      });
+    }
+
+    // Step 4: Check if all selected belong to the same user
+    const uniqueUsers = [...new Set(remittances.map((r) => String(r.userId)))];
+
+    if (uniqueUsers.length !== 1) {
+      return res.status(400).json({
+        message: "Selected remittances belong to different users.",
+      });
+    }
+
+    const userId = uniqueUsers[0];
+
+    // Step 5: Get pending remittances (for debug or UI)
+    const pendingRemittances = await adminCodRemittance
+      .find({ userId, status: "Pending" })
+      .lean();
+
+    const pendingIds = pendingRemittances.map((r) => r.remitanceId);
+
+    // SUCCESS
     return res.status(200).json({
       message: "Validation successful",
+      selectedIds: remittanceIds,
       userId,
-      remittanceIds,
+      pendingIds,
     });
   } catch (error) {
     console.error("Error in validateCODTransfer:", error);
@@ -2293,12 +2295,23 @@ const validateCODTransfer = async (req, res) => {
 const getCODTransferData = async (req, res) => {
   try {
     const { id } = req.params;
+    const { selectedRemittanceIds } = req.query;
 
     if (!id) {
       return res.status(400).json({ message: "User ID is required." });
     }
 
-    // 1. Fetch all remittance records for this user
+    // selectedRemittanceIds MUST be an array
+    if (
+      !Array.isArray(selectedRemittanceIds) ||
+      selectedRemittanceIds.length === 0
+    ) {
+      return res
+        .status(400)
+        .json({ message: "selectedRemittanceIds array is required." });
+    }
+
+    // Fetch all remittance records for this user
     const remittanceRecords = await codRemittance.find({ userId: id }).lean();
 
     if (!remittanceRecords || remittanceRecords.length === 0) {
@@ -2307,23 +2320,24 @@ const getCODTransferData = async (req, res) => {
         .json({ message: "No remittance data found for this user." });
     }
 
-    // 2. Extract only pending remittanceData
-    const pendingRemittances = remittanceRecords
+    // Filter only selected remittance entries
+    const filteredRemittance = remittanceRecords
       .map((record) => ({
         ...record,
-        remittanceData: record.remittanceData.filter(
-          (r) => r.status === "Pending"
+        remittanceData: record.remittanceData.filter((r) =>
+          selectedRemittanceIds.includes(String(r.remittanceId))
         ),
       }))
       .filter((record) => record.remittanceData.length > 0);
 
-    if (pendingRemittances.length === 0) {
-      return res
-        .status(404)
-        .json({ message: "No pending remittance data found for this user." });
+    if (filteredRemittance.length === 0) {
+      return res.status(404).json({
+        message:
+          "No matching remittance data found for selected remittance IDs.",
+      });
     }
 
-    // 3. Fetch bank details for this user
+    // Fetch bank details
     const bankDetails = await bankAccount.findOne({ user: id }).lean();
 
     if (!bankDetails) {
@@ -2332,11 +2346,29 @@ const getCODTransferData = async (req, res) => {
         .json({ message: "Bank details not found for this user." });
     }
 
-    // 4. Send response
+    // 🔥 Fetch Wallet Balance & Hold Amount
+    const user = await User.findById(id).lean();
+    if (!user || !user.Wallet) {
+      return res
+        .status(404)
+        .json({ message: "Wallet not found for this user." });
+    }
+
+    const wallet = await Wallet.findById(user.Wallet).lean();
+    if (!wallet) {
+      return res.status(404).json({ message: "Wallet data not found." });
+    }
+
+    const walletBalance = wallet.balance || 0;
+    const holdAmount = wallet.holdAmount || 0; // adjust field name if different
+
+    // Return only selected remittance entries
     return res.status(200).json({
-      message: "Pending remittance data & bank details fetched successfully",
+      message: "Selected remittance data & bank details fetched successfully",
       bankDetails,
-      data: pendingRemittances,
+      walletBalance,
+      holdAmount,
+      data: filteredRemittance,
     });
   } catch (error) {
     console.error("Error in getCODTransferData:", error);
@@ -2344,86 +2376,279 @@ const getCODTransferData = async (req, res) => {
   }
 };
 
+// const transferCOD = async (req, res) => {
+//   try {
+//     const { id } = req.params; // userId
+//     const { utr } = req.body;
+
+//     if (!id || !utr) {
+//       return res.status(400).json({ message: "User ID and UTR are required." });
+//     }
+
+//     // 1. Fetch COD Remittance record for this user
+//     const remittanceRecord = await codRemittance.findOne({ userId: id });
+//     if (!remittanceRecord) {
+//       return res
+//         .status(404)
+//         .json({ message: "No remittance data found for this user." });
+//     }
+
+//     // 2. Find all Pending remittanceData
+//     const pendingRemittances = remittanceRecord.remittanceData.filter(
+//       (r) => r.status === "Pending"
+//     );
+
+//     if (pendingRemittances.length === 0) {
+//       return res
+//         .status(400)
+//         .json({ message: "No pending remittance data found for this user." });
+//     }
+
+//     // 3. Remove duplicate remittanceIds
+//     const uniquePendingRemittances = [];
+//     const seenIds = new Set();
+
+//     for (let r of pendingRemittances) {
+//       if (!seenIds.has(r.remittanceId)) {
+//         seenIds.add(r.remittanceId);
+//         uniquePendingRemittances.push(r);
+//       }
+//     }
+
+//     // 4. Calculate total sum of COD available (only unique ones)
+//     const initiatedSum = uniquePendingRemittances.reduce(
+//       (sum, r) => sum + (r.codAvailable || 0),
+//       0
+//     );
+
+//     // 5. Update remittanceData -> set Paid + utr
+//     remittanceRecord.remittanceData = remittanceRecord.remittanceData.map((r) =>
+//       r.status === "Pending" && seenIds.has(r.remittanceId)
+//         ? { ...r, status: "Paid", utr, remittanceMethod: "Bank Transaction" }
+//         : r
+//     );
+
+//     // 6. Update summary fields in codRemittance
+//     remittanceRecord.LastCODRemitted = initiatedSum;
+//     remittanceRecord.RemittanceInitiated =
+//       (remittanceRecord.RemittanceInitiated || 0) - initiatedSum;
+//     remittanceRecord.TotalCODRemitted =
+//       (Number(remittanceRecord.TotalCODRemitted) || 0) + initiatedSum;
+
+//     await remittanceRecord.save();
+
+//     // 7. Update adminCodRemittance for each unique remittanceId
+//     for (let rem of uniquePendingRemittances) {
+//       await adminCodRemittance.findOneAndUpdate(
+//         { remitanceId: rem.remittanceId },
+//         { $set: { status: "Paid" } }
+//       );
+//     }
+
+//     return res.status(200).json({
+//       message: "COD transfer completed successfully",
+//       utr,
+//       remittanceInitiated: initiatedSum,
+//       data: remittanceRecord,
+//     });
+//   } catch (error) {
+//     console.error("Error in transferCOD:", error);
+//     return res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
 const transferCOD = async (req, res) => {
   try {
-    const { id } = req.params; // userId
-    const { utr } = req.body;
+    const { id } = req.params;
 
-    if (!id || !utr) {
-      return res.status(400).json({ message: "User ID and UTR are required." });
+    let {
+      utr,
+      selectedRemittanceIds = [],
+      payableRemittanceIds = [],
+      topUpRemittanceIds = [],
+      frozenRemittanceIds = []
+    } = req.body;
+
+    // Normalize IDs
+    selectedRemittanceIds = selectedRemittanceIds.map(String);
+    payableRemittanceIds = payableRemittanceIds.map(String);
+    topUpRemittanceIds = topUpRemittanceIds.map(String);
+    frozenRemittanceIds = frozenRemittanceIds.map(String);
+
+    // UTR required only if money is paid to client
+    if (payableRemittanceIds.length > 0 && !utr) {
+      return res.status(400).json({
+        message: "UTR is required when paying remittances."
+      });
     }
 
-    // 1. Fetch COD Remittance record for this user
-    const remittanceRecord = await codRemittance.findOne({ userId: id });
-    if (!remittanceRecord) {
-      return res
-        .status(404)
-        .json({ message: "No remittance data found for this user." });
+    // Fetch user remittance record
+    const remRecord = await codRemittance.findOne({ userId: id });
+    if (!remRecord) {
+      return res.status(404).json({ message: "No COD remittance record found" });
     }
 
-    // 2. Find all Pending remittanceData
-    const pendingRemittances = remittanceRecord.remittanceData.filter(
+    // Fetch user + wallet
+    const user = await User.findById(id);
+    const wallet = await Wallet.findById(user.Wallet);
+
+    if (!wallet) {
+      return res.status(404).json({ message: "Wallet not found" });
+    }
+
+    // Get only pending entries
+    const pendingEntries = remRecord.remittanceData.filter(
       (r) => r.status === "Pending"
     );
 
-    if (pendingRemittances.length === 0) {
-      return res
-        .status(400)
-        .json({ message: "No pending remittance data found for this user." });
-    }
+    let totalPayable = 0;
+    let totalAdjusted = 0;
 
-    // 3. Remove duplicate remittanceIds
-    const uniquePendingRemittances = [];
-    const seenIds = new Set();
+    // ============================================================
+    // Process each pending entry
+    // ============================================================
+    remRecord.remittanceData = remRecord.remittanceData.map((item) => {
+      const idStr = String(item.remittanceId);
 
-    for (let r of pendingRemittances) {
-      if (!seenIds.has(r.remittanceId)) {
-        seenIds.add(r.remittanceId);
-        uniquePendingRemittances.push(r);
+      // Skip already Paid entries → don't modify them
+      if (item.status === "Paid") return item;
+
+      const remAmt =
+        Number(item.codAvailable || 0)
+
+      // 1️⃣ PAYABLE entries → Paid
+      if (payableRemittanceIds.includes(idStr)) {
+        totalPayable += Number(item.codAvailable || 0);
+
+        return {
+          ...item,
+          status: "Paid",
+          utr,
+          remittanceMethod: "Bank Transfer",
+          reason: "Paid to client"
+        };
       }
-    }
 
-    // 4. Calculate total sum of COD available (only unique ones)
-    const initiatedSum = uniquePendingRemittances.reduce(
-      (sum, r) => sum + (r.codAvailable || 0),
-      0
-    );
+      // 2️⃣ Wallet Top-Up entries
+      if (topUpRemittanceIds.includes(idStr)) {
+        totalAdjusted += remAmt;
 
-    // 5. Update remittanceData -> set Paid + utr
-    remittanceRecord.remittanceData = remittanceRecord.remittanceData.map((r) =>
-      r.status === "Pending" && seenIds.has(r.remittanceId)
-        ? { ...r, status: "Paid", utr, remittanceMethod: "Bank Transaction" }
-        : r
-    );
+        return {
+          ...item,
+          status: "Paid",
+          adjustedAmount: remAmt,
+          remittanceMethod: "Wallet Adjustment",
+          reason: "Used to adjust negative wallet balance"
+        };
+      }
 
-    // 6. Update summary fields in codRemittance
-    remittanceRecord.LastCODRemitted = initiatedSum;
-    remittanceRecord.RemittanceInitiated =
-      (remittanceRecord.RemittanceInitiated || 0) - initiatedSum;
-    remittanceRecord.TotalCODRemitted =
-      (Number(remittanceRecord.TotalCODRemitted) || 0) + initiatedSum;
+      // 3️⃣ Frozen entries → not paid, not topup
+      if (frozenRemittanceIds.includes(idStr)) {
+        return {
+          ...item,
+          status: "Pending",
+          utr: null,
+          remittanceMethod: null,
+          reason: "Frozen because negative wallet balance"
+        };
+      }
 
-    await remittanceRecord.save();
+      // 4️⃣ Held entries → still pending
+      return {
+        ...item,
+        status: "Pending",
+        utr: null,
+        remittanceMethod: null,
+        reason: "Held due to hold amount requirement"
+      };
+    });
 
-    // 7. Update adminCodRemittance for each unique remittanceId
-    for (let rem of uniquePendingRemittances) {
-      await adminCodRemittance.findOneAndUpdate(
-        { remitanceId: rem.remittanceId },
-        { $set: { status: "Paid" } }
+    // ============================================================
+    // WALLET ADJUSTMENT (TopUp)
+    // ============================================================
+    if (totalAdjusted > 0) {
+      const newBalance = wallet.balance + totalAdjusted;
+
+      await Wallet.updateOne(
+        { _id: wallet._id },
+        {
+          $set: { balance: newBalance },
+          $push: {
+            transactions: {
+              category: "credit",
+              amount: totalAdjusted,
+              balanceAfterTransaction: newBalance,
+              description: "COD adjustment credited to wallet",
+              date: new Date()
+            }
+          }
+        }
       );
     }
 
+    // ============================================================
+    // Update summary fields
+    // ============================================================
+    remRecord.LastCODRemitted = totalPayable;
+    remRecord.RemittanceInitiated =
+      (remRecord.RemittanceInitiated || 0) - totalPayable-totalAdjusted;
+    remRecord.TotalCODRemitted =
+      (Number(remRecord.TotalCODRemitted) || 0) + totalPayable;
+
+    await remRecord.save();
+
+    // ============================================================
+    // Update admin table
+    // ============================================================
+    for (const remId of selectedRemittanceIds) {
+      let status = "Pending";
+      let reason = "";
+
+      if (payableRemittanceIds.includes(remId)) {
+        status = "Paid";
+        reason = "Paid to client";
+      } else if (topUpRemittanceIds.includes(remId)) {
+        status = "Paid";
+        reason = "";
+      } else if (frozenRemittanceIds.includes(remId)) {
+        status = "Pending";
+        reason = "Frozen because negative wallet balance";
+      } else {
+        status = "Pending";
+        reason = "Held for hold amount requirement";
+      }
+
+      await adminCodRemittance.findOneAndUpdate(
+        { remitanceId: remId },
+        {
+          $set: {
+            status,
+            // utr: payableRemittanceIds.includes(remId) ? utr : null,
+            reason
+          }
+        },
+        { new: true }
+      );
+    }
+
+    // ============================================================
+    // Response
+    // ============================================================
     return res.status(200).json({
-      message: "COD transfer completed successfully",
-      utr,
-      remittanceInitiated: initiatedSum,
-      data: remittanceRecord,
+      success: true,
+      message: "COD remittance processed successfully.",
+      totalPayable,
+      totalAdjusted
     });
   } catch (error) {
     console.error("Error in transferCOD:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
   }
 };
+
 
 module.exports = {
   codPlanUpdate,

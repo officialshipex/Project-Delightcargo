@@ -21,6 +21,7 @@ const codRemittanceSchema = new mongoose.Schema({
       remittanceMethod: {
         type: String,
       },
+      reason:{type:String},
       status: {
         type: String,
         enum: ["Pending", "Paid"],

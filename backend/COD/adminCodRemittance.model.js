@@ -25,6 +25,7 @@ const adminCodRemittance = new mongoose.Schema(
       enum: ["Pending", "Paid"],
       default: "Pending",
     },
+    reason:{type:String},
     orderDetails: {
       date: { type: Date, required: true },
       codcal: { type: Number },

@@ -112,15 +112,15 @@ const DelhiveryWebhook = async (req, res) => {
     const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
 
     const lastEntryDate = lastAction?.date
-      ? new Date(lastAction.date).toDateString()
+      ? new Date(lastAction.date).getTime()
       : null;
     const currentStatusDate = new Date(
       normalizedData.StatusDateTime
-    ).toDateString();
+    ).getTime();
 
     if (
       (order.ndrHistory.length === 0 || lastEntryDate < currentStatusDate) &&
-      order.ndrHistory.length <= 2
+      order.ndrHistory.length <= 3
     ) {
       if (
         normalizedData.StatusCode &&

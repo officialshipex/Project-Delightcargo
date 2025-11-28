@@ -81,12 +81,12 @@ app.get("/download-invoice/:id", async (req, res) => {
 
   // SHIPPING ADDRESS (left)
   const b1 = drawBlock(col1X, startY, col1W, "SHIPPING ADDRESS:", [
-    s(pickup.contactName),
-    s(pickup.address),
-    s(pickup.city),
-    s(pickup.state),
-    s(pickup.pinCode),
-    s(pickup.phoneNumber),
+    s(receiver.contactName),
+    s(receiver.address),
+    s(receiver.city),
+    s(receiver.state),
+    s(receiver.pinCode),
+    s(receiver.phoneNumber),
   ]);
 
   // SOLD BY (middle) — using receiver here is typical; change if needed

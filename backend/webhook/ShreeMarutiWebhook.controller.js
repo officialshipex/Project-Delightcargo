@@ -134,7 +134,7 @@ const ShreeMarutiWebhook = async (req, res) => {
       if (status === "UNDELIVERED") {
         order.status = "Undelivered";
         order.ndrStatus = "Undelivered";
-        const currentDate = new Date(normalizedData.StatusDateTime);
+        const currentDate = new Date(normalizedData.StatusDateTime).getTime();
 
         // fetch last NDR attempt date (if any)
         let lastNdrDate = null;
@@ -142,7 +142,7 @@ const ShreeMarutiWebhook = async (req, res) => {
           const lastHistory = order.ndrHistory[order.ndrHistory.length - 1];
           const lastAction =
             lastHistory.actions[lastHistory.actions.length - 1];
-          lastNdrDate = new Date(lastAction.date);
+          lastNdrDate = new Date(lastAction.date).getTime();
         }
 
         const attemptCount = order.ndrHistory.length + 1;
@@ -195,7 +195,7 @@ const ShreeMarutiWebhook = async (req, res) => {
     ───────────────────────────────────────────────
   */
 
-        if (attemptCount <= 2 && (!lastNdrDate || currentDate > lastNdrDate)) {
+        if (attemptCount <= 3 && (!lastNdrDate || currentDate > lastNdrDate)) {
           order.reattempt = true;
 
           order.ndrHistory.push({
