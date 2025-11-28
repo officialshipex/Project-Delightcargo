@@ -300,7 +300,7 @@ const trackSingleOrder = async (order) => {
           ) {
             order.status = "Undelivered";
             order.ndrStatus = "Undelivered";
-            updateNdrHistoryByAwb(order.awb_number);
+            // updateNdrHistoryByAwb(order.awb_number);
             order.ndrReason = {
               date: normalizedData.StatusDateTime,
               reason: normalizedData.StrRemarks,
@@ -312,11 +312,11 @@ const trackSingleOrder = async (order) => {
             const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
 
             const lastEntryDate = lastAction?.date
-              ? new Date(lastAction.date).toDateString()
+              ? new Date(lastAction.date).getTime()
               : null;
             const currentStatusDate = new Date(
               normalizedData.StatusDateTime
-            ).toDateString();
+            ).getTime();
 
             if (
               (lastEntryDate !== currentStatusDate ||
@@ -368,7 +368,7 @@ const trackSingleOrder = async (order) => {
           order.ndrStatus = "Out for Delivery";
           order.reattempt = false;
         }
-        console.log("amazon", normalizedData);
+        // console.log("amazon", normalizedData);
         if (normalizedData.Instructions === "Delivered") {
           order.status = "Delivered";
           order.reattempt = false;
@@ -401,7 +401,7 @@ const trackSingleOrder = async (order) => {
             order.status = "Undelivered";
             order.ndrStatus = "Undelivered";
 
-            updateNdrHistoryByAwb(order.awb_number);
+            // updateNdrHistoryByAwb(order.awb_number);
 
             order.ndrReason = {
               date: normalizedData.StatusDateTime,
@@ -412,12 +412,12 @@ const trackSingleOrder = async (order) => {
             const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
 
             const lastEntryDate = lastAction?.date
-              ? new Date(lastAction.date).toDateString()
+              ? new Date(lastAction.date).getTime()
               : null;
 
             const currentStatusDate = new Date(
               normalizedData.StatusDateTime
-            ).toDateString();
+            ).getTime()
 
             if (
               (order.ndrHistory.length === 0 ||
@@ -947,7 +947,7 @@ const trackSingleOrder = async (order) => {
       // --- Handle Undelivered / NDR Cases ---
       if (normalizedData.scanCode === 11) {
         // updateNdrHistoryByAwb(order.awb_number);
-order.ndrStatus = "Undelivered";
+        order.ndrStatus = "Undelivered";
         order.ndrReason = {
           date: normalizedData.StatusDateTime,
           reason: normalizedData.StrRemarks,
@@ -956,41 +956,41 @@ order.ndrStatus = "Undelivered";
         const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
         const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
         const lastEntryDate = lastAction?.date
-          ? new Date(lastAction.date).toDateString()
+          ? new Date(lastAction.date).getTime()
           : null;
 
         const currentStatusDate = new Date(
           normalizedData.StatusDateTime
-        ).toDateString();
-
+        ).getTime();
+// console.log("ZipyPost NDR lastEntryDate:", lastEntryDate, "currentStatusDate:", currentStatusDate);
         // Avoid duplicate same-day entries & limit history entries
         if (
           (order.ndrHistory.length === 0 ||
             lastEntryDate < currentStatusDate) &&
-          order.ndrHistory.length <= 2
+          order.ndrHistory.length <= 3
         ) {
-          // if (order.ndrStatus !== "Action_Requested") {
-          
-          const attemptCount = order.ndrHistory?.length + 1 || 0;
-          order.reattempt = true;
-          const newHistoryEntry = {
-            actions: [
-              {
-                action: `NDR ${attemptCount} Raised`,
-                actionBy: order.courierServiceName,
-                remark: normalizedData.Instructions,
-                source: order.provider,
-                date: normalizedData.StatusDateTime,
-              },
-            ],
-          };
+        // console.log("Adding NDR history entry for AWB:", order.awb_number);
+          if (order.ndrStatus !== "Action_Requested") {
+            const attemptCount = order.ndrHistory?.length + 1 || 0;
+            order.reattempt = true;
+            const newHistoryEntry = {
+              actions: [
+                {
+                  action: `NDR ${attemptCount} Raised`,
+                  actionBy: order.courierServiceName,
+                  remark: normalizedData.Instructions,
+                  source: order.provider,
+                  date: normalizedData.StatusDateTime,
+                },
+              ],
+            };
 
-          order.ndrHistory.push(newHistoryEntry);
-          // }
+            order.ndrHistory.push(newHistoryEntry);
+          }
         }
       }
 
-      if(order.ndrHistory.length>=4){
+      if (order.ndrHistory.length >= 4) {
         order.reattempt = false;
       }
 
@@ -1129,10 +1129,10 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      provider: { $nin: ["Shree Maruti","Dtdc", "DTDC", "Delhivery"] },
+      provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery"] },
       // ndrStatus: "Undelivered",
-      // provider: "Bluedart",
-      // awb_number: "78083837705",
+      // provider: "Dtdc",
+      awb_number: "78088836151",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1159,7 +1159,7 @@ const startTrackingLoop = async () => {
     );
     const currentHour = istDate.getHours();
 
-    if (currentHour >= 7 && currentHour <= 23) {
+    if (currentHour >= 6 && currentHour <= 22) {
       console.log(
         "🕒 Starting Order Tracking at",
         istDate.toLocaleTimeString("en-IN")
@@ -1315,7 +1315,7 @@ const mapTrackingResponse = (data, provider, remark) => {
 };
 
 const formatDTDCDateTime = (dateStr, timeStr) => {
-  if (!dateStr || dateStr.length !== 8 ) {
+  if (!dateStr || dateStr.length !== 8) {
     return null; // Handle invalid inputs
   }
 

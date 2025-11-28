@@ -361,6 +361,20 @@ const getAllReferralStats = async (req, res) => {
   }
 };
 
+const updateAllReferralCommission = async () => {
+  try {
+    const result = await User.updateMany(
+      {}, // match all users
+      { referralCommissionPercentage: 2 } // update value
+    );
+
+    console.log("Referral Commission Updated for all users:", result);
+  } catch (error) {
+    console.error("Error updating referral commission for all users:", error);
+  }
+};
+// updateAllReferralCommission()
+
 module.exports = {
   generateMonthlyReferralReport,
   getReferralStats,
