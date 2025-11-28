@@ -656,8 +656,9 @@ const getOrdersByNdrStatus = async (req, res) => {
     if (status === "Undelivered" && tab === "Action_Required") {
       andConditions.push({ ndrStatus: "Undelivered" });
       andConditions.push({ reattempt: true });
-    } else if (status && status !== "All") {
+    } else if (status ==="Undelivered" && tab==="") {
       andConditions.push({ ndrStatus: status });
+      andConditions.push({reattempt:false});
     }
 
     if (status && status !== "All") {

@@ -946,8 +946,8 @@ const trackSingleOrder = async (order) => {
 
       // --- Handle Undelivered / NDR Cases ---
       if (normalizedData.scanCode === 11) {
-        updateNdrHistoryByAwb(order.awb_number);
-
+        // updateNdrHistoryByAwb(order.awb_number);
+order.ndrStatus = "Undelivered";
         order.ndrReason = {
           date: normalizedData.StatusDateTime,
           reason: normalizedData.StrRemarks,
@@ -970,7 +970,7 @@ const trackSingleOrder = async (order) => {
           order.ndrHistory.length <= 2
         ) {
           // if (order.ndrStatus !== "Action_Requested") {
-          order.ndrStatus = "Undelivered";
+          
           const attemptCount = order.ndrHistory?.length + 1 || 0;
           order.reattempt = true;
           const newHistoryEntry = {
@@ -988,6 +988,10 @@ const trackSingleOrder = async (order) => {
           order.ndrHistory.push(newHistoryEntry);
           // }
         }
+      }
+
+      if(order.ndrHistory.length>=4){
+        order.reattempt = false;
       }
 
       // --- Cancelled Case ---
@@ -1128,7 +1132,7 @@ const trackOrders = async () => {
       provider: { $nin: ["Shree Maruti","Dtdc", "DTDC", "Delhivery"] },
       // ndrStatus: "Undelivered",
       // provider: "Bluedart",
-      // awb_number: "76705666343",
+      // awb_number: "78083837705",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);

@@ -12,114 +12,120 @@ const BillingAddress = require("../models/billingInfo.model");
 const { generateKeySync } = require("crypto");
 const Wallet = require("../models/wallet");
 
-const refundFreightIfSingleDebit = async (orderId) => {
+const refundFreightIfSingleDebit = async () => {
   try {
-    if (!orderId) {
-      console.log("❌ orderId is required");
-      return;
-    }
+    console.log("🚀 Running Refund Freight Batch...");
 
-    // 1️⃣ Fetch Order with allowed statuses
-    const order = await Order.findOne({
-      orderId: orderId,
-      status: { $in: ["Booked", "Ready To Ship", "Not Picked"] },
+    // 1️⃣ Define date filter: shipmentCreatedAt before 20 Nov 2025
+    const cutoffDate = new Date("2025-11-01T00:00:00.000Z");
+
+    // 2️⃣ Fetch all eligible orders in bulk
+    const orders = await Order.find({
+      shipmentCreatedAt: { $lt: cutoffDate },
+      // status: { $in: ["Ready To Ship", "Booked", "Not Picked"] },
+      status:{$in:["In-transit"]}
     });
 
-    if (!order) {
-      console.log("❌ Order not found or status not eligible");
+    if (!orders.length) {
+      console.log("ℹ No eligible orders found.");
       return;
     }
 
-    const awb = order.awb_number;
-    if (!awb) {
-      console.log("❌ Order does not contain awb_number");
-      return;
-    }
+    console.log(`📦 Found ${orders.length} eligible orders.`);
 
-    // 2️⃣ Fetch User
-    const user = await User.findById(order.userId);
-    if (!user || !user.Wallet) {
-      console.log("❌ User or Wallet not found");
-      return;
-    }
+    for (const order of orders) {
+      const orderId = order.orderId;
+      const awb = order.awb_number;
 
-    // 3️⃣ Fetch Wallet
-    const wallet = await Wallet.findById(user.Wallet);
-    if (!wallet) {
-      console.log("❌ Wallet not found");
-      return;
-    }
+      console.log(`\n➡ Processing order ${orderId} (AWB: ${awb})`);
 
-    // 4️⃣ Fetch transactions by AWB NUMBER
-    const walletTxns = wallet.transactions.filter(
-      (txn) => txn.awb_number === awb
-    );
-
-    // ---------------------------------------------------------
-    // ⭐ NEW LOGIC: If 2 transactions exist → CANCEL ORDER + UPDATE TXNS
-    // ---------------------------------------------------------
-    if (walletTxns.length === 2) {
-      console.log(
-        `⚠ Found TWO transactions for AWB ${awb}. Marking CANCELLED.`
-      );
-
-      // A) Update Order Status → Cancelled
-      order.status = "Cancelled";
-      await order.save();
-
-      // B) Update both related wallet transactions
-      wallet.transactions = wallet.transactions.map((txn) => {
-        if (txn.awb_number === awb) {
-          txn.transactionStatus = "Cancelled"; // ← new field
-        }
-        return txn;
-      });
-
-      await wallet.save();
-
-      console.log("✅ Order and Transactions marked as CANCELLED");
-      return;
-    }
-
-    // ---------------------------------------------------------
-    // ⭐ ORIGINAL LOGIC: If only 1 DEBIT → Create CREDIT
-    // ---------------------------------------------------------
-    if (walletTxns.length === 1 && walletTxns[0].category === "debit") {
-      const creditAmount = order.totalFreightCharges;
-
-      if (!creditAmount || creditAmount <= 0) {
-        console.log("❌ Invalid freight charge amount");
-        return;
+      // 3️⃣ Fetch User + Wallet
+      const user = await User.findById(order.userId);
+      if (!user || !user.Wallet) {
+        console.log("❌ User or Wallet missing → Skipping.");
+        continue;
       }
 
-      const newBalance = wallet.balance + creditAmount;
+      const wallet = await Wallet.findById(user.Wallet);
+      if (!wallet) {
+        console.log("❌ Wallet not found → Skipping.");
+        continue;
+      }
 
-      wallet.transactions.push({
-        channelOrderId: orderId,
-        category: "credit",
-        amount: creditAmount,
-        balanceAfterTransaction: newBalance,
-        awb_number: awb,
-        description: "Freight Charges Received",
-      });
+      // 4️⃣ Get wallet transactions for this AWB
+      const walletTxns = wallet.transactions.filter(
+        (txn) => txn.awb_number === awb
+      );
 
-      wallet.balance = newBalance;
-      await wallet.save();
+      // ---------------------------------------------------------
+      // ⭐ CASE A → TWO transactions → Cancel Order + mark txns
+      // ---------------------------------------------------------
+      if (walletTxns.length === 2) {
+        console.log(`⚠ Two txns found for ${awb}. Marking CANCELLED.`);
 
-      console.log("✅ Credit transaction added successfully");
-      console.log("➡ Updated Wallet Balance:", newBalance);
-      return;
+        order.status = "Cancelled";
+
+        // Update both txns
+        wallet.transactions = wallet.transactions.map((txn) => {
+          if (txn.awb_number === awb) {
+            txn.transactionStatus = "Cancelled";
+          }
+          return txn;
+        });
+
+        await wallet.save();
+        await order.save();
+        console.log("✔ Order + Wallet transactions updated.");
+        continue;
+      }
+
+      // ---------------------------------------------------------
+      // ⭐ CASE B → One DEBIT → Add CREDIT (refund freight)
+      // ---------------------------------------------------------
+      if (walletTxns.length === 1 && walletTxns[0].category === "debit") {
+        const refundAmount = Number(order.totalFreightCharges || 0);
+
+        if (refundAmount <= 0) {
+          console.log("❌ Invalid totalFreightCharges → Skipping.");
+          continue;
+        }
+
+        const newBalance = wallet.balance + refundAmount;
+
+        // Add credit entry
+        wallet.transactions.push({
+          channelOrderId: orderId,
+          category: "credit",
+          amount: refundAmount,
+          balanceAfterTransaction: newBalance,
+          awb_number: awb,
+          description: "Freight Charges Received",
+        });
+        order.status = "Cancelled";
+
+        wallet.balance = newBalance;
+        await wallet.save();
+        await order.save();
+        console.log(`✔ Credited ₹${refundAmount} for AWB ${awb}.`);
+        console.log(`💰 New Balance: ₹${newBalance}`);
+        continue;
+      }
+
+      // ---------------------------------------------------------
+      // ⭐ CASE C → No action
+      // ---------------------------------------------------------
+      console.log(
+        `ℹ No action for AWB ${awb}. Txn count: ${walletTxns.length}`
+      );
     }
 
-    console.log(
-      `ℹ No action taken. Existing transactions for AWB ${awb}: ${walletTxns.length}`
-    );
+    console.log("\n🏁 Freight Refund Batch Completed.");
   } catch (error) {
-    console.error("❌ Refund Freight Error:", error.message);
+    console.error("❌ Error in refundFreightIfSingleDebit:", error.message);
   }
 };
 
-// refundFreightIfSingleDebit(861985)
+// refundFreightIfSingleDebit()
 
 const getUsers = async (req, res) => {
   try {
