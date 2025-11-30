@@ -1131,8 +1131,8 @@ const trackOrders = async () => {
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery"] },
       // ndrStatus: "Undelivered",
-      // provider: "Dtdc",
-      // awb_number: "78088836151",
+      // provider: "Delhivery",
+      // awb_number: "I75009320",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1181,7 +1181,7 @@ const startTrackingLoop = async () => {
 };
 
 // Start the loop once
-// startTrackingLoop();
+// startTrackingLoop(); 
 
 if (process.env.NODE_ENV === "production") {
   startTrackingLoop();

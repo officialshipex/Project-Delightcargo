@@ -15,7 +15,7 @@ const SameDateDeliverySchema = new mongoose.Schema({
   totalCod: { type: Number, required: true },
   status: {
     type: String,
-    enum: ["Pending", "Complete"],
+    enum: ["Pending", "Completed"],
     default: "Pending",
   },
 });
