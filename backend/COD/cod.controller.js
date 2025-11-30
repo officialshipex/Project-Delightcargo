@@ -88,6 +88,10 @@ const codPlanUpdate = async (req, res) => {
 
 const codToBeRemitteds = async () => {
   try {
+    const daysBack = 10;
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+
     const deliveredCodOrders = await Order.aggregate([
       {
         $match: {
@@ -95,11 +99,27 @@ const codToBeRemitteds = async () => {
           "paymentDetails.method": "COD",
         },
       },
+      {
+        $addFields: {
+          lastTracking: {
+            $arrayElemAt: ["$tracking", -1], // get last element of tracking array
+          },
+        },
+      },
+      {
+        $match: {
+          "lastTracking.StatusDateTime": { $gte: cutoffDate },
+        },
+      },
     ]);
 
+    console.log(
+      `🚚 Found ${deliveredCodOrders.length} delivered COD orders to process.`
+    );
     for (const order of deliveredCodOrders) {
       const latestTracking = order.tracking?.[order.tracking.length - 1];
       const deliveryDate = latestTracking?.StatusDateTime;
+
 
       if (!deliveryDate) {
         console.log(`⚠️ Skipping order ${order._id} - No delivery date`);
@@ -121,12 +141,18 @@ const codToBeRemitteds = async () => {
 
       if (sameDateEntry) {
         // ✅ Check if order already exists
+        console.log(
+          `🔍 Checking for duplicate in SameDateDelivered for order ${order.awb_number}`
+        );
         const isDuplicate = sameDateEntry.orderDetails.some(
           (id) => Number(id.customOrderId) === order.orderId
         );
 
+        console.log(`Duplicate check for order ${sameDateEntry._id}: ${isDuplicate}`);
+
         if (!isDuplicate) {
           // ✅ Add to existing entry
+          console.log(`➕ Adding order ${order._id} to existing SameDateDelivered entry`);
           sameDateEntry.orderDetails.push({
             orderId: order._id,
             codAmount,
@@ -2466,7 +2492,7 @@ const transferCOD = async (req, res) => {
       selectedRemittanceIds = [],
       payableRemittanceIds = [],
       topUpRemittanceIds = [],
-      frozenRemittanceIds = []
+      frozenRemittanceIds = [],
     } = req.body;
 
     // Normalize IDs
@@ -2478,14 +2504,16 @@ const transferCOD = async (req, res) => {
     // UTR required only if money is paid to client
     if (payableRemittanceIds.length > 0 && !utr) {
       return res.status(400).json({
-        message: "UTR is required when paying remittances."
+        message: "UTR is required when paying remittances.",
       });
     }
 
     // Fetch user remittance record
     const remRecord = await codRemittance.findOne({ userId: id });
     if (!remRecord) {
-      return res.status(404).json({ message: "No COD remittance record found" });
+      return res
+        .status(404)
+        .json({ message: "No COD remittance record found" });
     }
 
     // Fetch user + wallet
@@ -2513,8 +2541,7 @@ const transferCOD = async (req, res) => {
       // Skip already Paid entries → don't modify them
       if (item.status === "Paid") return item;
 
-      const remAmt =
-        Number(item.codAvailable || 0)
+      const remAmt = Number(item.codAvailable || 0);
 
       // 1️⃣ PAYABLE entries → Paid
       if (payableRemittanceIds.includes(idStr)) {
@@ -2525,7 +2552,7 @@ const transferCOD = async (req, res) => {
           status: "Paid",
           utr,
           remittanceMethod: "Bank Transfer",
-          reason: "Paid to client"
+          reason: "Paid to client",
         };
       }
 
@@ -2538,7 +2565,7 @@ const transferCOD = async (req, res) => {
           status: "Paid",
           adjustedAmount: remAmt,
           remittanceMethod: "Wallet Adjustment",
-          reason: "Used to adjust negative wallet balance"
+          reason: "Used to adjust negative wallet balance",
         };
       }
 
@@ -2549,7 +2576,7 @@ const transferCOD = async (req, res) => {
           status: "Pending",
           utr: null,
           remittanceMethod: null,
-          reason: "Frozen because negative wallet balance"
+          reason: "Frozen because negative wallet balance",
         };
       }
 
@@ -2559,7 +2586,7 @@ const transferCOD = async (req, res) => {
         status: "Pending",
         utr: null,
         remittanceMethod: null,
-        reason: "Held due to hold amount requirement"
+        reason: "Held due to hold amount requirement",
       };
     });
 
@@ -2579,9 +2606,9 @@ const transferCOD = async (req, res) => {
               amount: totalAdjusted,
               balanceAfterTransaction: newBalance,
               description: "COD adjustment credited to wallet",
-              date: new Date()
-            }
-          }
+              date: new Date(),
+            },
+          },
         }
       );
     }
@@ -2591,7 +2618,7 @@ const transferCOD = async (req, res) => {
     // ============================================================
     remRecord.LastCODRemitted = totalPayable;
     remRecord.RemittanceInitiated =
-      (remRecord.RemittanceInitiated || 0) - totalPayable-totalAdjusted;
+      (remRecord.RemittanceInitiated || 0) - totalPayable - totalAdjusted;
     remRecord.TotalCODRemitted =
       (Number(remRecord.TotalCODRemitted) || 0) + totalPayable;
 
@@ -2624,8 +2651,8 @@ const transferCOD = async (req, res) => {
           $set: {
             status,
             // utr: payableRemittanceIds.includes(remId) ? utr : null,
-            reason
-          }
+            reason,
+          },
         },
         { new: true }
       );
@@ -2638,17 +2665,16 @@ const transferCOD = async (req, res) => {
       success: true,
       message: "COD remittance processed successfully.",
       totalPayable,
-      totalAdjusted
+      totalAdjusted,
     });
   } catch (error) {
     console.error("Error in transferCOD:", error);
     return res.status(500).json({
       message: "Internal server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
-
 
 module.exports = {
   codPlanUpdate,

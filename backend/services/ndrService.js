@@ -513,6 +513,7 @@ const submitNdrToDtdc = async (
 
     const result = response.data;
     console.log("DTDC Response:", result);
+    console.log("DTDC Payload:", result?.result?.invalidConsignmentResponse?.consignmentsNotFoundResponse);
 
     const { validConsignmentResponse, invalidConsignmentResponse } =
       result?.result || {};
