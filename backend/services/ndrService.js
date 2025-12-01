@@ -500,7 +500,7 @@ const submitNdrToDtdc = async (
       remarks: remarks || "",
     },
   ];
-
+console.log("payload",payload);
   const url = "http://bodb.dtdc.com/ctbs-sraa-api/sraa/validateAndSave";
 
   try {
