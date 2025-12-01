@@ -352,7 +352,7 @@ const trackSingleOrder = async (order) => {
           order.status = "Ready To Ship";
           order.ndrStatus = "Ready To Ship";
         }
-// console.log("amazon instr", normalizedData);
+        // console.log("amazon instr", normalizedData);
         if (
           normalizedData.Instructions === "PickupDone" ||
           normalizedData.Instructions === "ArrivedAtCarrierFacility" ||
@@ -371,7 +371,7 @@ const trackSingleOrder = async (order) => {
         // console.log("amazon", normalizedData);
         if (normalizedData.Instructions === "Delivered") {
           order.status = "Delivered";
-          order.ndrStatus="";
+          order.ndrStatus = "";
           order.reattempt = false;
         }
 
@@ -418,7 +418,7 @@ const trackSingleOrder = async (order) => {
 
             const currentStatusDate = new Date(
               normalizedData.StatusDateTime
-            ).getTime()
+            ).getTime();
 
             if (
               (order.ndrHistory.length === 0 ||
@@ -947,31 +947,32 @@ const trackSingleOrder = async (order) => {
 
       // --- Handle Undelivered / NDR Cases ---
       if (normalizedData.scanCode === 11) {
-        // updateNdrHistoryByAwb(order.awb_number);
-        order.ndrStatus = "Undelivered";
-        order.ndrReason = {
-          date: normalizedData.StatusDateTime,
-          reason: normalizedData.StrRemarks,
-        };
+        if (order.ndrStatus !== "Action_Requested") {
+          // updateNdrHistoryByAwb(order.awb_number);
+          order.ndrStatus = "Undelivered";
+          order.ndrReason = {
+            date: normalizedData.StatusDateTime,
+            reason: normalizedData.StrRemarks,
+          };
 
-        const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
-        const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
-        const lastEntryDate = lastAction?.date
-          ? new Date(lastAction.date).getTime()
-          : null;
+          const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+          const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+          const lastEntryDate = lastAction?.date
+            ? new Date(lastAction.date).getTime()
+            : null;
 
-        const currentStatusDate = new Date(
-          normalizedData.StatusDateTime
-        ).getTime();
-// console.log("ZipyPost NDR lastEntryDate:", lastEntryDate, "currentStatusDate:", currentStatusDate);
-        // Avoid duplicate same-day entries & limit history entries
-        if (
-          (order.ndrHistory.length === 0 ||
-            lastEntryDate < currentStatusDate) &&
-          order.ndrHistory.length <= 3
-        ) {
-        // console.log("Adding NDR history entry for AWB:", order.awb_number);
-          if (order.ndrStatus !== "Action_Requested") {
+          const currentStatusDate = new Date(
+            normalizedData.StatusDateTime
+          ).getTime();
+          // console.log("ZipyPost NDR lastEntryDate:", lastEntryDate, "currentStatusDate:", currentStatusDate);
+          // Avoid duplicate same-day entries & limit history entries
+          if (
+            (order.ndrHistory.length === 0 ||
+              lastEntryDate < currentStatusDate) &&
+            order.ndrHistory.length <= 3
+          ) {
+            // console.log("Adding NDR history entry for AWB:", order.awb_number);
+
             const attemptCount = order.ndrHistory?.length + 1 || 0;
             order.reattempt = true;
             const newHistoryEntry = {
