@@ -412,7 +412,7 @@ const trackOrderDTDC = async (AWBNo) => {
     };
   }
 };
-// trackOrderDTDC('7X105009886');
+// trackOrderDTDC('7G1187613');
 
 const checkServiceabilityDTDC = async (
   originPincode,

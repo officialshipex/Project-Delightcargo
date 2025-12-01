@@ -525,11 +525,10 @@ const fetchExtraData = async () => {
         (today - new Date(planOrderDate)) / (1000 * 60 * 60 * 24)
       );
       const shouldMoveToAdmin =
-        (isNotSunday &&
-          ([1, 4, 7].includes(planDays) ||
-            (planDays === 2 && isTodayMWF) ||
-            (planDays === 3 && isTodayTF))) ||
-        dayDiff >= planDays;
+        isNotSunday &&
+        (([1, 4, 7].includes(planDays) && dayDiff >= planDays) ||
+          (planDays === 2 && dayDiff >= 2 && isTodayMWF) ||
+          (planDays === 3 && dayDiff >= 3 && isTodayTF));
 
       if (!shouldMoveToAdmin) {
         console.log(`⏭️ Skipping user ${plan.userId}: Not yet due`);

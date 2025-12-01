@@ -1134,7 +1134,7 @@ const trackOrders = async () => {
       provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery"] },
       // ndrStatus: "Undelivered",
       // provider: "Amazon Shipping",
-      // awb_number: "364889405630",
+      // awb_number: "7X105009883",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
