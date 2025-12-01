@@ -345,7 +345,7 @@ const getShipmentTracking = async (trackingId) => {
         },
       }
     );
-    // console.log("response", response.data.payload);
+    // console.log("response", response.data.payload.eventHistory);
     // console.log(
     //   "Tracking Information:",
     //   response.data.payload.eventHistory[
@@ -361,7 +361,7 @@ const getShipmentTracking = async (trackingId) => {
     ) {
       remark = remarkData?.forward?.[0];
     } else {
-      remark = remarkData?.reverse[1];
+      remark = remarkData?.returns[1];
     }
     return { success: true, data: response.data.payload.eventHistory, remark };
   } catch (error) {
@@ -371,7 +371,7 @@ const getShipmentTracking = async (trackingId) => {
     );
   }
 };
-// getShipmentTracking("364157621588");
+// getShipmentTracking("365399704633");
 
 const getCorrectShipDate = () => {
   const now = new Date();
