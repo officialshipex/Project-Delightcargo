@@ -284,10 +284,12 @@ const remittanceScheduleData = async () => {
       // Only check remittance eligibility
       const shouldRemitToday =
         isNotSunday &&
-        ([1, 4, 7].includes(planDays) ||
-          (planDays === 2 && isTodayMWF) ||
-          (planDays === 3 && isTodayTF) ||
-          dayDiff > planDays);
+        // D+1, D+4, D+7
+        (([1, 4, 7].includes(planDays) && dayDiff >= planDays) ||
+          // D+2 → Mon/Wed/Fri only
+          (planDays === 2 && dayDiff >= 2 && isTodayMWF) ||
+          // D+3 → Tue/Fri only
+          (planDays === 3 && dayDiff >= 3 && isTodayTF));
 
       let uniqueId;
       do {
