@@ -1221,7 +1221,8 @@ const remittanceTransactionData = async (req, res) => {
       totalOrder: orderdata.length,
       totalCOD: result.orderDetails?.codcal || 0,
       remittanceAmount: result.codAvailable || 0,
-      deliveryDate: result.orderDetails?.date || "N/A",
+      reason: result.reason || "N/A",
+      // deliveryDate: orderdata.tracking[orderdata.tracking.lentgh-1].StatusDateTime || "N/A",
       status: result.status || "N/A",
       orderDataInArray: orderdata,
       bankDetails: {
@@ -1998,10 +1999,22 @@ const sellerremittanceTransactionData = async (req, res) => {
       });
     }
 
-    // Fetch remittance data
+    // Fetch ONLY the required remittance entry (FAST)
     const remittanceData = await adminCodRemittance
-      .findOne({ remitanceId: id })
+      .findOne(
+        { remitanceId: id },
+        {
+          remitanceId: 1,
+          userId: 1,
+          date: 1,
+          status: 1,
+          reason: 1,
+          codAvailable: 1,
+          orderDetails: 1,
+        }
+      )
       .lean();
+
     if (!remittanceData) {
       return res.status(404).json({
         success: false,
@@ -2011,20 +2024,36 @@ const sellerremittanceTransactionData = async (req, res) => {
 
     const userId = remittanceData.userId;
 
-    // Parallel fetch: Bank details, User (to get Wallet ID)
+    // Fetch Bank + User (Wallet ID) in PARALLEL
     const [bankDetails, user] = await Promise.all([
-      BankAccountDetails.findOne({ user: userId }).lean(),
-      users.findById(userId).lean(),
+      BankAccountDetails.findOne({ user: userId })
+        .lean()
+        .select("nameAtBank accountNumber ifsc bank branch"),
+      users.findById(userId).lean().select("Wallet"),
     ]);
 
-    const wallet = user?.Wallet
-      ? await Wallet.findById(user.Wallet).lean()
-      : null;
+    // Fetch Wallet balance only if wallet exists
+    const walletPromise = user?.Wallet
+      ? Wallet.findById(user.Wallet).lean().select("balance")
+      : Promise.resolve(null);
 
-    // Fetch all orders in a single query
+    const wallet = await walletPromise;
+
+    // Fetch orders with projection (FAST)
     const orderIds = remittanceData.orderDetails?.orders || [];
+
     const filteredOrders = orderIds.length
-      ? await Order.find({ _id: { $in: orderIds } }).lean()
+      ? await Order.find(
+          { _id: { $in: orderIds } },
+          {
+            orderId: 1,
+            awb_number: 1,
+            provider: 1,
+            courierServiceName: 1,
+            tracking: 1,
+            paymentDetails: 1,
+          }
+        ).lean()
       : [];
 
     const transactions = {
@@ -2034,8 +2063,11 @@ const sellerremittanceTransactionData = async (req, res) => {
       totalCOD: remittanceData.orderDetails?.codcal || 0,
       remitanceAmount: remittanceData.codAvailable || 0,
       deliveryDate: remittanceData.orderDetails?.date || "N/A",
+      reason: remittanceData.reason || "N/A",
       status: remittanceData.status || "N/A",
+
       orderDataInArray: filteredOrders,
+
       bankDetails: {
         accountHolderName: bankDetails?.nameAtBank || "N/A",
         accountNumber: bankDetails?.accountNumber || "N/A",
