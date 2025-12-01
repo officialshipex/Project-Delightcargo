@@ -86,7 +86,24 @@ const codPlanUpdate = async (req, res) => {
   }
 };
 
+const runTransaction = async (callback) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const result = await callback(session);
+    await session.commitTransaction();
+    session.endSession();
+    return result;
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    throw err;
+  }
+};
+
 const codToBeRemitteds = async () => {
+  const session = await mongoose.startSession();
+
   try {
     const daysBack = 10;
     const cutoffDate = new Date();
@@ -100,10 +117,13 @@ const codToBeRemitteds = async () => {
         },
       },
       {
-        $addFields: {
-          lastTracking: {
-            $arrayElemAt: ["$tracking", -1], // get last element of tracking array
-          },
+        $project: {
+          tracking: 1,
+          paymentDetails: 1,
+          orderId: 1,
+          awb_number: 1,
+          userId: 1,
+          lastTracking: { $arrayElemAt: ["$tracking", -1] },
         },
       },
       {
@@ -113,103 +133,90 @@ const codToBeRemitteds = async () => {
       },
     ]);
 
-    console.log(
-      `🚚 Found ${deliveredCodOrders.length} delivered COD orders to process.`
-    );
-    for (const order of deliveredCodOrders) {
-      const latestTracking = order.tracking?.[order.tracking.length - 1];
-      const deliveryDate = latestTracking?.StatusDateTime;
+    console.log(`🚚 Found ${deliveredCodOrders.length} COD orders.`);
 
+    for (const order of deliveredCodOrders) {
+      const deliveryDate = order.lastTracking?.StatusDateTime;
 
       if (!deliveryDate) {
-        console.log(`⚠️ Skipping order ${order._id} - No delivery date`);
+        console.log(`⚠ Skipped: No delivery date for order ${order._id}`);
         continue;
       }
 
+      // Normalize date (start & end of UTC day)
       const formattedDate = new Date(deliveryDate).toISOString().split("T")[0];
       const startOfDay = new Date(`${formattedDate}T00:00:00.000Z`);
       const endOfDay = new Date(`${formattedDate}T23:59:59.999Z`);
 
       const codAmount = order.paymentDetails.amount || 0;
-      const customOrderId = order.orderId || "";
+      const customOrderId = String(order.orderId || "");
 
-      // 🔍 Find SameDateDelivered for user and deliveryDate
-      let sameDateEntry = await SameDateDelivered.findOne({
-        userId: order.userId,
-        deliveryDate: { $gte: startOfDay, $lte: endOfDay },
+      // 🔥 Start TRANSACTION
+      await session.withTransaction(async () => {
+        // 1️⃣ Fetch or create SameDateDelivered atomically
+        let sameDateEntry = await SameDateDelivered.findOneAndUpdate(
+          {
+            userId: order.userId,
+            deliveryDate: { $gte: startOfDay, $lte: endOfDay },
+          },
+          {
+            $setOnInsert: {
+              userId: order.userId,
+              deliveryDate: new Date(deliveryDate),
+              orderDetails: [],
+              orderIds: [],
+              totalCod: 0,
+              status: "Pending",
+            },
+          },
+          { upsert: true, new: true, session }
+        );
+
+        // 2️⃣ Prevent duplicate orders
+        const isDuplicate = sameDateEntry.orderDetails.some(
+          (d) => String(d.customOrderId) === customOrderId
+        );
+
+        if (isDuplicate) {
+          console.log(`⛔ Duplicate order ignored: ${order.orderId}`);
+          return; // nothing to update
+        }
+
+        // 3️⃣ Push new order details
+        await SameDateDelivered.updateOne(
+          { _id: sameDateEntry._id },
+          {
+            $push: {
+              orderDetails: {
+                orderId: order._id,
+                codAmount,
+                customOrderId,
+              },
+              orderIds: order._id,
+            },
+            $inc: { totalCod: codAmount },
+          },
+          { session }
+        );
+
+        // 4️⃣ Update CODToBeRemitted atomically
+        await codRemittance.updateOne(
+          { userId: order.userId },
+          {
+            $inc: { CODToBeRemitted: codAmount },
+            $setOnInsert: { rechargeAmount: 0, userId: order.userId },
+          },
+          { upsert: true, session }
+        );
       });
 
-      if (sameDateEntry) {
-        // ✅ Check if order already exists
-        console.log(
-          `🔍 Checking for duplicate in SameDateDelivered for order ${order.awb_number}`
-        );
-        const isDuplicate = sameDateEntry.orderDetails.some(
-          (id) => Number(id.customOrderId) === order.orderId
-        );
-
-        console.log(`Duplicate check for order ${sameDateEntry._id}: ${isDuplicate}`);
-
-        if (!isDuplicate) {
-          // ✅ Add to existing entry
-          console.log(`➕ Adding order ${order._id} to existing SameDateDelivered entry`);
-          sameDateEntry.orderDetails.push({
-            orderId: order._id,
-            codAmount,
-            customOrderId,
-          });
-          sameDateEntry.orderIds.push(order._id);
-          sameDateEntry.totalCod += codAmount;
-          await sameDateEntry.save();
-
-          // ✅ Update or create remittance
-          let remittance = await codRemittance.findOne({
-            userId: order.userId,
-          });
-          if (!remittance) {
-            remittance = new codRemittance({
-              userId: order.userId,
-              CODToBeRemitted: codAmount,
-              rechargeAmount: 0,
-            });
-          } else {
-            remittance.CODToBeRemitted += codAmount;
-          }
-          await remittance.save();
-        }
-      } else {
-        // ✅ Create new SameDateDelivered entry
-        await SameDateDelivered.create({
-          userId: order.userId,
-          deliveryDate: new Date(deliveryDate),
-          orderDetails: [
-            {
-              orderId: order._id,
-              codAmount,
-              customOrderId,
-            },
-          ],
-          orderIds: [order._id],
-          totalCod: codAmount,
-          status: "Pending",
-        });
-
-        // ✅ Create or update remittance
-        let remittance = await codRemittance.findOne({ userId: order.userId });
-        if (!remittance) {
-          remittance = new codRemittance({
-            userId: order.userId,
-            CODToBeRemitted: codAmount,
-            rechargeAmount: 0,
-          });
-        } else {
-          remittance.CODToBeRemitted += codAmount;
-        }
-        await remittance.save();
-      }
+      // END TRANSACTION
+      console.log(`✔ Updated COD for order ${order.orderId}`);
     }
   } catch (error) {
-    console.error("❌ Error in COD to be remitted:", error);
+    console.error("❌ CODToBeRemitteds ERROR:", error);
+  } finally {
+    session.endSession();
   }
 };
 
@@ -305,19 +312,19 @@ const remittanceScheduleData = async () => {
         planDays: planDays,
       };
       // console.log("remittanceEntry", remittanceEntry);
-      if (shouldRemitToday) {
-        // Push directly to adminCodRemittance using business logic
-        await processAndRemit(remittanceEntry);
-      } else {
-        // Save to afterPlan (no calculation yet)
-        await new afterPlan(remittanceEntry).save();
-      }
+      await runTransaction(async (session) => {
+        if (shouldRemitToday) {
+          await processAndRemit(remittanceEntry, session);
+        } else {
+          await afterPlan.create([remittanceEntry], { session });
+        }
 
-      // Mark delivered as processed
-      await SameDateDelivered.updateOne(
-        { _id: remittance._id },
-        { $set: { status: "Completed" } }
-      );
+        await SameDateDelivered.updateOne(
+          { _id: remittance._id },
+          { $set: { status: "Completed" } },
+          { session }
+        );
+      });
     }
   } catch (error) {
     console.error("❌ Error in remittance schedule:", error);

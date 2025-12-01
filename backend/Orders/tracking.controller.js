@@ -352,7 +352,7 @@ const trackSingleOrder = async (order) => {
           order.status = "Ready To Ship";
           order.ndrStatus = "Ready To Ship";
         }
-
+// console.log("amazon instr", normalizedData);
         if (
           normalizedData.Instructions === "PickupDone" ||
           normalizedData.Instructions === "ArrivedAtCarrierFacility" ||
@@ -371,6 +371,7 @@ const trackSingleOrder = async (order) => {
         // console.log("amazon", normalizedData);
         if (normalizedData.Instructions === "Delivered") {
           order.status = "Delivered";
+          order.ndrStatus="";
           order.reattempt = false;
         }
 
@@ -1131,8 +1132,8 @@ const trackOrders = async () => {
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery"] },
       // ndrStatus: "Undelivered",
-      // provider: "Delhivery",
-      // awb_number: "I75009320",
+      // provider: "Amazon Shipping",
+      // awb_number: "364889405630",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
