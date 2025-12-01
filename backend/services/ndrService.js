@@ -741,9 +741,9 @@ const submitNdrToShreeMaruti = async ({
     if (result.success === true) {
       const entry = {
         action: actionType,
-        actionBy: "Shree Maruti",
+        actionBy: "ShipexIndia",
         remark: remarks || "NDR Action Requested",
-        source: "Shree Maruti",
+        source: "ShipexIndia",
         date: new Date(),
       };
 
