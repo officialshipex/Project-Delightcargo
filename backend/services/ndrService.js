@@ -309,7 +309,7 @@ const submitNdrToAmazon = async (
           actions: [ndrActionEntry],
         });
       }
-
+      order.reattempt = false;
       order.ndrStatus = "Action_Requested";
       await order.save();
     }
@@ -379,7 +379,7 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
       order.manualRTOStatus = "Action_Requested";
       order.ndrStatus = "Action_Requested";
       order.status = "Undelivered";
-
+      order.reattempt = false;
       await order.save();
 
       return {
@@ -513,7 +513,10 @@ const submitNdrToDtdc = async (
 
     const result = response.data;
     console.log("DTDC Response:", result);
-    console.log("DTDC Payload:", result?.result?.invalidConsignmentResponse?.consignmentsNotFoundResponse);
+    console.log(
+      "DTDC Payload:",
+      result?.result?.invalidConsignmentResponse?.consignmentsNotFoundResponse
+    );
 
     const { validConsignmentResponse, invalidConsignmentResponse } =
       result?.result || {};
@@ -581,6 +584,7 @@ const submitNdrToDtdc = async (
       // --- Update order status ---
       orderInDb.ndrStatus = "Action_Requested";
       orderInDb.status = "Undelivered";
+      orderInDb.reattempt = false;
       await orderInDb.save();
 
       // console.log("Order updated:", orderInDb);
@@ -762,7 +766,7 @@ const submitNdrToShreeMaruti = async ({
 
       orderInDb.ndrStatus = "Action_Requested";
       orderInDb.status = "Undelivered";
-
+      orderInDb.reattempt = false;
       await orderInDb.save();
 
       return {
@@ -877,6 +881,7 @@ const callSmartshipNdrApi = async (
       // --- Update order status ---
       currentOrder.ndrStatus = "Action_Requested";
       currentOrder.status = "Undelivered";
+      currentOrder.reattempt = false;
       await currentOrder.save();
 
       return {
@@ -1025,7 +1030,7 @@ const submitNdrToZipypost = async (awb, payload) => {
     // --- Update status fields ---
     orderInDb.ndrStatus = "Action_Requested";
     orderInDb.status = "Undelivered";
-
+    orderInDb.reattempt = false;
     await orderInDb.save();
 
     console.log("✅ Order updated after ZipyPost NDR:", orderInDb.awb_number);
