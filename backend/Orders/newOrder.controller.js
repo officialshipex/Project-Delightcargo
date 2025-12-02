@@ -1513,6 +1513,7 @@ const passbook = async (req, res) => {
       fromDate,
       toDate,
       category,
+      description,
       awbNumber,
       orderId,
       page = 1,
@@ -1542,6 +1543,9 @@ const passbook = async (req, res) => {
 
     if (category) {
       transactionMatchStage["wallet.transactions.category"] = category;
+    }
+    if(description){
+      transactionMatchStage["wallet.transactions.description"] = description;
     }
 
     if (awbNumber) {

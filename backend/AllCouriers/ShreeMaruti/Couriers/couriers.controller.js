@@ -116,7 +116,12 @@ const createOrder = async (req, res) => {
         message: "Order is already being processed or not in 'new' status.",
       });
     }
-
+function sanitizeAddress(str) {
+      return str
+        .replace(/[^a-zA-Z\s]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
     const users = await user
       .findById({ _id: currentOrder.userId })
       .session(session);
@@ -182,7 +187,7 @@ const createOrder = async (req, res) => {
       billingAddress: {
         name: `${currentOrder.pickupAddress.contactName}`,
         phone: currentOrder.pickupAddress.phoneNumber.toString(),
-        address1: currentOrder.pickupAddress.address,
+        address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: currentOrder.Biling_details.address2,
         city: currentOrder.pickupAddress.city,
         state: currentOrder.pickupAddress.state,
@@ -192,7 +197,7 @@ const createOrder = async (req, res) => {
       shippingAddress: {
         name: `${currentOrder.receiverAddress.contactName}`,
         phone: currentOrder.receiverAddress.phoneNumber.toString(),
-        address1: currentOrder.receiverAddress.address,
+        address1: sanitizeAddress(currentOrder.receiverAddress.address),
         // address2: currentOrder.receiverAddress.address2,
         city: currentOrder.receiverAddress.city,
         state: currentOrder.receiverAddress.state,
@@ -202,7 +207,7 @@ const createOrder = async (req, res) => {
       pickupAddress: {
         name: `${currentOrder.pickupAddress.contactName}`,
         phone: currentOrder.pickupAddress.phoneNumber.toString(),
-        address1: currentOrder.pickupAddress.address,
+        address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: wh.addressLine2,
         city: currentOrder.pickupAddress.city,
         state: currentOrder.pickupAddress.state,

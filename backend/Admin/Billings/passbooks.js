@@ -10,6 +10,7 @@ const getAllPassbookTransactions = async (req, res) => {
       fromDate,
       toDate,
       category,
+      description,
       page = 1,
       limit = 20,
       awbNumber,
@@ -71,6 +72,10 @@ const getAllPassbookTransactions = async (req, res) => {
 
     if (category) {
       transactionFilterConditions.push({ $eq: ["$$t.category", category] });
+    }
+
+    if(description){
+      transactionFilterConditions.push({ $eq: ["$$t.description", description] });
     }
 
     if (awbNumber) {

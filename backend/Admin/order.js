@@ -558,7 +558,7 @@ const getOrdersByStatus = async (req, res) => {
       courierServiceName,
       pickupContactName,
     } = req.query;
-    console.log("rere", req.query);
+    // console.log("rere", req.query);
     const andConditions = [];
 
     if (

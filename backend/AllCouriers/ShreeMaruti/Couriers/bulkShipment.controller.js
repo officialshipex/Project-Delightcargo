@@ -71,6 +71,13 @@ const createShipmentFunctionShreeMaruti = async (
       }
     }
 
+    function sanitizeAddress(str) {
+      return str
+        .replace(/[^a-zA-Z0-9\s,\/.-]/g, "") // keep letters, numbers, comma, slash, dot, hyphen
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
     // Prepare order items
     const lineItems = Array.from(
       { length: currentOrder.productDetails.length },
@@ -117,40 +124,40 @@ const createShipmentFunctionShreeMaruti = async (
       billingAddress: {
         name: `${currentOrder.pickupAddress.contactName}`,
         phone: currentOrder.pickupAddress.phoneNumber.toString(),
-        address1: currentOrder.pickupAddress.address,
+        address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: currentOrder.Biling_details.address2,
-        city: currentOrder.pickupAddress.city,
-        state: currentOrder.pickupAddress.state,
+        city: sanitizeAddress(currentOrder.pickupAddress.city),
+        state: sanitizeAddress(currentOrder.pickupAddress.state),
         country: "India",
         zip: `${currentOrder.pickupAddress.pinCode}`,
       },
       shippingAddress: {
         name: `${currentOrder.receiverAddress.contactName}`,
         phone: currentOrder.receiverAddress.phoneNumber.toString(),
-        address1: currentOrder.receiverAddress.address,
+        address1: sanitizeAddress(currentOrder.receiverAddress.address),
         // address2: currentOrder.receiverAddress.address2,
-        city: currentOrder.receiverAddress.city,
-        state: currentOrder.receiverAddress.state,
+        city: sanitizeAddress(currentOrder.receiverAddress.city),
+        state: sanitizeAddress(currentOrder.receiverAddress.state),
         country: "India",
         zip: `${currentOrder.receiverAddress.pinCode}`,
       },
       pickupAddress: {
         name: `${currentOrder.pickupAddress.contactName}`,
         phone: currentOrder.pickupAddress.phoneNumber.toString(),
-        address1: currentOrder.pickupAddress.address,
+        address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: wh.addressLine2,
-        city: currentOrder.pickupAddress.city,
-        state: currentOrder.pickupAddress.state,
+        city: sanitizeAddress(currentOrder.pickupAddress.city),
+        state: sanitizeAddress(currentOrder.pickupAddress.state),
         country: "India",
         zip: `${currentOrder.pickupAddress.pinCode}`,
       },
       returnAddress: {
         name: `${currentOrder.pickupAddress.contactName}`,
         phone: currentOrder.pickupAddress.phoneNumber.toString(),
-        address1: currentOrder.pickupAddress.address,
+        address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: wh.addressLine2,
-        city: currentOrder.pickupAddress.city,
-        state: currentOrder.pickupAddress.state,
+        city: sanitizeAddress(currentOrder.pickupAddress.city),
+        state: sanitizeAddress(currentOrder.pickupAddress.state),
         country: "India",
         zip: `${currentOrder.pickupAddress.pinCode}`,
       },
@@ -165,11 +172,11 @@ const createShipmentFunctionShreeMaruti = async (
 
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
-      const balance= currentWallet.balance + currentWallet.creditLimit;
+    const balance = currentWallet.balance + currentWallet.creditLimit;
     if (balance < finalCharges) {
       return { success: false, message: "Insufficient Wallet Balance" };
     }
-
+// console.log("payload",payload)
     // API request
     const response = await axios.post(API_URL, payload, {
       headers: {
@@ -208,7 +215,8 @@ const createShipmentFunctionShreeMaruti = async (
               channelOrderId: currentOrder.orderId,
               category: "debit",
               amount: finalCharges,
-              balanceAfterTransaction: currentWallet.balance - parseFloat(finalCharges),
+              balanceAfterTransaction:
+                currentWallet.balance - parseFloat(finalCharges),
               date: new Date(),
               awb_number: result.awbNumber,
               description: "Freight Charges Applied",

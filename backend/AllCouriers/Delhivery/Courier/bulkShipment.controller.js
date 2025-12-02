@@ -75,7 +75,7 @@ const createShipmentFunctionDelhivery = async (
       selectedServiceDetails.courierType === "Domestic (Air)"
         ? "Express"
         : "Surface";
-    console.log("warehouse", selectedServiceDetails);
+    // console.log("warehouse", selectedServiceDetails);
     const payloadData = {
       pickup_location: {
         name: wh.contactName || "Default Warehouse",
@@ -191,6 +191,7 @@ const createShipmentFunctionDelhivery = async (
           details: response.data,
         };
       } else {
+        console.error("Error response from Delhivery:", response.data);
         return {
           status: 400,
           error: "Error creating shipment",
