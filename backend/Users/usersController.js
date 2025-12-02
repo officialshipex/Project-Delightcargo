@@ -795,7 +795,7 @@ const getUserDetails = async (req, res) => {
 
 const changeUser = async (req, res) => {
   try {
-    console.log("hi");
+    // console.log("hi");
     const userId = req.user
       ? req.user.id
       : req.employee
@@ -807,7 +807,7 @@ const changeUser = async (req, res) => {
         .json({ message: "Unauthorized: user not found in token" });
     }
     const { adminTab } = req.body;
-    console.log("ad", adminTab);
+    // console.log("ad", adminTab);
 
     if (typeof adminTab !== "boolean") {
       return res.status(400).json({ message: "Invalid adminTab value" });

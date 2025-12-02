@@ -220,7 +220,7 @@ const dashboard = async (req, res) => {
         percentage: Number(percentage), // or keep as string with '%' suffix
       };
     });
-    console.log("ndr", totalNdr);
+    // console.log("ndr", totalNdr);
     return res.status(200).json({
       success: true,
       data: {
