@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { getOrdersByStatus,searchUser,getAllOrdersByNdrStatus,getAllOrdersByManualRtoStatus, filterOrders, filterNdrOrders, filterOrdersForEmployee, filterNdrOrdersForEmployee, getAllOrdersByManualRtoStatusForEmployee } = require("../Admin/order");
+const { getOrdersByStatus,searchUser,getAllOrdersByNdrStatus,getAllOrdersByManualRtoStatus, filterOrders, filterNdrOrders, filterOrdersForEmployee, filterNdrOrdersForEmployee, getAllOrdersByManualRtoStatusForEmployee,filterDelayDeliveredOrders } = require("../Admin/order");
 const {getDashboardStats}=require("../Admin/dashboard");
 const { isAuthorized } = require("../middleware/auth.middleware");
 
@@ -15,6 +15,7 @@ router.get("/dashboard",getDashboardStats)
 
 router.get("/filterEmployeeOrders",isAuthorized ,filterOrdersForEmployee)
 router.get("/filterNdrOrdersForEmployee",isAuthorized ,filterNdrOrdersForEmployee)
+router.get("/filterDelayDeliveredOrders",isAuthorized,filterDelayDeliveredOrders)
 router.get("/getAllOrdersByManualRtoStatusForEmployee",isAuthorized ,getAllOrdersByManualRtoStatusForEmployee)
 
 

@@ -19,5 +19,7 @@ router.get('/AssignPlan/:userId/:planId',isAuthorized,userController.assignPlan)
 router.post('/update-profile',isAuthorized,uploads.single("profileImage"),userController.updateProfile);
 router.post('/updateReferralCommission',isAuthorized,userController.updateReferralCommission);
 router.put("/updateCreditLimit",isAuthorized,userController.updateCreditLimit);
+router.get("/getKamDetails/:id",isAuthorized,userController.getKamDetails);
+router.put("/updateKamDetails/:id",isAuthorized,userController.updateKamDetails);
 
 module.exports=router;

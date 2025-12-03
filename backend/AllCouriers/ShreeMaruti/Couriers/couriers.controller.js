@@ -122,6 +122,23 @@ function sanitizeAddress(str) {
         .replace(/\s+/g, " ")
         .trim();
     }
+    function normalizeState(state) {
+  if (!state) return "";
+
+  const cleaned = state.replace(/[^a-zA-Z\s]/g, "").trim().toLowerCase();
+
+  if (
+    cleaned === "jammu kashmir" ||
+    cleaned === "jammu and kashmir" ||
+    cleaned === "jammu  kashmir" ||
+    cleaned === "jammu   kashmir"
+  ) {
+    return "Jammu and Kashmir";
+  }
+
+  return state.trim();
+}
+
     const users = await user
       .findById({ _id: currentOrder.userId })
       .session(session);
@@ -190,7 +207,7 @@ function sanitizeAddress(str) {
         address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: currentOrder.Biling_details.address2,
         city: currentOrder.pickupAddress.city,
-        state: currentOrder.pickupAddress.state,
+        state: normalizeState(currentOrder.pickupAddress.state),
         country: "India",
         zip: `${currentOrder.pickupAddress.pinCode}`,
       },
@@ -200,7 +217,7 @@ function sanitizeAddress(str) {
         address1: sanitizeAddress(currentOrder.receiverAddress.address),
         // address2: currentOrder.receiverAddress.address2,
         city: currentOrder.receiverAddress.city,
-        state: currentOrder.receiverAddress.state,
+        state: normalizeState(currentOrder.receiverAddress.state),
         country: "India",
         zip: `${currentOrder.receiverAddress.pinCode}`,
       },
@@ -210,7 +227,7 @@ function sanitizeAddress(str) {
         address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: wh.addressLine2,
         city: currentOrder.pickupAddress.city,
-        state: currentOrder.pickupAddress.state,
+        state: normalizeState(currentOrder.pickupAddress.state),
         country: "India",
         zip: `${currentOrder.pickupAddress.pinCode}`,
       },
@@ -220,7 +237,7 @@ function sanitizeAddress(str) {
         address1: currentOrder.pickupAddress.address,
         // address2: wh.addressLine2,
         city: currentOrder.pickupAddress.city,
-        state: currentOrder.pickupAddress.state,
+        state: normalizeState(currentOrder.pickupAddress.state),
         country: "India",
         zip: `${currentOrder.pickupAddress.pinCode}`,
       },

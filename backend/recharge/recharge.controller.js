@@ -73,7 +73,7 @@ const generateUniqueTransactionId = async () => {
       },
     });
   } while (exists);
-  console.log("trans", transactionId);
+  // console.log("trans", transactionId);
   return transactionId;
 };
 
@@ -236,7 +236,7 @@ const getWalletHistoryByUserId = async (req, res) => {
       toDate,
     } = req.query;
     const userId = id || req.user._id;
-    console.log("trans", req.query);
+    // console.log("trans", req.query);
     if (!userId) {
       return res.status(400).json({ message: "User ID is required." });
     }
