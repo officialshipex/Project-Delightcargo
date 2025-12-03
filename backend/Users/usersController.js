@@ -11,6 +11,7 @@ const Order = require("../models/newOrder.model");
 const BillingAddress = require("../models/billingInfo.model");
 const { generateKeySync } = require("crypto");
 const Wallet = require("../models/wallet");
+const KamDetails = require("../models/KamDetails.model");
 
 const refundFreightIfSingleDebit = async () => {
   try {
@@ -23,7 +24,7 @@ const refundFreightIfSingleDebit = async () => {
     const orders = await Order.find({
       shipmentCreatedAt: { $lt: cutoffDate },
       // status: { $in: ["Ready To Ship", "Booked", "Not Picked"] },
-      status:{$in:["In-transit"]}
+      status: { $in: ["In-transit"] },
     });
 
     if (!orders.length) {
@@ -466,6 +467,7 @@ const getUserById = async (req, res) => {
         .status(404)
         .json({ success: false, message: "User not found" });
     }
+    const kamDetails = await KamDetails.findOne({ userId: user._id }).lean();
 
     const [plan, codPlan, account, aadhar, pan, gst, billingAddress] =
       await Promise.all([
@@ -505,6 +507,17 @@ const getUserById = async (req, res) => {
       referralCode: user.referralCode || "",
       lastLogin: user.lastLogin,
       referralCommissionPercentage: user.referralCommissionPercentage || 0,
+      kamDetails: kamDetails
+        ? {
+            kamName: kamDetails.kamName,
+            kamEmail: kamDetails.kamEmail,
+            kamPhone: kamDetails.kamPhone,
+          }
+        : {
+            kamName: "",
+            kamEmail: "",
+            kamPhone: "",
+          },
       accountDetails: account
         ? {
             beneficiaryName: account.nameAtBank,
@@ -1055,6 +1068,51 @@ const updateCreditLimit = async (req, res) => {
   }
 };
 
+const getKamDetails = async (req, res) => {
+  try {
+    const { id } = req.params; // userId
+
+    const kam = await KamDetails.findOne({ userId: id });
+
+    if (!kam) {
+      return res.json({
+        kamName: "",
+        kamEmail: "",
+        kamPhone: "",
+        userId: id,
+      });
+    }
+
+    return res.json(kam);
+  } catch (error) {
+    console.error("Error fetching KAM details:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+const updateKamDetails = async (req, res) => {
+  try {
+    const { id } = req.params; // userId
+    const { kamName, kamEmail, kamPhone } = req.body;
+
+    const updated = await KamDetails.findOneAndUpdate(
+      { userId: id },
+      {
+        userId: id,
+        kamName,
+        kamEmail,
+        kamPhone,
+      },
+      { new: true, upsert: true }
+    );
+
+    return res.json(updated);
+  } catch (error) {
+    console.error("Error updating KAM details:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 module.exports = {
   getUsers,
   getUserDetails,
@@ -1069,4 +1127,6 @@ module.exports = {
   updateProfile,
   updateReferralCommission,
   updateCreditLimit,
+  getKamDetails,
+  updateKamDetails,
 };

@@ -262,12 +262,13 @@ const getBusinessInsights = async (req, res) => {
   try {
     let userId = req.user._id;
     let searchId = req.query.userId;
+    let today=new Date(req.query.date);
 
     const userData = await User.findById(userId);
     const isAdminView = userData?.isAdmin && userData?.adminTab;
 
     // Dates
-    const today = new Date();
+    // const today = new Date();
     const startOfToday = new Date(today.setHours(0, 0, 0, 0));
     const last30Days = moment().subtract(30, "days").toDate();
     const prev30Days = moment().subtract(60, "days").toDate();

@@ -159,7 +159,7 @@ const generateUniqueTransactionId = async () => {
       },
     });
   } while (exists);
-  console.log("trans", transactionId);
+  // console.log("trans", transactionId);
   return transactionId;
 };
 

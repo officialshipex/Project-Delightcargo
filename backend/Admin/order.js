@@ -232,6 +232,211 @@ const filterOrdersForEmployee = async (req, res) => {
   }
 };
 
+const filterDelayDeliveredOrders = async (req, res) => {
+  try {
+    const {
+      orderId,
+      awbNumber,
+      startDate,
+      endDate,
+      searchQuery,
+      paymentType,
+      pickupContactName,
+      courier,
+      userId,
+      page = 1,
+      limit = 20,
+    } = req.query;
+// console.log("req query",req.query)
+    const filter = {};
+
+    // --------------------------------------
+    // SAME FILTERS AS ORIGINAL (EXCEPT STATUS)
+    // --------------------------------------
+
+    if (orderId && !isNaN(orderId)) {
+      filter.orderId = Number(orderId);
+    }
+
+    if (awbNumber) {
+      filter.awb_number = { $regex: awbNumber, $options: "i" };
+    }
+
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      filter.createdAt = { $gte: start, $lte: end };
+    }
+
+    if (paymentType) {
+      filter["paymentDetails.method"] = paymentType;
+    }
+
+    if (courier) {
+      filter.courierServiceName = courier;
+    }
+
+    if (pickupContactName) {
+      filter["pickupAddress.contactName"] = pickupContactName;
+    }
+
+    let allocatedUserIds = [];
+
+    // EMPLOYEE ROLE LOGIC
+    if (req.employee && req.employee.employeeId) {
+      const allocations = await AllocateRole.find({
+        employeeId: req.employee.employeeId,
+      });
+
+      allocatedUserIds = allocations.map((a) => a.sellerMongoId.toString());
+
+      if (allocatedUserIds.length === 0) {
+        return res.json({
+          orders: [],
+          totalPages: 0,
+          totalCount: 0,
+          currentPage: parseInt(page),
+          couriers: [],
+          pickupLocations: [],
+        });
+      }
+    }
+
+    // USER FILTER
+    if (userId) {
+      const objectId = new mongoose.Types.ObjectId(userId);
+
+      if (allocatedUserIds.length > 0 && !allocatedUserIds.includes(userId)) {
+        return res.json({
+          orders: [],
+          totalPages: 0,
+          totalCount: 0,
+          currentPage: parseInt(page),
+          couriers: [],
+          pickupLocations: [],
+        });
+      }
+
+      filter.userId = objectId;
+    }
+
+    // GLOBAL SEARCH BY USER (fullname, email, phoneNumber)
+    if (searchQuery) {
+      const userFilter = {
+        $or: [
+          { fullname: { $regex: searchQuery, $options: "i" } },
+          { email: { $regex: searchQuery, $options: "i" } },
+          { phoneNumber: { $regex: searchQuery, $options: "i" } },
+        ],
+      };
+
+      const users = await User.find(userFilter).select("_id");
+      const matchedIds = users.map((u) => u._id.toString());
+
+      let validUserIds = matchedIds;
+
+      if (allocatedUserIds.length > 0) {
+        validUserIds = matchedIds.filter((id) => allocatedUserIds.includes(id));
+      }
+
+      if (validUserIds.length > 0) {
+        filter.userId = {
+          $in: validUserIds.map((id) => new mongoose.Types.ObjectId(id)),
+        };
+      } else {
+        return res.json({
+          orders: [],
+          totalPages: 0,
+          totalCount: 0,
+          currentPage: parseInt(page),
+          couriers: [],
+          pickupLocations: [],
+        });
+      }
+    } else if (!userId && allocatedUserIds.length > 0) {
+      filter.userId = {
+        $in: allocatedUserIds.map((id) => new mongoose.Types.ObjectId(id)),
+      };
+    }
+    
+
+    // ---------------------------
+    // QUERY ORDERS (NO STATUS FILTER)
+    // ---------------------------
+    const skip = (page - 1) * limit;
+
+    let allOrders = await Order.find(filter)
+      .sort({ createdAt: -1 })
+      .populate("userId", "fullname email phoneNumber company userId")
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+// console.log("hi")
+    // -------------------------------------------
+    // ⭐ FILTER: DELAY DELIVERED ORDERS ONLY
+    // currentDate > estimateDeliveryDate
+    // -------------------------------------------
+    const now = new Date();
+    // console.log("now",now)
+
+    const delayedOrders = allOrders.filter((order) => {
+      if (!order.estimatedDeliveryDate) return false;
+      return now > new Date(order.estimatedDeliveryDate);
+    });
+    // console.log("delayed",delayedOrders)
+
+    const totalCount = delayedOrders.length;
+    const totalPages = Math.ceil(totalCount / limit);
+
+    const paginatedOrders = delayedOrders.slice(skip, skip + parseInt(limit));
+
+    // -------------------------------------
+    // COURIERS LIST (BASED ON DELAYED ORDERS ONLY)
+    // -------------------------------------
+    const couriersSet = new Set();
+    delayedOrders.forEach((ord) => {
+      if (ord.courierServiceName) couriersSet.add(ord.courierServiceName);
+    });
+
+    const couriers = [...couriersSet];
+
+    // -------------------------------------
+    // PICKUP LOCATIONS (BASED ON DELAYED ORDERS ONLY)
+    // -------------------------------------
+    const pickupMap = new Map();
+
+    delayedOrders.forEach((ord) => {
+      if (ord.pickupAddress?.contactName) {
+        pickupMap.set(ord.pickupAddress.contactName, {
+          contactName: ord.pickupAddress.contactName,
+          address: ord.pickupAddress.address,
+          phoneNumber: ord.pickupAddress.phoneNumber,
+          email: ord.pickupAddress.email,
+          pinCode: ord.pickupAddress.pinCode,
+          city: ord.pickupAddress.city,
+          state: ord.pickupAddress.state,
+        });
+      }
+    });
+
+    const pickupLocations = [...pickupMap.values()];
+
+    // FINAL RESPONSE (SAME FORMAT)
+    res.json({
+      orders: paginatedOrders,
+      totalPages,
+      totalCount,
+      currentPage: parseInt(page),
+      couriers,
+      pickupLocations,
+    });
+  } catch (err) {
+    console.error("Error in filterDelayDeliveredOrders:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 const filterNdrOrdersForEmployee = async (req, res) => {
   try {
     const {
@@ -255,13 +460,12 @@ const filterNdrOrdersForEmployee = async (req, res) => {
     } = req.query;
     // console.log("Query Params:", req.query);
     const filter = {};
-    
+
     // ⭐ Special logic when action=Action_Requested
     if (tab === "Action_Required") {
       filter.reattempt = true; // Shipment eligible for RE-ATTEMPT
       filter.ndrStatus = "Undelivered"; // Must be Undelivered
-    }
-    else if(tab===""){
+    } else if (tab === "") {
       filter.reattempt = false;
     }
 
@@ -1149,6 +1353,7 @@ module.exports = {
   getAllOrdersByNdrStatus,
   getAllOrdersByManualRtoStatus,
   filterOrdersForEmployee,
+  filterDelayDeliveredOrders,
   filterNdrOrdersForEmployee,
   getAllOrdersByManualRtoStatusForEmployee,
 };

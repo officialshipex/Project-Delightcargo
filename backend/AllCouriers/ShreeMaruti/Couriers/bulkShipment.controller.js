@@ -78,6 +78,26 @@ const createShipmentFunctionShreeMaruti = async (
         .trim();
     }
 
+    function normalizeState(state) {
+      if (!state) return "";
+
+      const cleaned = state
+        .replace(/[^a-zA-Z\s]/g, "")
+        .trim()
+        .toLowerCase();
+
+      if (
+        cleaned === "jammu kashmir" ||
+        cleaned === "jammu and kashmir" ||
+        cleaned === "jammu  kashmir" ||
+        cleaned === "jammu   kashmir"
+      ) {
+        return "Jammu and Kashmir";
+      }
+
+      return state.trim();
+    }
+
     // Prepare order items
     const lineItems = Array.from(
       { length: currentOrder.productDetails.length },
@@ -127,7 +147,7 @@ const createShipmentFunctionShreeMaruti = async (
         address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: currentOrder.Biling_details.address2,
         city: sanitizeAddress(currentOrder.pickupAddress.city),
-        state: sanitizeAddress(currentOrder.pickupAddress.state),
+        state: normalizeState(currentOrder.pickupAddress.state),
         country: "India",
         zip: `${currentOrder.pickupAddress.pinCode}`,
       },
@@ -137,7 +157,7 @@ const createShipmentFunctionShreeMaruti = async (
         address1: sanitizeAddress(currentOrder.receiverAddress.address),
         // address2: currentOrder.receiverAddress.address2,
         city: sanitizeAddress(currentOrder.receiverAddress.city),
-        state: sanitizeAddress(currentOrder.receiverAddress.state),
+        state: normalizeState(currentOrder.receiverAddress.state),
         country: "India",
         zip: `${currentOrder.receiverAddress.pinCode}`,
       },
@@ -147,7 +167,7 @@ const createShipmentFunctionShreeMaruti = async (
         address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: wh.addressLine2,
         city: sanitizeAddress(currentOrder.pickupAddress.city),
-        state: sanitizeAddress(currentOrder.pickupAddress.state),
+        state: normalizeState(currentOrder.pickupAddress.state),
         country: "India",
         zip: `${currentOrder.pickupAddress.pinCode}`,
       },
@@ -157,7 +177,7 @@ const createShipmentFunctionShreeMaruti = async (
         address1: sanitizeAddress(currentOrder.pickupAddress.address),
         // address2: wh.addressLine2,
         city: sanitizeAddress(currentOrder.pickupAddress.city),
-        state: sanitizeAddress(currentOrder.pickupAddress.state),
+        state: normalizeState(currentOrder.pickupAddress.state),
         country: "India",
         zip: `${currentOrder.pickupAddress.pinCode}`,
       },
@@ -176,7 +196,7 @@ const createShipmentFunctionShreeMaruti = async (
     if (balance < finalCharges) {
       return { success: false, message: "Insufficient Wallet Balance" };
     }
-// console.log("payload",payload)
+    // console.log("payload",payload)
     // API request
     const response = await axios.post(API_URL, payload, {
       headers: {
