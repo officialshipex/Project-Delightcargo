@@ -62,9 +62,10 @@ const downloadExcel = async (req, res) => {
 const uploadDispreancy = async (req, res) => {
   try {
     if (!req.file) {
-      return res
-        .status(400)
-        .json({ success: false, error: "No file uploaded" });
+      return res.status(400).json({
+        success: false,
+        error: "No file uploaded",
+      });
     }
 
     const filePath = req.file.path;
@@ -82,6 +83,7 @@ const uploadDispreancy = async (req, res) => {
     for (const row of sheetData) {
       const awb = row["*AWB Number"]?.toString().trim();
       const chargeWeight = parseFloat(row["*Charge Weight"]);
+
       if (awb && !isNaN(chargeWeight)) {
         chargeWeightMap[awb] = {
           chargeWeight,
@@ -92,34 +94,32 @@ const uploadDispreancy = async (req, res) => {
       }
     }
 
+    // already existing discrepancies
     const existing = await WeightDiscrepancy.find({
       awbNumber: { $in: awbNumbers },
     }).select("awbNumber");
-    // console.log("existing", existing);
+
     const existingSet = new Set(existing.map((e) => e.awbNumber));
 
     const orders = await Order.find({ awb_number: { $in: awbNumbers } });
-    // console.log("orders", orders);
     const orderMap = new Map(orders.map((o) => [o.awb_number, o]));
-    // console.log("order",orders)
+
     const planCache = new Map();
 
     for (const awb of awbNumbers) {
+      // 🚫 Skip AWB if discrepancy already exists
+      if (existingSet.has(awb)) continue;
+
       const chargeData = chargeWeightMap[awb];
-      // console.log("chargeData", chargeData);
-      if (!chargeData || existingSet.has(awb)) continue;
+      if (!chargeData) continue;
 
       const order = orderMap.get(awb);
-      if (!order) {
-        console.log(`Order not found for AWB: ${awb}`);
-        continue;
-      }
+      if (!order) continue;
 
       const userId = order.userId.toString();
       let userPlan = planCache.get(userId);
 
       if (!userPlan) {
-        console.log("user plan", userPlan);
         userPlan = await Plan.findOne({ userId });
         if (!userPlan) continue;
         planCache.set(userId, userPlan);
@@ -135,7 +135,7 @@ const uploadDispreancy = async (req, res) => {
         !matchedRateCard.weightPriceAdditional?.length
       )
         continue;
-      // console.log("awb", awb);
+
       const basicWeightSlabGrams = matchedRateCard.weightPriceBasic[0].weight;
       const additionalWeightSlabGrams =
         matchedRateCard.weightPriceAdditional[0].weight;
@@ -148,23 +148,18 @@ const uploadDispreancy = async (req, res) => {
         5000;
 
       const actualWeightKg = order.packageDetails.applicableWeight || 0;
-
       const applicableWeightKg = Math.max(volumetricWeightKg, actualWeightKg);
 
-      // console.log("applicableWeightKg", applicableWeightKg);
       const roundedApplicableGrams =
         Math.ceil((applicableWeightKg * 1000) / basicWeightSlabGrams) *
         basicWeightSlabGrams;
 
-      // console.log("roundedApplicableGrams", roundedApplicableGrams);
       const chargedGrams =
         Math.ceil(
           (chargeData.chargeWeight * 1000) / additionalWeightSlabGrams
         ) * additionalWeightSlabGrams;
-      const chargedKg = chargedGrams / 1000;
+
       if (chargedGrams <= basicWeightSlabGrams) continue;
-      // console.log("chargedGrams", chargedGrams);
-      // console.log("chargedKg", chargedKg);
       if (chargedGrams <= roundedApplicableGrams) continue;
 
       let excessGrams = chargedGrams - roundedApplicableGrams;
@@ -172,11 +167,10 @@ const uploadDispreancy = async (req, res) => {
       excessGrams =
         Math.ceil(excessGrams / additionalWeightSlabGrams) *
         additionalWeightSlabGrams;
-      console.log("excessGrams", excessGrams);
+
       const excessWeight = parseFloat((excessGrams / 1000).toFixed(2));
-      console.log("excessWeight", excessWeight);
       if (excessWeight <= 0) continue;
-      console.log("awb", awb);
+
       const payload = {
         pickupPincode: order.pickupAddress.pinCode,
         deliveryPincode: order.receiverAddress.pinCode,
@@ -193,8 +187,7 @@ const uploadDispreancy = async (req, res) => {
       const additionalCharges = await calculateRateForDispute(payload);
       if (!additionalCharges || !additionalCharges[0]) continue;
 
-      // console.log("additionalCharges", additionalCharges);
-
+      // Create discrepancy entry
       const discrepancy = new WeightDiscrepancy({
         userId,
         awbNumber: order.awb_number,
@@ -205,14 +198,10 @@ const uploadDispreancy = async (req, res) => {
         enteredWeight: {
           applicableWeight: roundedApplicableGrams / 1000,
           deadWeight: deadWeightKg,
-          volumetricWeight: {
-            length: order.packageDetails.volumetricWeight.length,
-            breadth: order.packageDetails.volumetricWeight.width,
-            height: order.packageDetails.volumetricWeight.height,
-          },
+          volumetricWeight: order.packageDetails.volumetricWeight,
         },
         chargedWeight: {
-          applicableWeight: chargedKg,
+          applicableWeight: chargedGrams / 1000,
           deadWeight: chargeData.chargeWeight,
         },
         chargeDimension: {
@@ -234,32 +223,31 @@ const uploadDispreancy = async (req, res) => {
       });
 
       discrepancies.push(discrepancy);
-      // console.log("final data", discrepancy);
     }
 
+    // 🚫 If NO new discrepancies found → Do NOT update wallet at all
     if (discrepancies.length > 0) {
-      // Step 1: Accumulate pending amounts per walletId
       const walletUpdates = new Map();
 
       for (const discrepancy of discrepancies) {
         const userId = discrepancy.userId;
         const userDetails = await User.findById(userId).select("Wallet");
+
         if (!userDetails || !userDetails.Wallet) continue;
 
         const walletId = userDetails.Wallet.toString();
-        const amountToHold = Number(
-          discrepancy.excessWeightCharges?.pendingAmount || 0
+        const amount = Number(
+          discrepancy.excessWeightCharges.pendingAmount || 0
         );
-
-        if (isNaN(amountToHold) || amountToHold <= 0) continue;
+        if (amount <= 0) continue;
 
         walletUpdates.set(
           walletId,
-          (walletUpdates.get(walletId) || 0) + amountToHold
+          (walletUpdates.get(walletId) || 0) + amount
         );
       }
 
-      // Step 2: Apply holdAmount updates
+      // apply holdAmount updates
       for (const [walletId, amount] of walletUpdates.entries()) {
         await Wallet.updateOne(
           { _id: walletId },
@@ -267,20 +255,17 @@ const uploadDispreancy = async (req, res) => {
         );
       }
 
-      // Step 3: Save discrepancies
       await WeightDiscrepancy.insertMany(discrepancies);
     }
 
-    fs.promises.unlink(filePath).catch((err) => {
-      console.error("Error deleting uploaded file:", err);
-    });
+    fs.promises.unlink(filePath).catch(() => {});
 
     res.status(200).json({
       success: true,
-      message: "Weight discrepancies recorded successfully",
+      message: "Discrepancies processed successfully",
     });
   } catch (error) {
-    console.error("Error processing file:", error);
+    console.error("Error:", error);
     res.status(500).json({ success: false, error: "Internal Server Error" });
   }
 };
@@ -334,7 +319,7 @@ const getAllDiscrepancy = async (req, res) => {
       status,
       provider,
     } = req.query;
-    console.log("re", req.query);
+    // console.log("re", req.query);
     const userMatchStage = {};
     const discrepancyMatchStage = {};
 
@@ -578,7 +563,7 @@ const AllDiscrepancyBasedId = async (req, res) => {
           updatedAt: 1,
           text: 1,
           imageUrl: 1,
-          discrepancyDeclinedReason:1
+          discrepancyDeclinedReason: 1,
         },
       },
       { $sort: { createdAt: -1 } },
@@ -908,7 +893,6 @@ if (process.env.NODE_ENV === "production") {
   cron.schedule("0 0 * * *", autoAcceptDiscrepancies);
 }
 
-
 // Raise Discrepancies
 const raiseDiscrepancies = async (req, res) => {
   try {
@@ -1066,7 +1050,12 @@ const bulkDeclineDiscrepancy = async (req, res) => {
     const { awbNumbers, text } = req.body;
 
     // Validate input
-    if (!awbNumbers || !Array.isArray(awbNumbers) || awbNumbers.length === 0 || !text) {
+    if (
+      !awbNumbers ||
+      !Array.isArray(awbNumbers) ||
+      awbNumbers.length === 0 ||
+      !text
+    ) {
       return res.status(400).json({
         message: "AWB numbers (array) and reason are required",
       });

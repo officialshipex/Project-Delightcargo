@@ -79,6 +79,7 @@ const callProviderWithRetry = async (
   maxRetries = 1,
   retryDelay = 1000
 ) => {
+  // console.log("service details",serviceDetails)
   // console.log("service",serviceDetails.provider)
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -270,211 +271,272 @@ const shipBulkOrder = async (req, res) => {
   }
 };
 
+// createBulkOrder controller - updated for immediate-response background processing for large batches
+
 const createBulkOrder = async (req, res) => {
   const { selectedOrders } = req.body;
-  let successCount = 0;
-  let failureCount = 0;
-  // console.log("selected", selectedOrders);
-  try {
-    // const userId = req.user._id;
-    // const user = await User.findById(userId);
-    // if (!user) return res.status(404).json({ error: "User not found" });
 
-    // const plans = await plan.findOne({ userId });
-    // if (!plan) return res.status(404).json({ error: "User plan not found" });
+  if (!Array.isArray(selectedOrders) || selectedOrders.length === 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "No orders provided" });
+  }
 
-    // const walletId = user.Wallet;
-    const EDDRates = await EDDMap.find();
-    const couriers = await Courier.find({ status: "Enable" });
-    const courierServices = await Services.find({ status: "Enable" });
+  // Helper: normalize string
+  const normalize = (str) =>
+    str?.toString().toLowerCase().replace(/\s+/g, "").trim();
 
-    const normalize = (str) => str?.toLowerCase().replace(/\s+/g, "").trim();
-
-    // 🔁 Process each selected order
-    for (const orderId of selectedOrders) {
-      const claimedOrder = await claimOrder(orderId);
-      if (!claimedOrder) {
-        console.log(`Order ${orderId} is already processed. Skipping.`);
-        continue;
+  // Single-order processing logic extracted to a reusable function
+  async function processSingleOrder(orderId) {
+    try {
+      // 1) Claim order (idempotency)
+      const claimed = await claimOrder(orderId);
+      if (!claimed) {
+        // Already processed or claimed
+        return { success: false, reason: "already_claimed", orderId };
       }
 
-      try {
-        const order = await Order.findById(orderId);
-        if (!order) throw new Error("Order details not found");
-        // ✅ Fetch user and plan based on each order’s userId
-        const userId = order.userId;
-        const user = await User.findById(userId);
-        if (!user) throw new Error("User not found for order");
+      // 2) Fetch order
+      const order = await Order.findById(orderId);
+      if (!order) throw new Error("Order details not found");
 
-        const plans = await plan.findOne({ userId });
-        if (!plans) throw new Error("User plan not found");
+      // 3) Fetch user & plan
+      const userId = order.userId;
+      const user = await User.findById(userId);
+      if (!user) throw new Error("User not found for order");
 
-        const walletId = user.Wallet;
-        const applicableWeight = order.packageDetails.applicableWeight;
+      const plans = await plan.findOne({ userId });
+      if (!plans) throw new Error("User plan not found");
 
-        // ✅ Find eligible courier services based on plan.rateCard & weight
-        // Step 1: Filter all slabs that are >= applicableWeight
-        let eligibleCouriers = plans.rateCard
-          .filter((rc) => rc.status === "Active") // Active only
-          .filter((rc) => {
-            const weightSlab = rc.weightPriceBasic?.[0]?.weight / 1000 || 0;
-            return weightSlab >= applicableWeight;
-          });
+      const walletId = user.Wallet;
+      const applicableWeight = order.packageDetails?.applicableWeight || 0;
 
-        // Step 2: Find the minimum (nearest) slab among them
-        if (eligibleCouriers.length > 0) {
-          const minSlab = Math.min(
-            ...eligibleCouriers.map(
-              (rc) => rc.weightPriceBasic?.[0]?.weight / 1000 || 0
-            )
-          );
+      // 4) Prepare courier lists & EDD etc (grab fresh each order for correctness)
+      const EDDRates = await EDDMap.find();
+      const couriers = await Courier.find({ status: "Enable" });
+      const courierServices = await Services.find({ status: "Enable" });
 
-          // Step 3: Keep only those couriers with that exact nearest slab
-          eligibleCouriers = eligibleCouriers.filter(
-            (rc) => rc.weightPriceBasic?.[0]?.weight / 1000 === minSlab
-          );
-        }
-
-        // console.log("eligible courier", eligibleCouriers);
-        if (eligibleCouriers.length === 0) {
-          throw new Error("No courier available for this weight slab");
-        }
-
-        // ✅ Filter active + enabled couriers
-        eligibleCouriers = eligibleCouriers.filter((rc) => {
-          const service = courierServices.find(
-            (cs) =>
-              normalize(cs.name) === normalize(rc.courierServiceName) &&
-              cs.status === "Enable"
-          );
-          const provider = couriers.find(
-            (c) =>
-              normalize(c.courierProvider) === normalize(rc.courierProviderName)
-          );
-          return service && provider?.status === "Enable";
+      // 5) Determine eligible couriers (weight slab logic)
+      let eligibleCouriers = (plans.rateCard || [])
+        .filter((rc) => rc.status === "Active")
+        .filter((rc) => {
+          const weightSlab = rc.weightPriceBasic?.[0]?.weight / 1000 || 0;
+          return weightSlab >= applicableWeight;
         });
 
-        // ✅ Sort based on plan.priorityType
-        const zone = await getZone(
-          order.pickupAddress.pinCode,
-          order.receiverAddress.pinCode
+      if (eligibleCouriers.length > 0) {
+        const minSlab = Math.min(
+          ...eligibleCouriers.map(
+            (rc) => rc.weightPriceBasic?.[0]?.weight / 1000 || 0
+          )
         );
+        eligibleCouriers = eligibleCouriers.filter(
+          (rc) => (rc.weightPriceBasic?.[0]?.weight / 1000 || 0) === minSlab
+        );
+      }
 
-        let priorityType = plans.priorityType?.toLowerCase();
-        if (!["cheapest", "fastest", "custom"].includes(priorityType)) {
-          priorityType = "cheapest";
-        }
-        if (priorityType === "cheapest") {
-          eligibleCouriers.sort((a, b) => {
-            const costA = parseFloat(a.weightPriceBasic[0][zone.zone]) || 0;
-            const costB = parseFloat(b.weightPriceBasic[0][zone.zone]) || 0;
-            return costA - costB;
-          });
-        } else if (priorityType === "fastest") {
-          eligibleCouriers.sort((a, b) => {
-            const eddA = EDDRates.find(
-              (e) =>
-                normalize(e.serviceName) === normalize(a.courierServiceName)
-            );
-            const eddB = EDDRates.find(
-              (e) =>
-                normalize(e.serviceName) === normalize(b.courierServiceName)
-            );
-            const daysA =
-              eddA?.zoneRates?.[zone.zone] ?? Number.MAX_SAFE_INTEGER;
-            const daysB =
-              eddB?.zoneRates?.[zone.zone] ?? Number.MAX_SAFE_INTEGER;
-            return daysA - daysB;
-          });
-        } else if (priorityType === "custom") {
-          const customOrder = plans.rateCard.map((r) =>
-            r?.courierServiceName?.toLowerCase()
-          );
-          eligibleCouriers.sort((a, b) => {
-            const indexA = customOrder.indexOf(
-              a.courierServiceName?.toLowerCase()
-            );
-            const indexB = customOrder.indexOf(
-              b.courierServiceName?.toLowerCase()
-            );
-            return indexA - indexB;
-          });
-        }
-
-        // ✅ Try couriers sequentially
-        let shipmentSuccess = false;
-        for (const courier of eligibleCouriers) {
-          try {
-            const details = {
-              pickupPincode: order.pickupAddress.pinCode,
-              deliveryPincode: order.receiverAddress.pinCode,
-              length: order.packageDetails.volumetricWeight.length,
-              breadth: order.packageDetails.volumetricWeight.width,
-              height: order.packageDetails.volumetricWeight.height,
-              weight: applicableWeight,
-              cod: order.paymentDetails.method === "COD" ? "Yes" : "No",
-              valueInINR: order.paymentDetails.amount,
-              userID: userId,
-              filteredServices: courier,
-            };
-
-            const rates = await calculateRateForServiceBulk(details);
-            // console.log("courier",courier)
-            const charges = parseFloat(rates?.[0]?.forward?.finalCharges || 0);
-            // ✅ Skip if charges invalid, NaN, or 0
-            if (!charges || isNaN(charges) || charges <= 0) {
-              console.warn(
-                `⚠️ Skipping order ${orderId}: Invalid or zero charges for courier ${courier.courierServiceName}`
-              );
-              continue;
-            }
-            // console.log("charges", charges);
-
-            const courierDetails = {
-              provider: courier.courierProviderName,
-              name: courier.courierServiceName,
-            };
-            const result = await callProviderWithRetry(
-              courierDetails,
-              order,
-              order.pickupAddress,
-              walletId,
-              charges
-            );
-
-            if (result) {
-              shipmentSuccess = true;
-              successCount++;
-              console.log(
-                `✅ Order ${orderId} created with ${courier.courierServiceName}`
-              );
-              break;
-            }
-          } catch (err) {
-            console.warn(
-              `Courier ${courier.courierServiceName} failed for order ${orderId}: ${err.message}`
-            );
-            continue; // try next courier
-          }
-        }
-
-        if (!shipmentSuccess) {
-          failureCount++;
-          await Order.findByIdAndUpdate(orderId, {
-            $set: {
-              status: "new",
-              failureReason: "All couriers failed",
-            },
-          });
-        }
-
-        await delay(1000);
-      } catch (error) {
-        console.error(`Order ${orderId} processing error:`, error.message);
+      if (eligibleCouriers.length === 0) {
+        // mark failure in DB and return
         await Order.findByIdAndUpdate(orderId, {
-          $set: { status: "new", failureReason: error.message },
+          $set: {
+            status: "new",
+            failureReason: "No courier available for this weight slab",
+          },
         });
-        failureCount++;
+        return { success: false, reason: "no_weight_slab", orderId };
+      }
+
+      // filter enabled services/providers
+      eligibleCouriers = eligibleCouriers.filter((rc) => {
+        const service = courierServices.find(
+          (cs) =>
+            normalize(cs.name) === normalize(rc.courierServiceName) &&
+            cs.status === "Enable"
+        );
+        const provider = couriers.find(
+          (c) =>
+            normalize(c.courierProvider) === normalize(rc.courierProviderName)
+        );
+        return !!service && provider?.status === "Enable";
+      });
+
+      // zone and priority sorting
+      const zone = await getZone(
+        order.pickupAddress.pinCode,
+        order.receiverAddress.pinCode
+      );
+
+      let priorityType = (plans.priorityType || "cheapest").toLowerCase();
+      if (!["cheapest", "fastest", "custom"].includes(priorityType))
+        priorityType = "cheapest";
+
+      if (priorityType === "cheapest") {
+        eligibleCouriers.sort((a, b) => {
+          const costA = parseFloat(a.weightPriceBasic?.[0]?.[zone.zone] || 0);
+          const costB = parseFloat(b.weightPriceBasic?.[0]?.[zone.zone] || 0);
+          return costA - costB;
+        });
+      } else if (priorityType === "fastest") {
+        eligibleCouriers.sort((a, b) => {
+          const eddA = EDDRates.find(
+            (e) => normalize(e.serviceName) === normalize(a.courierServiceName)
+          );
+          const eddB = EDDRates.find(
+            (e) => normalize(e.serviceName) === normalize(b.courierServiceName)
+          );
+          const daysA = eddA?.zoneRates?.[zone.zone] ?? Number.MAX_SAFE_INTEGER;
+          const daysB = eddB?.zoneRates?.[zone.zone] ?? Number.MAX_SAFE_INTEGER;
+          return daysA - daysB;
+        });
+      } else if (priorityType === "custom") {
+        const customOrder = (plans.rateCard || []).map((r) =>
+          r?.courierServiceName?.toLowerCase()
+        );
+        eligibleCouriers.sort((a, b) => {
+          return (
+            customOrder.indexOf(a.courierServiceName?.toLowerCase()) -
+            customOrder.indexOf(b.courierServiceName?.toLowerCase())
+          );
+        });
+      }
+
+      // Try couriers sequentially
+      for (const courier of eligibleCouriers) {
+        try {
+          const details = {
+            pickupPincode: order.pickupAddress.pinCode,
+            deliveryPincode: order.receiverAddress.pinCode,
+            length: order.packageDetails?.volumetricWeight?.length,
+            breadth: order.packageDetails?.volumetricWeight?.width,
+            height: order.packageDetails?.volumetricWeight?.height,
+            weight: applicableWeight,
+            cod: order.paymentDetails?.method === "COD" ? "Yes" : "No",
+            valueInINR: order.paymentDetails?.amount,
+            userID: userId,
+            filteredServices: courier,
+          };
+
+          const rates = await calculateRateForServiceBulk(details);
+          const charges = parseFloat(rates?.[0]?.forward?.finalCharges || 0);
+
+          if (!charges || isNaN(charges) || charges <= 0) {
+            // skip this courier
+            continue;
+          }
+
+          const courierDetails = {
+            provider: courier.courierProviderName,
+            name: courier.courierServiceName,
+          };
+
+          const result = await callProviderWithRetry(
+            courierDetails,
+            order,
+            order.pickupAddress,
+            walletId,
+            charges
+          );
+
+          if (result) {
+            // success — provider returned AWB etc inside callProviderWithRetry
+            return {
+              success: true,
+              courier: courier.courierServiceName,
+              orderId,
+            };
+          }
+        } catch (err) {
+          // try next courier
+          console.warn(
+            `Courier ${courier.courierServiceName} failed for order ${orderId}:`,
+            err.message
+          );
+          continue;
+        }
+      }
+
+      // if reached here, all couriers failed
+      await Order.findByIdAndUpdate(orderId, {
+        $set: { status: "new", failureReason: "All couriers failed" },
+      });
+      return { success: false, reason: "all_couriers_failed", orderId };
+    } catch (err) {
+      // unexpected error - mark order as new & return failure
+      try {
+        await Order.findByIdAndUpdate(orderId, {
+          $set: { status: "new", failureReason: err.message },
+        });
+      } catch (e) {
+        console.error("Failed to set order failureReason:", e.message);
+      }
+      return { success: false, reason: err.message || "error", orderId };
+    }
+  } // end processSingleOrder
+
+  // Background processor used when immediate response is sent
+  async function processBulkOrdersBackground(selectedOrdersArr) {
+    console.log(
+      "BACKGROUND bulk processing started for",
+      selectedOrdersArr.length,
+      "orders"
+    );
+    let bgSuccess = 0;
+    let bgFail = 0;
+
+    for (const oid of selectedOrdersArr) {
+      try {
+        const result = await processSingleOrder(oid);
+        if (result.success) bgSuccess++;
+        else bgFail++;
+        // optionally: emit websocket / notification or update a job collection for UI
+      } catch (err) {
+        console.error("Background order processing error", oid, err.message);
+        bgFail++;
+      }
+      // do NOT delay in background to keep throughput (you can add small sleep if providers block you)
+    }
+
+    console.log(`BACKGROUND complete: success=${bgSuccess}, failure=${bgFail}`);
+  }
+
+  // ---------- MAIN controller flow ----------
+  try {
+    // If large batch — return immediately and process background
+    if (selectedOrders.length >= 15) {
+      const approxMinutes = Math.ceil(selectedOrders.length * 0.15); // heuristic
+      // Respond right away
+      res.status(202).json({
+        success: true,
+        message: `Bulk shipment started for ${selectedOrders.length} orders. Please check Ready To Ship tab after approx ${approxMinutes} minutes.`,
+      });
+
+      // Run background processing without blocking response
+      // setImmediate ensures this runs after the response has been sent
+      setImmediate(() => {
+        processBulkOrdersBackground(selectedOrders).catch((err) => {
+          console.error("Background processing failed:", err);
+        });
+      });
+
+      return; // done
+    }
+
+    // ---------- Small batch synchronous processing (< 15 orders) ----------
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const orderId of selectedOrders) {
+      const result = await processSingleOrder(orderId);
+      if (result.success) successCount++;
+      else failureCount++;
+
+      // Preserve small-batch delay if you want (keeps old behavior)
+      if (typeof delay === "function") {
+        try {
+          await delay(1000);
+        } catch (e) {
+          // ignore delay errors
+        }
       }
     }
 
@@ -484,14 +546,24 @@ const createBulkOrder = async (req, res) => {
       successCount,
       failureCount,
     });
-  } catch (error) {
-    console.error("Bulk order creation error:", error.message);
-    return res.status(500).json({
-      error: "Internal Server Error",
-      message: error.message,
-    });
+  } catch (outerErr) {
+    console.error("Bulk order creation error:", outerErr);
+    // If response has not been sent yet, send server error, otherwise just log
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        error: "Internal Server Error",
+        message: outerErr.message,
+      });
+    } else {
+      // response already sent (shouldn't happen because large batches responded earlier),
+      // but log error for debugging
+      return;
+    }
   }
 };
+
+
 
 module.exports = {
   updatePickup,

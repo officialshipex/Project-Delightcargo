@@ -663,7 +663,7 @@ const submitNdrToShreeMaruti = async ({
         : actionType === "RTO"
         ? "RTO"
         : actionType;
-
+console.log("action",actionTypeValue)
     if (actionType === "RE-ATTEMPT" && (!remarks || !remarks.trim())) {
       return {
         status: 400,
@@ -732,6 +732,7 @@ const submitNdrToShreeMaruti = async ({
       return {
         status: 422,
         success: false,
+        error:result.message,
         failedOrders,
         shreeMarutiResponse: result,
       };

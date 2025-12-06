@@ -106,7 +106,7 @@ const ndrProcessController = async (req, res) => {
     } else {
       return res.status(400).json({ error: "Unsupported platform" });
     }
-    // console.log("resererer", response);
+    // console.log("resererer", response.failedOrders);
     res.json({ success: response.success, data: response.error });
   } catch (error) {
     console.log(error);

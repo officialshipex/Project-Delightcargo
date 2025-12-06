@@ -2427,6 +2427,7 @@ const getCODTransferData = async (req, res) => {
 
     const walletBalance = wallet.balance || 0;
     const holdAmount = wallet.holdAmount || 0; // adjust field name if different
+    const creditLimit=wallet.creditLimit || 0;
 
     // Return only selected remittance entries
     return res.status(200).json({
@@ -2434,6 +2435,7 @@ const getCODTransferData = async (req, res) => {
       bankDetails,
       walletBalance,
       holdAmount,
+      creditLimit,
       data: filteredRemittance,
     });
   } catch (error) {

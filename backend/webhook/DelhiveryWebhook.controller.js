@@ -58,7 +58,11 @@ const DelhiveryWebhook = async (req, res) => {
 
     if (statusDoc) {
       function normalizeString(str) {
-        return str?.toLowerCase().replace(/\s+/g, "").trim();
+        return str
+          ?.toLowerCase()
+          .replace(/['"]/g, "") // remove apostrophes and quotes
+          .replace(/[^a-z0-9]/gi, "") // remove all non-alphanumeric characters
+          .trim();
       }
 
       const dbMapping = statusDoc.data.find(
@@ -114,9 +118,7 @@ const DelhiveryWebhook = async (req, res) => {
     const lastEntryDate = lastAction?.date
       ? new Date(lastAction.date).getTime()
       : null;
-    const currentStatusDate = new Date(
-      normalizedData.StatusDateTime
-    ).getTime();
+    const currentStatusDate = new Date(normalizedData.StatusDateTime).getTime();
 
     if (
       (order.ndrHistory.length === 0 || lastEntryDate < currentStatusDate) &&
