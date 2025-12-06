@@ -262,7 +262,7 @@ const getBusinessInsights = async (req, res) => {
   try {
     let userId = req.user._id;
     let searchId = req.query.userId;
-    let today=new Date(req.query.date);
+    let today = new Date(req.query.date);
 
     const userData = await User.findById(userId);
     const isAdminView = userData?.isAdmin && userData?.adminTab;
@@ -1103,46 +1103,58 @@ const getOverviewGraphsData = async (req, res) => {
 const getOverviewCardData = async (req, res) => {
   try {
     const userId = req.user._id;
-
     const searchId = req.query.userId;
     let { startDate, endDate } = req.query;
-    // If not provided, take today's date
+
+    // Default: today's date
     if (!startDate || !endDate) {
       const today = new Date();
-      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
-      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+      startDate = new Date(today.setHours(0, 0, 0, 0));
+      endDate = new Date(today.setHours(23, 59, 59, 999));
     }
+
     const userData = await User.findById(userId);
-    // Check if admin and has adminTab access
+
+    // Determine if admin view
     const isAdminView = userData?.isAdmin && userData?.adminTab;
 
-    // Determine final user filter
+    // Base match − Apply user filter
     let baseMatch = {};
     if (!isAdminView) {
-      // Normal user: restrict to their own orders
       baseMatch.userId = userId;
     } else if (searchId) {
-      // Admin with a selected user
       baseMatch.userId = new mongoose.Types.ObjectId(searchId);
     }
 
+    // Date Ranges
     const startOfMonth = moment().startOf("month").toDate();
     const startOfWeek = moment().startOf("week").toDate();
     const startOfQuarter = moment().startOf("quarter").toDate();
     const last90Days = moment().subtract(90, "days").toDate();
     const last30Days = moment().subtract(30, "days").toDate();
 
+    // COMMON FILTER for all orderValue calculations
+    const revenueFilter = {
+      ...baseMatch,
+      status: { $nin: ["new", "Cancelled"] }, // ⬅ TAKE ALL EXCEPT new + Cancelled
+    };
+
     const [result] = await Order.aggregate([
       { $match: baseMatch },
       {
         $facet: {
+          // ------------------------------
+          // Orders by Zone (based on date filter)
+          // ------------------------------
           ordersByZone: [
             {
               $match: {
+                status: { $nin: ["new", "Cancelled"] },
                 createdAt: {
                   $gte: new Date(startDate),
                   $lte: new Date(endDate),
                 },
+                ...baseMatch,
               },
             },
             {
@@ -1160,65 +1172,86 @@ const getOverviewCardData = async (req, res) => {
             },
           ],
 
-          totalOrders: [{ $count: "count" }],
-
-          last90DaysRevenue: [
+          totalOrders: [
             {
               $match: {
-                status: "Delivered",
+                status: { $nin: ["new", "Cancelled"] },
+                createdAt: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
+                ...baseMatch,
+              },
+            },
+            { $count: "count" },
+          ],
+
+          // ------------------------------
+          // Order Value Stats (NOT only Delivered)
+          // ------------------------------
+          last90DaysOrderValue: [
+            {
+              $match: {
+                ...revenueFilter,
                 createdAt: { $gte: last90Days },
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
-          thisMonthRevenue: [
+
+          thisMonthOrderValue: [
             {
               $match: {
-                status: "Delivered",
+                ...revenueFilter,
                 createdAt: { $gte: startOfMonth },
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
-          thisWeekRevenue: [
+
+          thisWeekOrderValue: [
             {
               $match: {
-                status: "Delivered",
+                ...revenueFilter,
                 createdAt: { $gte: startOfWeek },
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
-          thisQuarterRevenue: [
+
+          thisQuarterOrderValue: [
             {
               $match: {
-                status: "Delivered",
+                ...revenueFilter,
                 createdAt: { $gte: startOfQuarter },
               },
             },
             {
               $group: {
                 _id: null,
-                revenue: { $sum: "$paymentDetails.amount" },
+                orderValue: { $sum: "$paymentDetails.amount" },
               },
             },
           ],
 
+          // ------------------------------
+          // Weight Split
+          // ------------------------------
           weightSplit: [
             {
               $match: {
@@ -1244,9 +1277,7 @@ const getOverviewCardData = async (req, res) => {
                 groupBy: "$weight",
                 boundaries: [0, 0.5, 1, 2, 5, 10, 1000],
                 default: "Other",
-                output: {
-                  count: { $sum: 1 },
-                },
+                output: { count: { $sum: 1 } },
               },
             },
             {
@@ -1276,15 +1307,16 @@ const getOverviewCardData = async (req, res) => {
     const {
       ordersByZone = [],
       totalOrders = [],
-      last90DaysRevenue = [],
-      thisMonthRevenue = [],
-      thisWeekRevenue = [],
-      thisQuarterRevenue = [],
+      last90DaysOrderValue = [],
+      thisMonthOrderValue = [],
+      thisWeekOrderValue = [],
+      thisQuarterOrderValue = [],
       weightSplit = [],
     } = result;
 
     const totalOrderCount = totalOrders[0]?.count || 0;
 
+    // Add percentage calculation
     const ordersByZoneWithPercentage = ordersByZone.map((zone) => {
       const percentage =
         totalOrderCount > 0
@@ -1296,17 +1328,20 @@ const getOverviewCardData = async (req, res) => {
       };
     });
 
+    // Final Response
     return res.status(200).json({
       success: true,
       data: {
         ordersByZone: ordersByZoneWithPercentage,
-        revenueStats: {
-          last90Days: last90DaysRevenue[0]?.revenue || 0,
-          thisMonth: thisMonthRevenue[0]?.revenue || 0,
-          thisWeek: thisWeekRevenue[0]?.revenue || 0,
-          thisQuarter: thisQuarterRevenue[0]?.revenue || 0,
+
+        orderValueStats: {
+          last90Days: last90DaysOrderValue[0]?.orderValue || 0,
+          thisMonth: thisMonthOrderValue[0]?.orderValue || 0,
+          thisWeek: thisWeekOrderValue[0]?.orderValue || 0,
+          thisQuarter: thisQuarterOrderValue[0]?.orderValue || 0,
         },
-        weightSplit: weightSplit, // already has range and count
+
+        weightSplit: weightSplit,
       },
     });
   } catch (error) {

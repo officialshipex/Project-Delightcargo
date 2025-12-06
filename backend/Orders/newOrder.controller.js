@@ -135,7 +135,7 @@ const updatePackageDetails = async (req, res) => {
   try {
     const { length, width, height, weight } = req.body.details;
     const selectedOrders = req.body.selectedOrders;
-    console.log("re", req.body);
+    // console.log("re", req.body);
 
     if (
       length == null ||
@@ -656,9 +656,9 @@ const getOrdersByNdrStatus = async (req, res) => {
     if (status === "Undelivered" && tab === "Action_Required") {
       andConditions.push({ ndrStatus: "Undelivered" });
       andConditions.push({ reattempt: true });
-    } else if (status ==="Undelivered" && tab==="") {
+    } else if (status === "Undelivered" && tab === "") {
       andConditions.push({ ndrStatus: status });
-      andConditions.push({reattempt:false});
+      andConditions.push({ reattempt: false });
     }
 
     if (status && status !== "All") {
@@ -1544,7 +1544,7 @@ const passbook = async (req, res) => {
     if (category) {
       transactionMatchStage["wallet.transactions.category"] = category;
     }
-    if(description){
+    if (description) {
       transactionMatchStage["wallet.transactions.description"] = description;
     }
 
@@ -1822,7 +1822,8 @@ const bulkCancelOrder = async (req, res) => {
 
         // ✅ Determine provider
         const provider =
-          currentOrder.partner === "ZipyPost"
+          currentOrder.partner === "ZipyPost" &&
+          currentOrder.provider === "Bluedart"
             ? "ZipyPost"
             : currentOrder.provider;
 

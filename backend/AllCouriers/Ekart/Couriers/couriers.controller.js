@@ -103,8 +103,10 @@ const orderCreationEkart = async (req, res) => {
     // 3. Fetch Wallet
     const user = await User.findById(currentOrder.userId).session(session);
     const currentWallet = await Wallet.findById(user.Wallet).session(session);
+    const holdAmount=currentWallet.holdAmount || 0;
+    const effectiveBalance=currentWallet.balance-holdAmount;
 
-    const balance = currentWallet.balance + currentWallet.creditLimit;
+    const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < finalCharges) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();

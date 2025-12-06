@@ -52,6 +52,7 @@ const ShreeMarutiWebhook = async (req, res) => {
     ───────────────────────────────────────────────── */
     const isRTOStatus = [
       "RTO",
+      "RTO_REQUESTED",
       "RTO_OUT_FOR_DELIVERY",
       "RTO_IN_TRANSIT",
       "RTO_DELIVERED",
@@ -63,7 +64,7 @@ const ShreeMarutiWebhook = async (req, res) => {
     if (isRTOStatus) {
       order.reattempt = false; // not NDR case, this is RTO
 
-      if (status === "RTO") {
+      if (status === "RTO" || status==="RTO_REQUESTED") {
         order.status = "RTO";
         order.ndrStatus = "RTO";
       }
@@ -92,7 +93,7 @@ const ShreeMarutiWebhook = async (req, res) => {
 
       if (status === "READY_FOR_DISPATCH") order.status = "Ready To Ship";
 
-      if (status === "PICKED_UP") {
+      if (status === "PICKED_UP" || status==="PICKEDUP") {
         order.status = "In-transit";
         order.ndrStatus = "In-transit";
         order.reattempt = false;

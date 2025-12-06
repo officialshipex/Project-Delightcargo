@@ -45,7 +45,7 @@ const createBulkEkartShipment = async (
 
     const walletHold = currentWallet?.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHold;
-    const balance = currentWallet.balance + currentWallet.creditLimit;
+    const balance = effectiveBalance + currentWallet.creditLimit;
 
     if (balance < charges) {
       return { success: false, message: "Insufficient wallet balance" };
@@ -230,7 +230,7 @@ const createBulkEkartShipment = async (
 
     // 9. Wallet update (atomic)
     await Wallet.findOneAndUpdate(
-      { _id: walletId, balance: { $gte: charges } },
+      { _id: walletId},
       {
         $inc: { balance: -charges },
         $push: {

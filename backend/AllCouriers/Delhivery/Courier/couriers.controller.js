@@ -246,7 +246,7 @@ const createOrder = async (req, res) => {
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
     const balanceToBeDeducted =
       finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
-    const balance = currentWallet.balance + currentWallet.creditLimit;
+    const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < balanceToBeDeducted) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
@@ -441,7 +441,7 @@ const trackShipmentDelhivery = async (waybill) => {
 
     // Extract scans and remove the ScanDetail key
     const scans = shipmentData.Scans?.map((item) => item.ScanDetail) || [];
-    // console.log("ship",scans)
+    console.log("ship",scans)
     return {
       success: true,
       id: shipmentData.ReferenceNo,
@@ -456,7 +456,7 @@ const trackShipmentDelhivery = async (waybill) => {
   }
 };
 
-// trackShipmentDelhivery("35973710046362")
+// trackShipmentDelhivery("35973710062440")
 
 const generateShippingLabel = async (req, res) => {
   const { waybill } = req.params;

@@ -166,7 +166,7 @@ const generateUniqueTransactionId = async () => {
 const addWalletHistory = async (req, res) => {
   try {
     const { userId, paymentId, orderId, amount } = req.body;
-    console.log("re", req.body);
+    // console.log("re", req.body);
 
     // 1. Validate required fields
     if (!userId || !paymentId || !orderId || amount == null) {
@@ -254,7 +254,7 @@ const addPassbook = async (req, res) => {
       transactionType,
       userId,
     } = req.body;
-    console.log("re", req.body);
+    // console.log("re", req.body);
 
     // Validate incoming fields
     if (!userId) {

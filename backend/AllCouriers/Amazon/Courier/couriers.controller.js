@@ -127,7 +127,7 @@ const createOneClickShipment = async (req, res) => {
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
     const balanceToBeDeducted =
       finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
-    const balance = currentWallet.balance + currentWallet.creditLimit;
+    const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < balanceToBeDeducted) {
       await Order.findByIdAndUpdate(id, { status: "new" }, { session });
       await session.abortTransaction();

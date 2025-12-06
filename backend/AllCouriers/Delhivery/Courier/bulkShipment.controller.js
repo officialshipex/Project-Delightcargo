@@ -120,7 +120,7 @@ const createShipmentFunctionDelhivery = async (
     let currentWallet = await Wallet.findById(walletId);
     const walletHoldAmount = currentWallet?.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    const balance= currentWallet.balance + currentWallet.creditLimit;
+    const balance= effectiveBalance + currentWallet.creditLimit;
     if (balance >= finalCharges) {
       const response = await axios.post(delUrl, payload, {
         headers: {
@@ -163,7 +163,7 @@ const createShipmentFunctionDelhivery = async (
         };
 
         const updatedWallet = await Wallet.findOneAndUpdate(
-          { _id: walletId, balance: { $gte: parseFloat(finalCharges) } },
+          { _id: walletId},
           {
             $inc: { balance: -parseFloat(finalCharges) },
             $push: { transactions: transaction },

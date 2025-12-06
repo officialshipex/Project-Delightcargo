@@ -45,7 +45,7 @@ const createOrderZipypost = async (
     // Wallet check
     const walletHoldAmount = currentWallet?.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    const balance = currentWallet.balance + currentWallet.creditLimit;
+    const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < charges) {
       return { success: false, message: "Insufficient Wallet Balance" };
     }
@@ -301,7 +301,7 @@ const createOrderZipypost = async (
 
       // Deduct wallet balance
       await Wallet.findOneAndUpdate(
-        { _id: walletId, balance: { $gte: parseFloat(charges) } },
+        { _id: walletId},
         {
           $inc: { balance: -parseFloat(charges) },
           $push: {

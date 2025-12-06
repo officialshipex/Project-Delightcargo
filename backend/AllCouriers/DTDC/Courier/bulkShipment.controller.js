@@ -82,7 +82,7 @@ const createOrderDTDC = async (
     }
     const walletHoldAmount = currentWallet?.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    const balance= currentWallet.balance + currentWallet.creditLimit;
+    const balance= effectiveBalance + currentWallet.creditLimit;
     if (balance < charges) {
       return { success: false, message: "Insufficient Wallet Balance" };
     }
@@ -196,7 +196,7 @@ const createOrderDTDC = async (
       // console.log("sjakjska",balanceToBeDeducted)
       // Deduct wallet balance using atomic operation and update transaction
       const updatedWallet = await Wallet.findOneAndUpdate(
-        { _id: walletId, balance: { $gte: parseFloat(charges) } }, // Ensure sufficient balance
+        { _id: walletId }, // Ensure sufficient balance
         {
           $inc: { balance: -charges }, // Deduct balance
           $push: {

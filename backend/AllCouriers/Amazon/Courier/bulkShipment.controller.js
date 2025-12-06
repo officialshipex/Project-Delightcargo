@@ -78,7 +78,7 @@ const createShipmentAmazon = async (
 
     const holdAmount = currentWallet?.holdAmount || 0;
     const availableBalance = currentWallet.balance - holdAmount;
-    const balance = currentWallet.balance + currentWallet.creditLimit;
+    const balance = availableBalance + currentWallet.creditLimit;
     if (balance < charges) {
       // console.log("balance")
       return {
@@ -145,7 +145,7 @@ const createShipmentAmazon = async (
     }
 
     const trackingId = result.packageDocumentDetails[0].trackingId;
-    console.log("tracking", trackingId);
+    // console.log("tracking", trackingId);
     const base64Label =
       result.packageDocumentDetails[0].packageDocuments[0].contents;
     const labelBuffer = Buffer.from(base64Label, "base64");
@@ -195,7 +195,7 @@ const createShipmentAmazon = async (
     };
 
     const updatedWallet = await Wallet.findOneAndUpdate(
-      { _id: walletId, balance: { $gte: parseFloat(charges) } },
+      { _id: walletId },
       {
         $inc: { balance: -parseFloat(charges) },
         $push: { transactions: transaction },

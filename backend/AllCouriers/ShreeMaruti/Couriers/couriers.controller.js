@@ -252,7 +252,7 @@ function sanitizeAddress(str) {
 
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
-    const balance = currentWallet.balance + currentWallet.creditLimit;
+    const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < finalCharges) {
       return res
         .status(400)
@@ -535,7 +535,7 @@ const trackOrderShreeMaruti = async (awbNumber) => {
     };
   }
 };
-// trackOrderShreeMaruti("SHIP40000000003");
+// trackOrderShreeMaruti("SHIP40000002329");
 
 // Serviceability
 const checkServiceabilityShreeMaruti = async (payload) => {
