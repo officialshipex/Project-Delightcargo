@@ -447,8 +447,6 @@ const AllDiscrepancyCountBasedId = async (req, res) => {
       userId = req.user?._id || req.employee?._id;
     }
 
-    console.log("Using userId:", userId);
-
     const statusCounts = await WeightDiscrepancy.aggregate([
       {
         $match: { userId }, // correctly matched ObjectId
@@ -814,8 +812,9 @@ const autoAcceptDiscrepancies = async () => {
 
   try {
     console.log("Running auto-accept discrepancy job...");
-
-    const sevenDaysAgo = new Date();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const sevenDaysAgo = new Date(today);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     const discrepancies = await WeightDiscrepancy.find({
@@ -892,6 +891,8 @@ const autoAcceptDiscrepancies = async () => {
 if (process.env.NODE_ENV === "production") {
   cron.schedule("0 0 * * *", autoAcceptDiscrepancies);
 }
+
+// autoAcceptDiscrepancies()
 
 // Raise Discrepancies
 const raiseDiscrepancies = async (req, res) => {
