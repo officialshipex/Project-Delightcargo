@@ -69,19 +69,19 @@ const orderSchema = new mongoose.Schema(
     productDetails: [
       {
         id: { type: Number, required: true },
-        quantity: { type: Number, required: true },
-        name: { type: String, required: true },
-        hsn: { type: String, required: true },
+        quantity: { type: Number},
+        name: { type: String },
+        hsn: { type: String},
         sku: { type: String },
-        unitPrice: { type: String, required: true },
+        unitPrice: { type: String },
         category: { type: String },
         discount: { type: String },
         tax: { type: String },
       },
     ],
     packageDetails: {
-      deadWeight: { type: Number, required: true },
-      applicableWeight: { type: Number, required: true },
+      deadWeight: { type: Number},
+      applicableWeight: { type: Number},
       volumetricWeight: {
         length: { type: Number },
         width: { type: Number },
