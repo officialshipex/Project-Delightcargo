@@ -74,6 +74,9 @@ const orderSchema = new mongoose.Schema(
         hsn: { type: String, required: true },
         sku: { type: String },
         unitPrice: { type: String, required: true },
+        category: { type: String },
+        discount: { type: String },
+        tax: { type: String },
       },
     ],
     packageDetails: {

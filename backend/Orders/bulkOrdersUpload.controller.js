@@ -31,13 +31,27 @@ const downloadSampleExcel = async (req, res) => {
 
       // Mandatory Product 1
       { header: "*Product 1 Name", key: "product1_name", width: 30 },
-      { header: "*Product 1 SKU", key: "product1_sku", width: 30 },
+      { header: "Product 1 SKU (Optional)", key: "product1_sku", width: 30 },
+      { header: "Product 1 HSN (Optional)", key: "product1_hsn", width: 30 },
+      {
+        header: "Product 1 Discount (Optional)",
+        key: "product1_discount",
+        width: 30,
+      },
+      { header: "Product 1 Tax (Optional)", key: "product1_tax", width: 30 },
       { header: "*Product 1 Quantity", key: "product1_quantity", width: 30 },
       { header: "*Product 1 Unit Price", key: "product1_price", width: 30 },
 
       // Optional Product 2
       { header: "Product 2 Name (Optional)", key: "product2_name", width: 30 },
       { header: "Product 2 SKU (Optional)", key: "product2_sku", width: 30 },
+      { header: "Product 2 HSN (Optional)", key: "product2_hsn", width: 30 },
+      {
+        header: "Product 2 Discount (Optional)",
+        key: "product2_discount",
+        width: 30,
+      },
+      { header: "Product 2 Tax (Optional)", key: "product2_tax", width: 30 },
       {
         header: "Product 2 Quantity (Optional)",
         key: "product2_quantity",
@@ -52,6 +66,13 @@ const downloadSampleExcel = async (req, res) => {
       // Optional Product 3
       { header: "Product 3 Name (Optional)", key: "product3_name", width: 30 },
       { header: "Product 3 SKU (Optional)", key: "product3_sku", width: 30 },
+      { header: "Product 3 HSN (Optional)", key: "product3_hsn", width: 30 },
+      {
+        header: "Product 3 Discount (Optional)",
+        key: "product3_discount",
+        width: 30,
+      },
+      { header: "Product 3 Tax (Optional)", key: "product3_tax", width: 30 },
       {
         header: "Product 3 Quantity (Optional)",
         key: "product3_quantity",
@@ -65,13 +86,20 @@ const downloadSampleExcel = async (req, res) => {
 
       { header: "*Method (COD/Prepaid)", key: "method", width: 20 },
       {
-        header:"Reseller Name (Optional)",key:"resellerName", width:40,
+        header: "Reseller Name (Optional)",
+        key: "resellerName",
+        width: 40,
       },
       {
-        header:"GSTIN (Optional)",key:"gstin",width:40
-      },{
-        header:"GST E-Waybill Number",key:"ewaybill",width:40
-      }
+        header: "GSTIN (Optional)",
+        key: "gstin",
+        width: 40,
+      },
+      {
+        header: "GST E-Waybill Number",
+        key: "ewaybill",
+        width: 40,
+      },
     ];
 
     // Add a sample row with mandatory product 1 and optional products
@@ -92,25 +120,34 @@ const downloadSampleExcel = async (req, res) => {
       // Mandatory Product 1
       product1_name: "Wireless Headphones",
       product1_sku: "WH123",
+      product1_hsn: "SHX123",
+      product1_discount: "10",
+      product1_tax: 1,
       product1_quantity: 1,
       product1_price: 50,
 
       // Optional Product 2 (provided)
       product2_name: "Smartwatch",
       product2_sku: "SW456",
+      product2_hsn: "SHX123",
+      product2_discount: "10",
+      product2_tax: 1,
       product2_quantity: 2,
       product2_price: 150,
 
       // Optional Product 3 (empty)
       product3_name: "",
       product3_sku: "",
+      product3_hsn: "SHX123",
+      product3_discount: "10",
+      product3_tax: 1,
       product3_quantity: "",
       product3_price: "",
 
       method: "Prepaid",
-      resellerName:"",
-      gstin:"",
-      ewaybill:""
+      resellerName: "",
+      gstin: "",
+      ewaybill: "",
     });
 
     // Format the header row
@@ -337,11 +374,25 @@ const bulkOrder = async (req, res) => {
           row["Product 3 Unit Price (Optional)"] || 0
         );
 
-        const totalAmount =
+        const product1hsn = row["Product 1 HSN (Optional)"];
+        const product2hsn = row["Product 2 HSN (Optional)"];
+        const product3hsn = row["Product 3 HSN (Optional)"];
+
+        const product1discount = row["*Product 1 Discount (Optional)"];
+        const product2discount = row["Product 2 Discount (Optional)"];
+        const product3discount = row["Product 3 Discount (Optional)"];
+
+        const product1tax = row["*Product 1 Tax (Optional)"];
+        const product2tax = row["Product 2 Tax (Optional)"];
+        const product3tax = row["Product 3 Tax (Optional)"];
+
+        let totalAmount =
           product1Quantity * product1Price +
           product2Quantity * product2Price +
           product3Quantity * product3Price;
-
+        const totalDiscount =
+          product1discount + product2discount + product3discount;
+        totalAmount = totalAmount - totalDiscount;
         return {
           userId: userID,
           orderId: orderId,
@@ -364,7 +415,10 @@ const bulkOrder = async (req, res) => {
             {
               id: 1,
               name: row["*Product 1 Name"] || "Unknown Product",
-              sku: row["*Product 1 SKU"] || "UNKNOWN_SKU",
+              sku: row["Product 1 SKU"] || "UNKNOWN_SKU",
+              hsn: product1hsn || "",
+              discount: product1discount || "",
+              tax: product1tax || "",
               quantity: product1Quantity,
               unitPrice: product1Price,
             },
@@ -374,6 +428,9 @@ const bulkOrder = async (req, res) => {
                     id: 2,
                     name: row["Product 2 Name (Optional)"],
                     sku: row["Product 2 SKU (Optional)"] || "UNKNOWN_SKU",
+                    hsn: product2hsn || "",
+                    discount: product2discount || "",
+                    tax: product2tax || "",
                     quantity: product2Quantity,
                     unitPrice: product2Price,
                   },
@@ -385,6 +442,9 @@ const bulkOrder = async (req, res) => {
                     id: 3,
                     name: row["Product 3 Name (Optional)"],
                     sku: row["Product 3 SKU (Optional)"] || "UNKNOWN_SKU",
+                    hsn: product3hsn || "",
+                    discount: product3discount || "",
+                    tax: product3tax || "",
                     quantity: product3Quantity,
                     unitPrice: product3Price,
                   },
@@ -401,10 +461,10 @@ const bulkOrder = async (req, res) => {
               height: parseFloat(row["*Height (cm)"] || 0),
             },
           },
-          otherDetails:{
-            resellerName:row["Reseller Name (Optional)"],
-            gstin:row["GSTIN (Optional)"],
-            ewaybill:row["GST E-Waybill Number"]
+          otherDetails: {
+            resellerName: row["Reseller Name (Optional)"],
+            gstin: row["GSTIN (Optional)"],
+            ewaybill: row["GST E-Waybill Number"],
           },
           channel: "custom",
           compositeOrderId,
