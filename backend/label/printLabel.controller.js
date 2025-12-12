@@ -117,6 +117,10 @@ router.get("/generate-pdf/:id", async (req, res) => {
     doc.font("Helvetica").text(formattedOrderDate1);
     doc.font("Helvetica-Bold").text(`Invoice No: `, { continued: true });
     doc.font("Helvetica").text(orderData.orderId);
+    if (!labelSettings?.warehouseSettings.hideGstNumber) {
+      doc.font("Helvetica-Bold").text(`GSTIN No: `, { continued: true });
+      doc.font("Helvetica").text(orderData.otherDetails.gstin);
+    }
 
     // Order barcode
     const barcodeX = 380;
@@ -198,15 +202,17 @@ router.get("/generate-pdf/:id", async (req, res) => {
     // Dynamically build columns and headers
     const columns = [];
     if (!labelSettings?.productDetails.hideSKU || labelSettings == null)
-      columns.push({ key: "sku", title: "SKU", width: 90 });
+      columns.push({ key: "sku", title: "SKU", width: 65 });
     if (!labelSettings?.productDetails.hideProduct || labelSettings == null)
       columns.push({ key: "name", title: "Item Name", width: 220 });
+    if (!labelSettings?.productDetails.hideHSN || labelSettings == null)
+      columns.push({ key: "hsn", title: "HSN", width: 65 });
     if (!labelSettings?.productDetails.hideQty || labelSettings == null)
-      columns.push({ key: "quantity", title: "Qty.", width: 40 });
+      columns.push({ key: "quantity", title: "Qty.", width: 35 });
     if (!labelSettings?.productDetails.hideOrderAmount || labelSettings == null)
-      columns.push({ key: "unitPrice", title: "Unit Price", width: 100 });
+      columns.push({ key: "unitPrice", title: "Unit Price", width: 80 });
     if (!labelSettings?.productDetails.hideTotalAmount || labelSettings == null)
-      columns.push({ key: "totalAmount", title: "Total Amount", width: 100 });
+      columns.push({ key: "totalAmount", title: "Total Amount", width: 85 });
 
     // Adjust last column width so table fills full width to right margin
     const tableLeft = 20;
@@ -223,12 +229,13 @@ router.get("/generate-pdf/:id", async (req, res) => {
     const hasTable = columns.length > 0;
 
     if (hasTable && orderData.productDetails.length > 0) {
-      // Table positions
-      let tableTop = doc.y;
-      let tableLeft = 20;
-      let rowHeight = 20;
+      const tableTop = doc.y;
+      const tableLeft = 20;
+      const headerHeight = 20;
 
-      // Table Header Background & Borders
+      const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
+
+      // ===== HEADER =====
       let x = tableLeft;
       columns.forEach((col) => {
         doc
@@ -237,72 +244,91 @@ router.get("/generate-pdf/:id", async (req, res) => {
           .text(col.title, x + 5, tableTop + 5, { width: col.width - 10 });
         x += col.width;
       });
-      // Borders
+
+      // Draw header borders
       doc
         .moveTo(tableLeft, tableTop)
-        .lineTo(
-          tableLeft + columns.reduce((sum, col) => sum + col.width, 0),
-          tableTop
-        )
-        .stroke();
-      doc
-        .moveTo(tableLeft, tableTop + rowHeight)
-        .lineTo(
-          tableLeft + columns.reduce((sum, col) => sum + col.width, 0),
-          tableTop + rowHeight
-        )
+        .lineTo(tableLeft + tableWidth, tableTop)
         .stroke();
 
-      // Draw vertical borders
-      x = tableLeft;
-      columns.forEach((col) => {
-        doc
-          .moveTo(x, tableTop)
-          .lineTo(
-            x,
-            tableTop + rowHeight + orderData.productDetails.length * rowHeight
-          )
-          .stroke();
-        x += col.width;
-      });
-      // Right border
       doc
-        .moveTo(x, tableTop)
-        .lineTo(
-          x,
-          tableTop + rowHeight + orderData.productDetails.length * rowHeight
-        )
+        .moveTo(tableLeft, tableTop + headerHeight)
+        .lineTo(tableLeft + tableWidth, tableTop + headerHeight)
         .stroke();
 
-      // Draw bottom border after all rows
-      const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
-      const bottomY =
-        tableTop + rowHeight + orderData.productDetails.length * rowHeight;
-      doc
-        .moveTo(tableLeft, bottomY)
-        .lineTo(tableLeft + tableWidth, bottomY)
-        .stroke();
+      // ===== ROWS WITH DYNAMIC HEIGHTS =====
 
-      // Rows
-      orderData.productDetails.forEach((product, i) => {
-        let y = tableTop + rowHeight + i * rowHeight;
-        x = tableLeft;
-        columns.forEach((col) => {
+      let currentY = tableTop + headerHeight;
+
+      orderData.productDetails.forEach((product, rowIndex) => {
+        // 1️⃣ Calculate wrapped text heights for each cell
+        const cellHeights = columns.map((col) => {
           let value;
+
           if (col.key === "totalAmount") {
             value = (product.quantity * product.unitPrice).toString();
           } else {
-            value = product[col.key]?.toString() ?? "";
+            value = product[col.key]?.toString() || "";
           }
+
+          return doc.heightOfString(value, {
+            width: col.width - 10,
+            align: "left",
+          });
+        });
+
+        // 2️⃣ Row height = tallest cell height + padding
+        const rowHeight = Math.max(...cellHeights) + 10;
+
+        // 3️⃣ Draw row text
+        x = tableLeft;
+        columns.forEach((col, index) => {
+          let value;
+
+          if (col.key === "totalAmount") {
+            value = (product.quantity * product.unitPrice).toString();
+          } else {
+            value = product[col.key]?.toString() || "";
+          }
+
           doc
             .font("Helvetica")
             .fontSize(12)
-            .text(value, x + 5, y + 5, { width: col.width - 10 });
+            .text(value, x + 5, currentY + 5, {
+              width: col.width - 10,
+              align: "left",
+            });
+
           x += col.width;
         });
+
+        // 4️⃣ Draw row borders
+        doc
+          .moveTo(tableLeft, currentY)
+          .lineTo(tableLeft + tableWidth, currentY)
+          .stroke();
+
+        doc
+          .moveTo(tableLeft, currentY + rowHeight)
+          .lineTo(tableLeft + tableWidth, currentY + rowHeight)
+          .stroke();
+
+        currentY += rowHeight; // Move to next row start
       });
+
+      // ===== FINAL RIGHT & VERTICAL BORDERS =====
+      let vx = tableLeft;
+      columns.forEach((col) => {
+        doc.moveTo(vx, tableTop).lineTo(vx, currentY).stroke();
+        vx += col.width;
+      });
+
+      // Final right border
+      doc.moveTo(vx, tableTop).lineTo(vx, currentY).stroke();
+
       doc.moveDown(2);
     }
+
     // ======= END Table Section =======
 
     // Pickup Address

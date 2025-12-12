@@ -97,7 +97,7 @@ app.get("/download-invoice/:id", async (req, res) => {
     s(pickup.state),
     s(pickup.pinCode),
     `Phone: ${s(pickup.phoneNumber)}`,
-    "GSTIN: N/A",
+    `GSTIN: ${(order.otherDetails.gstin)}`,
     `Email: ${s(pickup.email)}`,
   ]);
 
@@ -189,6 +189,8 @@ app.get("/download-invoice/:id", async (req, res) => {
           [
             "S.No",
             "Product Name",
+            "SKU",
+            "HSN",
             "Quantity",
             "Unit Price",
             "SGST",
@@ -206,7 +208,7 @@ app.get("/download-invoice/:id", async (req, res) => {
   // Draw header
   doc.font("Helvetica-Bold").fontSize(12);
   let y = drawRow(
-    ["S.No", "Product Name", "Quantity", "Unit Price", "SGST", "CGST", "Total"],
+    ["S.No", "Product Name","SKU","HSN", "Quantity", "Unit Price", "SGST", "CGST", "Total"],
     doc.y,
     true
   );
@@ -227,6 +229,7 @@ app.get("/download-invoice/:id", async (req, res) => {
     const row = [
       String(i + 1),
       s(p.name),
+      s(p.sku),
       String(qty),
       f2(unit),
       f2(sgst),
