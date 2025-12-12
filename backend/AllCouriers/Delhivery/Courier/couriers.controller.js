@@ -221,6 +221,13 @@ const createOrder = async (req, res) => {
           products_desc: currentOrder.productDetails
             .map((p) => p.name)
             .join(", "),
+          hsn_code: currentOrder.productDetails
+            .map((product) => product.hsn)
+            .join(", "),
+          ewbn:
+            currentOrder?.paymentDetails?.amount >= 50000
+              ? currentOrder?.otherDetails?.ewaybill
+              : "",
           total_amount: currentOrder.paymentDetails.amount,
           name: currentOrder.receiverAddress.contactName || "Default Warehouse",
           weight: currentOrder.packageDetails.applicableWeight * 1000,
@@ -441,7 +448,7 @@ const trackShipmentDelhivery = async (waybill) => {
 
     // Extract scans and remove the ScanDetail key
     const scans = shipmentData.Scans?.map((item) => item.ScanDetail) || [];
-    console.log("ship",scans)
+    console.log("ship", scans);
     return {
       success: true,
       id: shipmentData.ReferenceNo,

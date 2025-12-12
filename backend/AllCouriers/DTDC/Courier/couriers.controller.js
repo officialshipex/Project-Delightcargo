@@ -143,7 +143,10 @@ const createOrder = async (req, res) => {
           weight: currentOrder.packageDetails.applicableWeight,
           declared_value: currentOrder.paymentDetails.amount,
           num_pieces: currentOrder.productDetails.length,
-
+          eway_bill:
+            currentOrder?.paymentDetails?.amount >= 50000
+              ? currentOrder?.otherDetails?.ewaybill
+              : "",
           origin_details: {
             name: currentOrder.pickupAddress.contactName,
             phone: currentOrder.pickupAddress.phoneNumber,
@@ -507,6 +510,3 @@ module.exports = {
   trackOrderDTDC,
   checkServiceabilityDTDC,
 };
-
-
-

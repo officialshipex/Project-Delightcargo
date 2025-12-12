@@ -91,6 +91,7 @@ const createOneClickShipment = async (req, res) => {
       origin: currentOrder.pickupAddress,
       destination: currentOrder.receiverAddress,
       payment_type: currentOrder.paymentDetails?.method,
+      gstin:currentOrder?.otherDetails?.gstin,
       order_amount: currentOrder.paymentDetails?.amount || 0,
       weight: weight || 0,
       length: currentOrder.packageDetails.volumetricWeight?.length || 0,
@@ -472,7 +473,7 @@ const checkAmazonServiceability = async (provider, payload) => {
       taxDetails: [
         {
           taxType: "GST",
-          taxRegistrationNumber: "06FKCPS6109D3Z7",
+          taxRegistrationNumber: payload?.gstin || "06FKCPS6109D3Z7",
         },
       ],
       channelDetails: {

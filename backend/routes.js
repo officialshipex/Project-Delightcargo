@@ -59,6 +59,8 @@ const referralRoute=require("./Referral/referal.router")
 const Notification=require("./notification/notification.router")
 const webhook=require("./webhook/webhook.router")
 const Invoice=require("./Invoice/invoice.router")
+const B2B=require("./B2B/routes");
+router.use("/b2b",B2B);
 
 router.use("/notification",Notification);
 

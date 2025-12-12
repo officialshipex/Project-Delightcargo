@@ -271,7 +271,7 @@ const createOrderZipypost = async (
       }
     );
 
-    console.log("📦 ZipyPost response:", response.data);
+    // console.log("📦 ZipyPost response:", response.data);
 
     if (response.data.success && response.data.booking === true) {
       const result = response.data.RESULT;

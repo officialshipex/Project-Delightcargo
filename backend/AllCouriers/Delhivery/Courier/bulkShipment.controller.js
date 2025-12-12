@@ -98,7 +98,14 @@ const createShipmentFunctionDelhivery = async (
           products_desc: currentOrder.productDetails
             .map((product) => product.name)
             .join(", "),
+          hsn_code: currentOrder.productDetails
+            .map((product) => product.hsn)
+            .join(", "),
           total_amount: currentOrder.paymentDetails.amount,
+          ewbn:
+            currentOrder?.paymentDetails?.amount >= 50000
+              ? currentOrder?.otherDetails?.ewaybill
+              : "",
           name: currentOrder.receiverAddress.contactName || "Default Warehouse",
           weight: currentOrder.packageDetails.applicableWeight * 1000,
           shipment_height: currentOrder.packageDetails.volumetricWeight.height,
@@ -120,7 +127,7 @@ const createShipmentFunctionDelhivery = async (
     let currentWallet = await Wallet.findById(walletId);
     const walletHoldAmount = currentWallet?.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    const balance= effectiveBalance + currentWallet.creditLimit;
+    const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance >= finalCharges) {
       const response = await axios.post(delUrl, payload, {
         headers: {
@@ -163,7 +170,7 @@ const createShipmentFunctionDelhivery = async (
         };
 
         const updatedWallet = await Wallet.findOneAndUpdate(
-          { _id: walletId},
+          { _id: walletId },
           {
             $inc: { balance: -parseFloat(finalCharges) },
             $push: { transactions: transaction },
