@@ -82,7 +82,7 @@ const createOrderDTDC = async (
     }
     const walletHoldAmount = currentWallet?.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    const balance= effectiveBalance + currentWallet.creditLimit;
+    const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < charges) {
       return { success: false, message: "Insufficient Wallet Balance" };
     }
@@ -122,7 +122,10 @@ const createOrderDTDC = async (
           weight: currentOrder.packageDetails.applicableWeight,
           declared_value: currentOrder.paymentDetails.amount,
           num_pieces: currentOrder.productDetails.length,
-
+          eway_bill:
+            currentOrder?.paymentDetails?.amount >= 50000
+              ? currentOrder?.otherDetails?.ewaybill
+              : "",
           origin_details: {
             name: currentOrder.pickupAddress.contactName,
             phone: currentOrder.pickupAddress.phoneNumber,
@@ -204,7 +207,8 @@ const createOrderDTDC = async (
               channelOrderId: currentOrder.orderId,
               category: "debit",
               amount: charges,
-              balanceAfterTransaction: currentWallet.balance - parseFloat(charges),
+              balanceAfterTransaction:
+                currentWallet.balance - parseFloat(charges),
               date: new Date(),
               awb_number: result.reference_number,
               description: "Freight Charges Applied",

@@ -64,6 +64,14 @@ const downloadSampleExcel = async (req, res) => {
       },
 
       { header: "*Method (COD/Prepaid)", key: "method", width: 20 },
+      {
+        header:"Reseller Name (Optional)",key:"resellerName", width:40,
+      },
+      {
+        header:"GSTIN (Optional)",key:"gstin",width:40
+      },{
+        header:"GST E-Waybill Number",key:"ewaybill",width:40
+      }
     ];
 
     // Add a sample row with mandatory product 1 and optional products
@@ -100,6 +108,9 @@ const downloadSampleExcel = async (req, res) => {
       product3_price: "",
 
       method: "Prepaid",
+      resellerName:"",
+      gstin:"",
+      ewaybill:""
     });
 
     // Format the header row
@@ -249,7 +260,7 @@ const bulkOrder = async (req, res) => {
 
     // Parse the file based on its extension
     if (fileExtension === ".csv") {
-      orders = await parseCSV(req.file.path, fileData);
+      // orders = await parseCSV(req.file.path, fileData);
     } else if (fileExtension === ".xlsx" || fileExtension === ".xls") {
       orders = await parseExcel(req.file.path);
     } else {
@@ -389,6 +400,11 @@ const bulkOrder = async (req, res) => {
               width: parseFloat(row["*Width (cm)"] || 0),
               height: parseFloat(row["*Height (cm)"] || 0),
             },
+          },
+          otherDetails:{
+            resellerName:row["Reseller Name (Optional)"],
+            gstin:row["GSTIN (Optional)"],
+            ewaybill:row["GST E-Waybill Number"]
           },
           channel: "custom",
           compositeOrderId,

@@ -450,68 +450,98 @@ async function scheduleMonthlyInvoiceCron() {
 /* -------------------------------------------------------
    Helper: Build Query From req.query
 ----------------------------------------------------------*/
-function buildInvoiceFilters(query) {
+const buildInvoiceFilters = (query) => {
   const filters = {};
 
-  // 1. Filter by invoiceNumber
-  if (query.invoiceNumber) {
-    filters.invoiceNumber = query.invoiceNumber.trim();
+  if (query.userId) filters.userId = query.userId;
+  if (query.invoiceNumber) filters.invoiceNumber = query.invoiceNumber;
+
+  let month = query.month ? Number(query.month) - 1 : null;
+  let year = query.year ? Number(query.year) : null;
+
+  // ⭐ If user selects month but NOT year → auto-set current year
+  if (month !== null && year === null) {
+    year = new Date().getFullYear();
   }
 
-  // 2. Filter by userId (admin only)
-  if (query.userId) {
-    filters.userId = query.userId;
+  // ⭐ Case 1: Month + Year → Filter by specific month
+  if (month !== null && year !== null) {
+    const startDate = new Date(year, month, 1);
+    const endDate = new Date(year, month + 1, 1);
+
+    filters.$or = [
+      { periodStart: { $gte: startDate, $lt: endDate } },
+      { periodEnd: { $gte: startDate, $lt: endDate } },
+    ];
+
+    return filters;
   }
 
-  // 3. Filter by exact date (invoice creation date)
-  if (query.date) {
-    const d = new Date(query.date);
-    const start = new Date(d.setHours(0, 0, 0, 0));
-    const end = new Date(d.setHours(23, 59, 59, 999));
-    filters.createdAt = { $gte: start, $lte: end };
+  // ⭐ Case 2: Year only → Filter entire year
+  if (month === null && year !== null) {
+    const startOfYear = new Date(year, 0, 1);
+    const endOfYear = new Date(year + 1, 0, 1);
+
+    filters.$or = [
+      { periodStart: { $gte: startOfYear, $lt: endOfYear } },
+      { periodEnd: { $gte: startOfYear, $lt: endOfYear } },
+    ];
+
+    return filters;
   }
 
-  // 4. Filter by month + year
-  if (query.month && query.year) {
-    const year = Number(query.year);
-    const month = Number(query.month) - 1; // 0-based
-    const start = new Date(year, month, 1);
-    const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
-    filters.createdAt = { $gte: start, $lte: end };
-  }
-
+  // ⭐ Case 3: No month & no year → return all invoices
   return filters;
-}
+};
 
 /* -------------------------------------------------------
    Admin Controller — Fetch All Invoices
 ----------------------------------------------------------*/
 const adminGetInvoices = async (req, res) => {
   try {
-    // Check admin
     if (!req.user?.isAdmin) {
       return res.status(403).json({ success: false, message: "Unauthorized" });
     }
-
+    // console.log("req.query", req.query);
     const filters = buildInvoiceFilters(req.query);
 
     const invoices = await Invoice.find(filters).sort({ createdAt: -1 });
 
+    if (!invoices.length) {
+      return res.json({ success: true, total: 0, invoices: [] });
+    }
+
+    const userIds = [...new Set(invoices.map((i) => i.userId))];
+
+    const users = await User.find(
+      { _id: { $in: userIds } },
+      { fullname: 1, email: 1, phoneNumber: 1, userId: 1 }
+    ).lean();
+
+    const userMap = {};
+    users.forEach((u) => {
+      userMap[u._id] = {
+        fullname: u.fullname || "",
+        email: u.email || "",
+        phoneNumber: u.phoneNumber || "",
+        userId: u.userId || "",
+      };
+    });
+
     const result = invoices.map((inv) => ({
       invoiceNumber: inv.invoiceNumber,
-      totalShipments: inv.includedAwbs ? inv.includedAwbs.length : 0,
+      totalShipments: inv.includedAwbs?.length || 0,
       invoiceDate: inv.createdAt.toISOString().split("T")[0],
+      periodStart: inv.periodStart.toISOString().split("T")[0],
+      periodEnd: inv.periodEnd.toISOString().split("T")[0],
       invoiceUrl: inv.s3Url || null,
       amount: inv.totalAmount,
       status: inv.status,
-      userId: inv.userId, // admin sees this too
+      userId: inv.userId,
+      userDetails: userMap[inv.userId] || {},
     }));
 
-    return res.json({
-      success: true,
-      total: result.length,
-      invoices: result,
-    });
+    return res.json({ success: true, total: result.length, invoices: result });
   } catch (err) {
     console.error("adminGetInvoices error:", err);
     return res.status(500).json({ success: false, message: err.message });
@@ -525,15 +555,24 @@ const userGetInvoices = async (req, res) => {
   try {
     const userId = req.user._id;
 
+    // Apply filters + force user restriction
     const filters = buildInvoiceFilters(req.query);
-    filters.userId = userId; // Force user restriction
+    filters.userId = userId;
 
+    // Fetch invoices
     const invoices = await Invoice.find(filters).sort({ createdAt: -1 });
 
+    if (!invoices.length) {
+      return res.json({ success: true, total: 0, invoices: [] });
+    }
+
+    // Build response similar to adminGetInvoices but without userDetails
     const result = invoices.map((inv) => ({
       invoiceNumber: inv.invoiceNumber,
-      totalShipments: inv.includedAwbs ? inv.includedAwbs.length : 0,
+      totalShipments: inv.includedAwbs?.length || 0,
       invoiceDate: inv.createdAt.toISOString().split("T")[0],
+      periodStart: inv.periodStart?.toISOString().split("T")[0] || null,
+      periodEnd: inv.periodEnd?.toISOString().split("T")[0] || null,
       invoiceUrl: inv.s3Url || null,
       amount: inv.totalAmount,
       status: inv.status,

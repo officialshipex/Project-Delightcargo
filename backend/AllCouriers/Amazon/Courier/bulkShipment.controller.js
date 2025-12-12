@@ -16,7 +16,7 @@ const createShipmentAmazon = async (
   charges
 ) => {
   try {
-    console.log("amazon", serviceDetails, orderId, walletId, charges);
+    // console.log("amazon", serviceDetails, orderId, walletId, charges);
     const accessToken = await getAmazonAccessToken();
     if (!accessToken) {
       console.log("accesstoken");
@@ -25,7 +25,7 @@ const createShipmentAmazon = async (
 
     const currentOrder = await Order.findById(orderId);
     if (!currentOrder) {
-      console.log("order");
+      // console.log("order");
       return { success: false, message: "Order not found" };
     }
 
@@ -43,7 +43,7 @@ const createShipmentAmazon = async (
       // res
     );
     if (!zone) {
-      console.log("sone");
+      // console.log("sone");
       return res.status(400).json({ message: "Pincode not serviceable" });
     }
 
@@ -93,6 +93,7 @@ const createShipmentAmazon = async (
       origin: currentOrder.pickupAddress,
       destination: currentOrder.receiverAddress,
       payment_type: currentOrder.paymentDetails?.method,
+      gstin:currentOrder?.otherDetails?.gstin,
       order_amount: currentOrder.paymentDetails?.amount || 0,
       weight: weight || 0,
       length: currentOrder.packageDetails.volumetricWeight?.length || 0,

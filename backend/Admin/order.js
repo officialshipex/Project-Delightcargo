@@ -22,6 +22,9 @@ const filterOrdersForEmployee = async (req, res) => {
 
     const filter = {};
 
+    // Include only B2C + older orders without orderType
+    filter.$or = [{ orderType: "B2C" }, { orderType: { $exists: false } }];
+
     // Order-level filters
     if (orderId && !isNaN(orderId)) {
       filter.orderId = Number(orderId);
@@ -247,7 +250,7 @@ const filterDelayDeliveredOrders = async (req, res) => {
       page = 1,
       limit = 20,
     } = req.query;
-// console.log("req query",req.query)
+    // console.log("req query",req.query)
     const filter = {};
 
     // --------------------------------------
@@ -359,7 +362,6 @@ const filterDelayDeliveredOrders = async (req, res) => {
         $in: allocatedUserIds.map((id) => new mongoose.Types.ObjectId(id)),
       };
     }
-    
 
     // ---------------------------
     // QUERY ORDERS (NO STATUS FILTER)
@@ -372,7 +374,7 @@ const filterDelayDeliveredOrders = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
-// console.log("hi")
+    // console.log("hi")
     // -------------------------------------------
     // ⭐ FILTER: DELAY DELIVERED ORDERS ONLY
     // currentDate > estimateDeliveryDate

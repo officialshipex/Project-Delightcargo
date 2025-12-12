@@ -64,9 +64,12 @@ const newOrder = async (req, res) => {
       productDetails,
       packageDetails,
       paymentDetails,
+      otherDetails,
+      orderType,
+      B2BPackageDetails,
       // commodityId,
     } = req.body;
-    console.log(req.body);
+    // console.log(req.body);
 
     // Validate request data
     if (
@@ -105,9 +108,12 @@ const newOrder = async (req, res) => {
       productDetails,
       packageDetails,
       paymentDetails,
+      otherDetails,
       compositeOrderId,
       status: "new",
       channel: "custom",
+      orderType,
+      B2BPackageDetails,
       // commodityId: commodityId,
       tracking: [
         {
@@ -323,6 +329,11 @@ const getOrders = async (req, res) => {
     const skip = limit ? (page - 1) * limit : 0;
 
     const andConditions = [{ userId }];
+
+    // Include B2C + orders without orderType
+    andConditions.push({
+      $or: [{ orderType: "B2C" }, { orderType: { $exists: false } }],
+    });
 
     if (status && status !== "All") {
       const statusArray = Array.isArray(status)

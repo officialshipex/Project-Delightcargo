@@ -293,7 +293,7 @@ const messageSent = async () => {
       // 🧠 Filter out duplicate (already sent) messages
       const filteredOrders = [];
       for (const order of todayOrders) {
-        console.log("order", order);
+        // console.log("order", order);
         const existingLog = await MessageLog.findOne({
           userId,
           awb_number: order.awb_number,

@@ -324,7 +324,7 @@ const getWalletBalanceAndHoldAmount = async (req, res) => {
 
     // Step 2: Fetch balance and holdAmount from wallet
     const wallet = await Wallet.findById(user.Wallet)
-      .select("balance holdAmount")
+      .select("balance holdAmount creditLimit")
       .lean();
 
     if (!wallet) {
@@ -336,6 +336,7 @@ const getWalletBalanceAndHoldAmount = async (req, res) => {
       success: true,
       balance: wallet.balance || 0,
       holdAmount: wallet.holdAmount || 0,
+      creditLimit: wallet.creditLimit || 0,
     });
   } catch (error) {
     console.error("Error fetching wallet balance and holdAmount:", error);
