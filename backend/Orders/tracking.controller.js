@@ -280,7 +280,7 @@ const trackSingleOrder = async (order) => {
             balanceTobeAdded =
               order.totalFreightCharges === "N/A"
                 ? 0
-                : parseInt(order.totalFreightCharges);
+                : parseFloat(order.totalFreightCharges);
             shouldUpdateWallet = true;
           }
 
@@ -1098,7 +1098,7 @@ const trackSingleOrder = async (order) => {
                 category: "credit",
                 amount: balanceTobeAdded,
                 balanceAfterTransaction: updatedWallet.balance,
-                date: new Date().toISOString().slice(0, 16).replace("T", " "),
+                date: new Date(),
                 awb_number: order.awb_number || "",
                 description: "Freight Charges Received",
               },
@@ -1131,7 +1131,7 @@ const trackOrders = async () => {
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery"] },
       // ndrStatus: "Undelivered",
-      // provider: "Amazon Shipping",
+      // provider: "Dtdc",
       // awb_number: "7X105009883",
     });
 

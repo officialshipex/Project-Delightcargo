@@ -190,7 +190,7 @@ const createOneClickShipment = async (req, res) => {
         {
           status: "Booked",
           StatusLocation: currentOrder.pickupAddress?.city || "N/A",
-          StatusDateTime: new Date(),
+          StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
           Instructions: "Order booked successfully",
         },
       ],
