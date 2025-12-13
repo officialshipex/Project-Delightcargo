@@ -867,8 +867,8 @@ const updatePickupAddress = async (req, res) => {
 const updateOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
-    console.log("orderId", orderId);
-    const { pickupAddress, receiverAddress, paymentDetails, packageDetails } =
+    // console.log("orderId", orderId);
+    const { pickupAddress, receiverAddress, paymentDetails, packageDetails,otherDetails } =
       req.body;
 
     console.log(req.body);
@@ -948,6 +948,13 @@ const updateOrder = async (req, res) => {
             packageDetails.volumetricWeight?.height ||
             existingOrder.packageDetails.volumetricWeight.height,
         },
+      };
+    }
+
+    // Ensure otherDetails exist before updating
+    if (otherDetails) {
+      updateFields.otherDetails = {
+        gstin: otherDetails.gstin || existingOrder.otherDetails.gstin,
       };
     }
 

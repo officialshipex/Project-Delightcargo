@@ -305,7 +305,7 @@ const createOrder = async (req, res) => {
             tracking: {
               status: "Booked",
               StatusLocation: currentOrder.pickupAddress?.city || "N/A",
-              StatusDateTime: new Date(),
+              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
               Instructions: "Order booked successfully",
             },
           },
@@ -448,7 +448,7 @@ const trackShipmentDelhivery = async (waybill) => {
 
     // Extract scans and remove the ScanDetail key
     const scans = shipmentData.Scans?.map((item) => item.ScanDetail) || [];
-    console.log("ship", scans);
+    // console.log("ship", scans);
     return {
       success: true,
       id: shipmentData.ReferenceNo,
