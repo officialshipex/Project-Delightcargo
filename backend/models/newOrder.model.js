@@ -69,9 +69,9 @@ const orderSchema = new mongoose.Schema(
     productDetails: [
       {
         id: { type: Number, required: true },
-        quantity: { type: Number},
+        quantity: { type: Number },
         name: { type: String },
-        hsn: { type: String},
+        hsn: { type: String },
         sku: { type: String },
         unitPrice: { type: String },
         category: { type: String },
@@ -80,8 +80,8 @@ const orderSchema = new mongoose.Schema(
       },
     ],
     packageDetails: {
-      deadWeight: { type: Number},
-      applicableWeight: { type: Number},
+      deadWeight: { type: Number },
+      applicableWeight: { type: Number },
       volumetricWeight: {
         length: { type: Number },
         width: { type: Number },
@@ -133,6 +133,10 @@ const orderSchema = new mongoose.Schema(
     },
 
     awb_number: { type: String },
+    child_awb_numbers: {
+      type: [String],
+      default: [],
+    },
     label: { type: String },
     manifest: { type: String },
     shipment_id: { type: String },

@@ -15,4 +15,4 @@ const courierPincodeSchema = new mongoose.Schema({
   ],
 }, { timestamps: true });
 
-module.exports = mongoose.model("CourierPincode", courierPincodeSchema);
+module.exports = mongoose.model("B2BCourierPincode", courierPincodeSchema);

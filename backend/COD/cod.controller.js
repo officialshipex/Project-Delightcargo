@@ -452,7 +452,11 @@ const processAndRemit = async (plan) => {
     (charges + creditedAmount + extraAmount).toFixed(2)
   );
   const codToBeRemitted = Number(remittanceData.CODToBeRemitted);
-  const codToBeDeducted = remainingRecharge;
+  const totalCodConsumed = Number(
+    (remainingRecharge + creditedAmount).toFixed(2)
+  );
+  const codToBeDeducted = totalCodConsumed;
+
   // Prepare remittance entry
   const totalCodResult = Number((remainingRecharge - charges).toFixed(2));
   const remittanceEntryForUser = {
@@ -473,7 +477,7 @@ const processAndRemit = async (plan) => {
     { userId: plan.userId, CODToBeRemitted: { $gte: codToBeDeducted } }, // ensure enough COD
     {
       $inc: {
-        CODToBeRemitted: -remainingRecharge,
+        CODToBeRemitted: -totalCodConsumed,
         RemittanceInitiated: payoutToClient,
         TotalDeductionfromCOD: TotalDeduction,
       },
@@ -2427,7 +2431,7 @@ const getCODTransferData = async (req, res) => {
 
     const walletBalance = wallet.balance || 0;
     const holdAmount = wallet.holdAmount || 0; // adjust field name if different
-    const creditLimit=wallet.creditLimit || 0;
+    const creditLimit = wallet.creditLimit || 0;
 
     // Return only selected remittance entries
     return res.status(200).json({
