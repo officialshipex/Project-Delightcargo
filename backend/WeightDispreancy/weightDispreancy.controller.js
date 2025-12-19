@@ -115,6 +115,7 @@ const uploadDispreancy = async (req, res) => {
 
       const order = orderMap.get(awb);
       if (!order) continue;
+      if (order.status==="Booked" || order.status==="Not Picked" || order.status==="Ready To Ship") continue;
 
       const userId = order.userId.toString();
       let userPlan = planCache.get(userId);
@@ -1214,6 +1215,66 @@ const exportWeightDiscrepancy = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+
+// const checkNonDeliveredDisputes = async () => {
+//   try {
+    
+//     const discrepancies = await WeightDiscrepancy.find({
+//       status: "new",
+//     }).select("awbNumber");
+
+//     if (!discrepancies.length) {
+//       console.log("No NEW weight discrepancies found.");
+//       return;
+//     }
+
+   
+//     const awbNumbers = discrepancies.map((d) => d.awbNumber);
+
+    
+//     const orders = await Order.find(
+//       { awb_number: { $in: awbNumbers } },
+//       { awb_number: 1, status: 1 }
+//     );
+
+   
+//     const orderMap = new Map(orders.map((o) => [o.awb_number, o]));
+
+   
+//     let nonDeliveredCount = 0;
+//     const nonDeliveredDetails = [];
+
+//     for (const d of discrepancies) {
+//       const order = orderMap.get(d.awbNumber);
+
+//       if (!order || order.status === "Not Picked" || order.status==="Booked" || order.status==="Ready To Ship") {
+//         nonDeliveredCount++;
+
+//         nonDeliveredDetails.push({
+//           awbNumber: d.awbNumber,
+//           orderStatus: order?.status || "ORDER_NOT_FOUND",
+//         });
+//       }
+//     }
+
+    
+//     console.log("========== DISPUTE DELIVERY CHECK ==========");
+//     console.log(`Total NEW disputes        : ${discrepancies.length}`);
+//     console.log(`Not Delivered Disputes    : ${nonDeliveredCount}`);
+//     console.log("-------------------------------------------");
+
+//     nonDeliveredDetails.forEach((item, index) => {
+//       console.log(
+//         `${index + 1}. AWB: ${item.awbNumber} | Status: ${item.orderStatus}`
+//       );
+//     });
+
+//     console.log("===========================================");
+//   } catch (error) {
+//     console.error("Error checking dispute delivery status:", error);
+//   }
+// };
+
 
 module.exports = {
   downloadExcel,

@@ -26,7 +26,7 @@ const loadCSV = async () => {
     state: row.state?.trim(),
   }));
 
-  console.log("✅ Sample row:", cache[0]);
+//   console.log("✅ Sample row:", cache[0]);
   return cache;
 };
 

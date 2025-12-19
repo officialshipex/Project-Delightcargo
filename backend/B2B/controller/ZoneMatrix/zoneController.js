@@ -1,11 +1,35 @@
 const ZoneMapping = require("../../models/zoneMatrix.model");
 const { findByPincode } = require("../../pincodeLoader");
+const User =require("../../../models/User.model")
+
+/**
+ * 🔐 Admin Access Check (Reusable)
+ */
+const checkAdminAccess = async (req, res) => {
+  const userId = req.user?._id;
+
+  if (!userId) {
+    res.status(401).json({ message: "Unauthorized" });
+    return null;
+  }
+
+  const user = await User.findById(userId);
+
+  if (!user || !user.isAdmin || !user.adminTab) {
+    res.status(403).json({ message: "Access denied" });
+    return null;
+  }
+
+  return user;
+};
 
 /**
  * GET all zones with locations
  */
 exports.getAll = async (req, res) => {
   try {
+    const admin = await checkAdminAccess(req, res);
+    if (!admin) return;
     const data = await ZoneMapping.find().sort({ createdAt: -1 });
     res.json(data);
   } catch (err) {
@@ -21,6 +45,8 @@ exports.getAll = async (req, res) => {
  */
 exports.addLocation = async (req, res) => {
   try {
+    const admin = await checkAdminAccess(req, res);
+    if (!admin) return;
     const { zone, locations } = req.body;
 
     if (!zone || !Array.isArray(locations) || locations.length === 0) {
@@ -39,9 +65,11 @@ exports.addLocation = async (req, res) => {
 
     if (existing) {
       return res.status(409).json({
-        message: `"${existing.locations.find(l =>
-          cleanLocations.some(c => c.name === l.name)
-        )?.name}" already mapped in zone ${existing.zone}`,
+        message: `"${
+          existing.locations.find((l) =>
+            cleanLocations.some((c) => c.name === l.name)
+          )?.name
+        }" already mapped in zone ${existing.zone}`,
       });
     }
 
@@ -68,6 +96,8 @@ exports.addLocation = async (req, res) => {
  */
 exports.removeLocation = async (req, res) => {
   try {
+    const admin = await checkAdminAccess(req, res);
+    if (!admin) return;
     const { zone, name } = req.body;
 
     if (!zone || !name) {
@@ -91,6 +121,8 @@ exports.removeLocation = async (req, res) => {
  */
 exports.removeZone = async (req, res) => {
   try {
+    const admin = await checkAdminAccess(req, res);
+    if (!admin) return;
     const { id } = req.params;
     await ZoneMapping.findByIdAndDelete(id);
     res.json({ success: true });
@@ -105,6 +137,8 @@ exports.removeZone = async (req, res) => {
  */
 exports.lookupPincode = async (req, res) => {
   try {
+    const admin = await checkAdminAccess(req, res);
+    if (!admin) return;
     const { pincode } = req.query;
 
     if (!pincode) {
