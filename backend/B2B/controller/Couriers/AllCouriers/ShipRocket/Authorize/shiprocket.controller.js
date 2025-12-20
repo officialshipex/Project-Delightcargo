@@ -51,8 +51,7 @@ const getToken = async (req, res) => {
 const refreshToken = async () => {
   try {
     const REFRESH_TOKEN = process.env.SHIPROCKET_CARGO_REFRESH_TOKEN;
-    const AUTH_TOKEN = process.env.SHIPROCKET_CARGO_AUTH_TOKEN; // demo / portal token
-    const BASE_URL = process.env.B2B_SHIPROCKET_URL || "https://api-cargo.shiprocket.in";
+    const AUTH_TOKEN = process.env.SHIPROCKET_CARGO_AUTH_TOKEN;
 
     if (!REFRESH_TOKEN || !AUTH_TOKEN) {
       throw new Error("Shiprocket Cargo AUTH or REFRESH token missing");
@@ -71,8 +70,8 @@ const refreshToken = async () => {
       }
     );
 
-   console.log("access token",response.data)
-    return response.data;
+  //  console.log("access token",response.data.access)
+    return response.data.access;
   } catch (error) {
     console.error(
       "Shiprocket Cargo Token Refresh Error:",
