@@ -9,8 +9,7 @@ const { PutObjectCommand } = require("@aws-sdk/client-s3");
 
 const generateLabel = async (req, res) => {
   try {
-    
-
+  
     const orderData = await Order.findOne({ awb_number: req.params.awb });
     // console.log("order",orderData)
 
@@ -19,9 +18,9 @@ const generateLabel = async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    if (orderData.userId.toString() !== req.user._id.toString()) {
-      return res.status(404).json({ error: "Order not found" });
-    }
+    // if (orderData.userId.toString() !== req.user._id.toString()) {
+    //   return res.status(404).json({ error: "Order not found" });
+    // }
 
     // console.log("orderData", orderData);
     if (orderData.label) {

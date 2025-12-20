@@ -864,51 +864,70 @@ const getAllPlans = async (req, res) => {
 
 const assignPlan = async (req, res) => {
   try {
-    const { userId, userName, planName, rateCards } = req.body;
-    console.log(req.body);
-    if (!planName || !rateCards) {
-      return res
-        .status(400)
-        .json({ error: "Plan name and rate card are required" });
+    const {
+      userId,
+      userName,
+      planName,
+      rateCards = [],
+      B2BRateCard = [],
+    } = req.body;
+
+    // console.log("Assign Plan Payload:", req.body);
+
+    if (!planName) {
+      return res.status(400).json({
+        error: "Plan name is required",
+      });
+    }
+
+    if (rateCards.length === 0 && B2BRateCard.length === 0) {
+      return res.status(400).json({
+        error: "At least one rate card (B2C or B2B) is required",
+      });
     }
 
     // Check if there is an existing plan for the user
     let existingPlan = await Plan.findOne({ userId });
 
-    console.log(existingPlan);
-
     if (existingPlan) {
-      // Update existing plan details (both plan name & rate cards)
+      // ✅ Update existing plan
       existingPlan.planName = planName;
       existingPlan.rateCard = rateCards;
-      existingPlan.assignedAt = new Date(); // Update timestamp
+      existingPlan.B2BRateCard = B2BRateCard; // 🔥 NEW
+      existingPlan.assignedAt = new Date();
 
       await existingPlan.save();
 
-      return res
-        .status(200)
-        .json({ message: "Plan updated successfully", plan: existingPlan });
+      return res.status(200).json({
+        message: "Plan updated successfully",
+        plan: existingPlan,
+      });
     }
 
-    // If no existing plan, create a new one
+    // ✅ Create new plan
     const newPlan = new Plan({
       userId,
       userName,
       planName,
       rateCard: rateCards,
+      B2BRateCard, // 🔥 NEW
       assignedAt: new Date(),
     });
 
     await newPlan.save();
 
-    res
-      .status(201)
-      .json({ message: "Plan assigned successfully", plan: newPlan });
+    return res.status(201).json({
+      message: "Plan assigned successfully",
+      plan: newPlan,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to assign plan" });
+    console.error("Assign Plan Error:", err);
+    return res.status(500).json({
+      error: "Failed to assign plan",
+    });
   }
 };
+
 
 const makeAdmin = async () => {
   try {

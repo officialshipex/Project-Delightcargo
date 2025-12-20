@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const {rateCardSchema}  = require("./rateCards"); // Assuming RateCard model is here
+const { rateCardSchema } = require("./rateCards"); // Assuming RateCard model is here
 
 // Define the Plan schema
 const planSchema = new mongoose.Schema({
@@ -12,7 +12,7 @@ const planSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  
+
   planName: {
     type: String,
     required: true,
@@ -21,6 +21,10 @@ const planSchema = new mongoose.Schema({
     // Make rateCard optional
     type: mongoose.Schema.Types.Mixed, // Allow it to store any object type
     required: false, // Optional
+  },
+  B2BRateCard: {
+    type: mongoose.Schema.Types.Mixed,
+    required: false,
   },
   assignedAt: {
     type: Date,

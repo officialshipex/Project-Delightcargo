@@ -1,4 +1,7 @@
-const Order=require("../../../../../../models/newOrder.model")
+const Order = require("../../../../../../models/newOrder.model");
+const BASE_URL = process.env.B2B_SHIPROCKET_URL;
+const { refreshToken } = require("../Authorize/shiprocket.controller");
+const axios = require("axios");
 
 exports.createShiprocketCargoShipment = async (req, res) => {
   try {
@@ -137,8 +140,6 @@ exports.createShiprocketCargoShipment = async (req, res) => {
     order.shipmentCreatedAt = new Date();
     order.status = "Shipment Created";
 
-    
-
     await order.save();
 
     return res.json({
@@ -192,16 +193,66 @@ exports.getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
   order.status = data.status;
 
   const awbTrackingExists = order.tracking.some(
-  (t) => t.status === "AWB Generated"
-);
+    (t) => t.status === "AWB Generated"
+  );
 
-if (!awbTrackingExists) {
-  order.tracking.push({
-    status: "AWB Generated",
-    StatusLocation: order.pickupAddress.city,
-    StatusDateTime: new Date(),
-    Instructions: "AWB auto-fetched via async job",
-  });
-}
+  if (!awbTrackingExists) {
+    order.tracking.push({
+      status: "AWB Generated",
+      StatusLocation: order.pickupAddress.city,
+      StatusDateTime: new Date(),
+      Instructions: "AWB auto-fetched via async job",
+    });
+  }
   await order.save();
 };
+
+const getCargoShipmentCharges = async () => {
+  try {
+    const accessToken = await refreshToken();
+    if (!accessToken) {
+      throw new Error("Shiprocket Cargo access token missing");
+    }
+
+    const payload = {
+      from_pincode: "122001",
+      from_city: "Gurgaon",
+      from_state: "Haryana",
+      to_pincode: "400001",
+      to_city: "Mumbai",
+      to_state: "Maharashtra",
+      quantity: 2,
+      invoice_value: 1111,
+      calculator_page: "true",
+      packaging_unit_details: [
+        {
+          units: 2,
+          length: 11,
+          height: 11,
+          weight: 12,
+          width: 11,
+          unit: "cm",
+        },
+      ],
+    };
+
+    const response = await axios.post(
+      `${BASE_URL}/api/shipment/charges/`,
+      payload,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    console.log("✅ Shiprocket Cargo Charges Response:");
+    console.log(response.data);
+  } catch (error) {
+    console.error("❌ Shiprocket Cargo Charges Error:");
+    console.error(error?.response?.data || error.message);
+  }
+};
+
+// getCargoShipmentCharges();
