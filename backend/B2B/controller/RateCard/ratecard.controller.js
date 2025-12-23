@@ -1,13 +1,14 @@
 const RateCard = require("../../models/ratecard.model");
 const CourierServiceB2B = require("../../models/courierService.model");
-const Plan = require("../../../models/createPlanName.model");
+const PlanName = require("../../../models/createPlanName.model");
 const ZoneMatrix = require("../../models/zoneMatrix.model");
 const Audit = require("../../models/ratecardAudit.model");
+const Plans = require("../../../models/Plan.model");
 
 /* ================= META ================= */
 exports.getMeta = async (req, res) => {
   const couriers = await CourierServiceB2B.find({ status: "Enable" });
-  const plans = await Plan.find();
+  const plans = await PlanName.find();
   const zones = await ZoneMatrix.find().select("zone -_id");
 
   res.json({
@@ -32,17 +33,20 @@ exports.getRateCard = async (req, res) => {
 
 /* ================= CREATE ================= */
 exports.createRateCard = async (req, res) => {
-  const { courierService, plan, rates, status,overheadCharges } = req.body;
+  const { courierService, plan, rates, status, overheadCharges } = req.body;
 
   const exists = await RateCard.findOne({ courierService, plan });
-  if (exists)
+  if (exists) {
     return res.status(409).json({ message: "Rate card already exists" });
-  const courierServiceB2B = await CourierServiceB2B.findById(courierService);
-  const planData = await Plan.findById(plan);
+  }
+
+  const courier = await CourierServiceB2B.findById(courierService);
+  const planData = await PlanName.findById(plan);
 
   const card = await RateCard.create({
     courierService,
-    courierServiceName: courierServiceB2B.name,
+    courierServiceName: courier.name,
+    courierProviderName: courier.provider,
     plan,
     planName: planData.name,
     rates,
@@ -50,6 +54,29 @@ exports.createRateCard = async (req, res) => {
     status,
     createdBy: req.user._id,
   });
+
+  const rateCardObject = buildB2BRateCardObject(card);
+
+  // 🔥 REMOVE OLD RATE CARD FOR SAME COURIER (SAFETY)
+  await Plans.updateMany(
+    {
+      planName: planData.name,
+      "B2BRateCard.courierService": courierService,
+    },
+    {
+      $pull: {
+        B2BRateCard: { courierService },
+      },
+    }
+  );
+
+  // 🔥 PUSH NEW RATE CARD
+  await Plans.updateMany(
+    { planName: planData.name },
+    {
+      $push: { B2BRateCard: rateCardObject },
+    }
+  );
 
   await Audit.create({
     rateCardId: card._id,
@@ -61,13 +88,46 @@ exports.createRateCard = async (req, res) => {
   res.status(201).json(card);
 };
 
+const buildB2BRateCardObject = (card) => ({
+  _id: card._id.toString(), // 🔥 CRITICAL FIX
+  courierService: card.courierService,
+  courierServiceName: card.courierServiceName,
+  courierProviderName: card.courierProviderName,
+  plan: card.plan,
+  planName: card.planName,
+  rates: card.rates,
+  overheadCharges: card.overheadCharges,
+  status: card.status,
+  createdAt: card.createdAt,
+  updatedAt: card.updatedAt,
+});
+
 /* ================= UPDATE ================= */
 exports.updateRateCard = async (req, res) => {
   const old = await RateCard.findById(req.params.id);
+  if (!old) {
+    return res.status(404).json({ message: "Rate card not found" });
+  }
 
   const updated = await RateCard.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
   });
+
+  const rateCardObject = buildB2BRateCardObject(updated);
+
+  const result = await Plans.updateMany(
+    { planName: updated.planName },
+    {
+      $set: {
+        "B2BRateCard.$[rc]": rateCardObject,
+      },
+    },
+    {
+      arrayFilters: [{ "rc._id": updated._id.toString() }], // 🔥 STRING MATCH
+    }
+  );
+
+  // console.log("PLAN UPDATE RESULT:", result);
 
   await Audit.create({
     rateCardId: updated._id,
@@ -83,8 +143,19 @@ exports.updateRateCard = async (req, res) => {
 /* ================= DELETE ================= */
 exports.deleteRateCard = async (req, res) => {
   const card = await RateCard.findById(req.params.id);
+  if (!card) {
+    return res.status(404).json({ message: "Rate card not found" });
+  }
 
   await RateCard.findByIdAndDelete(req.params.id);
+
+  // 🔥 IMPORTANT: match STRING _id
+  const result = await Plans.updateMany(
+    { planName: card.planName },
+    { $pull: { B2BRateCard: { _id: card._id.toString() } } }
+  );
+
+  // console.log("PLAN DELETE RESULT:", result);
 
   await Audit.create({
     rateCardId: card._id,
@@ -101,12 +172,13 @@ exports.copyRateCard = async (req, res) => {
   const { sourceId, targetCourier, targetPlan } = req.body;
 
   const source = await RateCard.findById(sourceId);
-   const courierServiceB2B = await CourierServiceB2B.findById(targetCourier);
-  const planData = await Plan.findById(targetPlan);
+  const courier = await CourierServiceB2B.findById(targetCourier);
+  const planData = await PlanName.findById(targetPlan);
 
   const newCard = await RateCard.create({
     courierService: targetCourier,
-    courierServiceName: courierServiceB2B.name,
+    courierServiceName: courier.name,
+    courierProviderName: courier.provider,
     plan: targetPlan,
     planName: planData.name,
     rates: source.rates,
@@ -114,6 +186,13 @@ exports.copyRateCard = async (req, res) => {
     status: "active",
     createdBy: req.user._id,
   });
+
+  const rateCardObject = buildB2BRateCardObject(newCard);
+
+  await Plans.updateMany(
+    { planName: planData.name },
+    { $push: { B2BRateCard: rateCardObject } }
+  );
 
   await Audit.create({
     rateCardId: newCard._id,

@@ -5,9 +5,8 @@ const axios = require("axios");
 
 exports.createShiprocketCargoShipment = async (req, res) => {
   try {
-    const { orderId } = req.body;
-
-    const order = await Order.findOne({ orderId });
+    const { id,provider,courierServiceName,finalCharges,rateBreakup } = req.body;
+    const order = await Order.findOne({ _id:id });
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -18,7 +17,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
         .json({ message: "Shiprocket Cargo supports B2B only" });
     }
 
-    const token = await getShiprocketCargoToken();
+    const token = await refreshToken();
 
     /* ================================
        STEP 1: ORDER CREATION
@@ -215,10 +214,10 @@ const getCargoShipmentCharges = async () => {
     }
 
     const payload = {
-      from_pincode: "122001",
+      from_pincode: "110019",
       from_city: "Gurgaon",
       from_state: "Haryana",
-      to_pincode: "400001",
+      to_pincode: "110017",
       to_city: "Mumbai",
       to_state: "Maharashtra",
       quantity: 2,

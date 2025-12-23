@@ -18,6 +18,9 @@ const CourierServiceSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  weight:{
+    type: Number,
+  },
   status: {
     type: String,
     required: true,

@@ -18,9 +18,9 @@ const generateLabel = async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // if (orderData.userId.toString() !== req.user._id.toString()) {
-    //   return res.status(404).json({ error: "Order not found" });
-    // }
+    if (orderData.userId.toString() !== req.user._id.toString()) {
+      return res.status(404).json({ error: "Order not found" });
+    }
 
     // console.log("orderData", orderData);
     if (orderData.label) {

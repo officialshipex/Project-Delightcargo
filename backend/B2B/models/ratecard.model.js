@@ -32,6 +32,9 @@ const RateCardSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    courierProviderName:{
+      type:String,
+    },
     plan: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Plan",

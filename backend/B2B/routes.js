@@ -20,6 +20,9 @@ const {
   loadCourierPincodes,
 } = require("./controller/Couriers/couriers.controller");
 const shiprocketRouter = require("./controller/Couriers/AllCourierRoutes/shiprocket.router");
+const {
+  ShipNowB2BOrder,
+} = require("./controller/Orders/ShipNowB2BOrder.controller");
 
 router.get("/getb2badminorder", adminB2BOrders);
 router.get("/getb2buserorder", isAuthorized, userB2BOrders);
@@ -59,8 +62,8 @@ router.post("/ratecard/copyRateCard", isAuthorized, ratecard.copyRateCard);
 router.get("/couriers/getAllCouriers", getAllCouriers);
 router.post("/couriers/updateCourierStatus", updateCourierStatus);
 router.delete("/couriers/deleteCourier/:id", deleteCourier);
-router.post("/couriers/:courier/uploadPincode",uploadPincode)
-router.get("/couriers/:courier/downloadPincode",downloadPincode)
+router.post("/couriers/:courier/uploadPincode", uploadPincode);
+router.get("/couriers/:courier/downloadPincode", downloadPincode);
 router.use("/shiprocket", shiprocketRouter);
 
 router.get("/courierServices/getAllCourierServices", getAllCourierServices);
@@ -70,5 +73,7 @@ router.put(
   updateCourierServicesStatus
 );
 router.put("/courierServices/updateCourier/:id", updateCourier);
+
+router.get("/shipNow/:id", isAuthorized, ShipNowB2BOrder);
 
 module.exports = router;

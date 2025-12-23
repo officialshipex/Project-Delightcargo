@@ -27,13 +27,14 @@ const getAllCourierServices = async (req, res) => {
 // ✅ Create New Courier Service
 const createCourier = async (req, res) => {
   try {
-    const { provider, courier, courierType, name, status } = req.body;
+    const { provider, courier, courierType, name,weight, status } = req.body;
 
     const newCourier = new CourierServicesB2B({
       provider,
       courier,
       courierType,
       name,
+      weight,
       status,
     });
 
