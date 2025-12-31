@@ -55,8 +55,8 @@ const createZipypostShipment = async ({
     // ✅ Step 3: Check wallet balance
     const hold = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - hold;
-    if (currentWallet.balance < finalCharges)
-      throw new Error("Insufficient wallet balance");
+    const balance = effectiveBalance + currentWallet.creditLimit;
+    if (balance < finalCharges) throw new Error("Insufficient wallet balance");
 
     // ✅ Step 4: Get zone (cached for speed)
     const zone = await getCachedZone(
@@ -170,6 +170,7 @@ const createZipypostShipment = async ({
         token.timestamp,
         sellerId
       );
+      // console.log("Warehouse creation result:", whResult);
 
       if (!whResult.success) {
         return {

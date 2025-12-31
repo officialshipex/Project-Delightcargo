@@ -379,7 +379,7 @@ const checkPincodeServiceabilityDelhivery = async (
       },
       params: { filter_codes: deliveryPincode },
     });
-    // console.log("delivery service", deliveryResponse.data.delivery_codes);
+    console.log("delivery service", deliveryResponse.data.delivery_codes);
     const deliveryCodes = deliveryResponse.data.delivery_codes || [];
     let deliveryServiceable = false;
 

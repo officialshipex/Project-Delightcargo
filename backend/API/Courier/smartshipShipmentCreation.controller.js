@@ -104,7 +104,8 @@ const createSmartshipShipment = async ({
     // 3️⃣ Check wallet balance
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
-    if (currentWallet.balance < finalCharges) {
+    const balance = effectiveBalance + currentWallet.creditLimit;
+    if (balance < finalCharges) {
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Insufficient Wallet Balance" };
@@ -241,7 +242,8 @@ const createSmartshipShipment = async ({
             channelOrderId: currentOrder.orderId,
             category: "debit",
             amount: parseInt(finalCharges),
-            balanceAfterTransaction: currentWallet.balance - parseInt(finalCharges),
+            balanceAfterTransaction:
+              currentWallet.balance - parseInt(finalCharges),
             date: new Date(),
             awb_number: result.awb_number,
             description: `Freight Charges Applied`,

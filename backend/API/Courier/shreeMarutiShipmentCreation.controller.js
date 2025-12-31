@@ -78,7 +78,8 @@ const createShreeMarutiShipment = async ({
     // Wallet balance check
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
-    if (currentWallet.balance < finalCharges) {
+    const balance = effectiveBalance + currentWallet.creditLimit;
+    if (balance < finalCharges) {
       await session.abortTransaction();
       await Order.findByIdAndUpdate(id, { status: "new" });
       session.endSession();
@@ -188,7 +189,6 @@ const createShreeMarutiShipment = async ({
     if (response.status === 200) {
       const result = response.data.data;
 
-      
       const balanceToBeDeducted = parseInt(finalCharges);
 
       currentOrder.status = "Booked";

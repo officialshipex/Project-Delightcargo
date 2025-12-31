@@ -3,6 +3,9 @@ const Order = require("../../../models/newOrder.model");
 const Plan = require("../../../models/Plan.model");
 const B2BRateCard = require("../../models/ratecard.model");
 const courierServiceB2B = require("../../models/courierService.model");
+const {
+  getCargoServiceableCouriers,
+} = require("../Couriers/AllCouriers/ShipRocket/Courier/couriers.controller");
 
 const normalize = (str) => str?.toLowerCase().replace(/\s+/g, "").trim();
 
@@ -118,6 +121,7 @@ const calculateB2BCargoRate = ({
   minWeight = 10,
   isCOD = false,
   orderValue = 0,
+  rovType = "ROV Owner",
 }) => {
   const divisor = resolveDivisor(rateCard.overheadCharges?.divisor);
 
@@ -142,7 +146,15 @@ const calculateB2BCargoRate = ({
   const overheads = rateCard.overheadCharges || {};
 
   const awb = calculateOverhead(overheads.awbCharges, freight, billableWeight);
-  const rov = calculateOverhead(overheads.rovOwner, freight, billableWeight);
+  let rov = 0;
+
+  if (rovType === "ROV Carrier") {
+    rov = calculateOverhead(overheads.rovCarrier, freight, billableWeight);
+  } else {
+    // Default → ROV Owner
+    rov = calculateOverhead(overheads.rovOwner, freight, billableWeight);
+  }
+
   const fsc = calculateOverhead(
     overheads.fuelSurcharge,
     freight,
@@ -221,13 +233,36 @@ const ShipNowB2BOrder = async (req, res) => {
 
     const results = [];
 
+    // 🔍 SHIPROCKET SERVICEABILITY CHECK (ONCE)
+    const serviceableCouriers = await getCargoServiceableCouriers({
+      order,
+      packages: order.B2BPackageDetails.packages,
+    });
+    // console.log("Serviceable Couriers:", serviceableCouriers);
+
     for (const rc of rateCards) {
+      // const providerName = rc.courierServiceName?.toLowerCase()?.trim();
+
+      // ❌ Skip non-serviceable courier
+      // if (!serviceableCouriers.has(providerName)) {
+      //   continue;
+      // }
+
       const courier = await courierServiceB2B
         .findById(rc.courierService)
-        .select("weight");
+        .select("weight")
+        .select("courier");
+      // console.log("Evaluating Courier Service:", courier);
+
+      const serviceName = courier?.courier?.toLowerCase()?.trim() || "";
+      // console.log("Evaluating Courier Service:", serviceName);
+      // ❌ Skip non-serviceable courier
+      if (!serviceableCouriers.includes(serviceName)) {
+        continue;
+      }
+
       const minWeight = courier?.weight || 10;
       const isCOD = order.paymentDetails?.method?.toUpperCase() === "COD";
-
       const orderValue = Number(order.paymentDetails?.amount || 0);
 
       const working = calculateB2BCargoRate({
@@ -238,8 +273,8 @@ const ShipNowB2BOrder = async (req, res) => {
         minWeight,
         isCOD,
         orderValue,
+        rovType: order.rovType,
       });
-      // console.log("working:", working);
 
       if (!working) continue;
 
@@ -271,4 +306,12 @@ const ShipNowB2BOrder = async (req, res) => {
   }
 };
 
-module.exports = { ShipNowB2BOrder };
+module.exports = {
+  ShipNowB2BOrder,
+  getZoneByCityOrState,
+  calculateChargeableWeight,
+  calculateOverhead,
+  resolveDivisor,
+  calculateCodCharge,
+  calculateB2BCargoRate,
+};

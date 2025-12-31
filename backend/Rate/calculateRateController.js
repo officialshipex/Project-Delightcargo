@@ -192,6 +192,7 @@ const calculateRate = async (req, res) => {
 
       ans.push({
         courierServiceName: rc.courierServiceName,
+        orderType:"B2C",
         provider,
         mode,
         cod,

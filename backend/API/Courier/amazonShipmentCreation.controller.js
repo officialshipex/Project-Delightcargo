@@ -91,9 +91,10 @@ const createAmazonShipment = async ({
 
     const holdAmount = currentWallet.holdAmount || 0;
     const availableBalance = currentWallet.balance - holdAmount;
+    const balance = availableBalance + currentWallet.creditLimit;
     const charges = finalCharges === "N/A" ? 0 : parseInt(finalCharges);
 
-    if (availableBalance < charges)
+    if (balance < charges)
       throw new Error("Insufficient wallet balance");
 
     // ✅ Create Amazon shipment (no change here, API call)

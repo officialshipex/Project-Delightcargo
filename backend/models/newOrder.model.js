@@ -104,6 +104,7 @@ const orderSchema = new mongoose.Schema(
       ],
     },
     orderType: { type: String, enum: ["B2C", "B2B"], default: "B2C" },
+    rovType:{type:String,enum:["ROV Owner", "ROV Carrier"],default:"ROV Owner"},
 
     otherDetails: {
       resellerName: { type: String },
@@ -119,6 +120,10 @@ const orderSchema = new mongoose.Schema(
     paymentDetails: {
       method: { type: String, enum: ["COD", "Prepaid"], required: true },
       amount: { type: Number, required: true },
+    },
+    rateBreakup: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
 
     // Updated ndrHistory
@@ -153,6 +158,9 @@ const orderSchema = new mongoose.Schema(
     reattempt: { type: Boolean, default: false },
     commodityId: { type: Number },
     estimatedDeliveryDate: { type: Date },
+    walletDeducted: { type: Boolean, default: false },
+    walletRefunded: { type: Boolean, default: false },
+
     tracking: [
       {
         status: { type: String },

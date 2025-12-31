@@ -41,6 +41,7 @@ const orderSchema = Joi.object({
 
 const bookOrder = async (req, res) => {
   const userId = req.user._id;
+  // console.log("Booking order for user:", userId);
 
   // ✅ Validate request body
   const { error, value } = orderSchema.validate(req.body, {
