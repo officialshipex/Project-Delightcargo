@@ -348,11 +348,12 @@ const walletUpdation = async (req, res) => {
 
     // console.log("req data", req.body);
     const isCreditNote = description === "Credit Note";
+    const iswalletToBank = description === "Wallet to bank";
 
     // ✅ Validate required fields
     if (!userId) return res.status(400).json({ error: "User ID is required" });
-    
-    if (!isCreditNote && !awbNumber) {
+
+    if (!isCreditNote && !iswalletToBank && !awbNumber) {
       return res.status(400).json({ error: "AWB Number is required" });
     }
 
@@ -381,7 +382,7 @@ const walletUpdation = async (req, res) => {
 
     let existingTxn = null;
 
-    if (!isCreditNote) {
+    if (!isCreditNote && !iswalletToBank) {
       existingTxn = wallet.transactions.find(
         (txn) => txn.awb_number === awbNumber
       );
@@ -503,10 +504,36 @@ const walletUpdation = async (req, res) => {
     const currentBalance =
       typeof wallet.balance === "number" ? wallet.balance : 0;
 
+    // ===============================
+    // ✅ Wallet to Bank validation
+    // ===============================
+    if (iswalletToBank) {
+      if (category.toLowerCase() !== "debit") {
+        return res.status(400).json({
+          success: false,
+          message: "Wallet to bank transaction can only be a debit.",
+        });
+      }
+
+      if (wallet.balance < parsedAmount) {
+        return res.status(400).json({
+          success: false,
+          message: "Insufficient wallet balance for Wallet to Bank transfer.",
+        });
+      }
+    }
+
     const newBalance =
       normalizedCategory === "credit"
         ? currentBalance + parsedAmount
         : currentBalance - parsedAmount;
+
+    if (iswalletToBank && newBalance < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Wallet balance cannot be negative.",
+      });
+    }
     let updatedCategory;
     if (category === "credit") {
       updatedCategory = "Received";
