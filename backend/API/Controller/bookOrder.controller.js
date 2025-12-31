@@ -243,7 +243,7 @@ const bookOrder = async (req, res) => {
       console.error("Shipment creation failed:", shipmentResult);
       return res.status(400).json({
         status: "failure",
-        message: shipmentResult?.error || "Shipment creation failed.",
+        message: shipmentResult?.message || "Shipment creation failed.",
       });
     }
 

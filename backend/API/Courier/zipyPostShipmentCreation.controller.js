@@ -171,10 +171,16 @@ const createZipypostShipment = async ({
         sellerId
       );
 
-      if (!whResult.success)
-        throw new Error(
-          "Pickup pincode not registered. Please add a pickup address first."
-        );
+      if (!whResult.success) {
+        return {
+          success: false,
+          message:
+            "Pickup address is not registered. Please register it using the Warehouse API.",
+        };
+      }
+      // throw new Error(
+      //   "Pickup pincode not registered. Please add a pickup address first."
+      // );
 
       warehouseCache.set(whKey, whResult.warehouseId);
       warehouseId = whResult.warehouseId;
@@ -264,7 +270,7 @@ const createZipypostShipment = async ({
     currentOrder.zone = zone.zone;
 
     // 🔹 Take estimatedDeliveryDate from DB
-    currentOrder.estimatedDeliveryDate =estimateDate || "";
+    currentOrder.estimatedDeliveryDate = estimateDate || "";
 
     currentOrder.tracking.push({
       status: "Booked",
