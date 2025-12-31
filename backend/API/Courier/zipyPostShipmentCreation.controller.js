@@ -55,8 +55,8 @@ const createZipypostShipment = async ({
     // ✅ Step 3: Check wallet balance
     const hold = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - hold;
-    if (currentWallet.balance < finalCharges)
-      throw new Error("Insufficient wallet balance");
+    const balance = effectiveBalance + currentWallet.creditLimit;
+    if (balance < finalCharges) throw new Error("Insufficient wallet balance");
 
     // ✅ Step 4: Get zone (cached for speed)
     const zone = await getCachedZone(
@@ -170,11 +170,19 @@ const createZipypostShipment = async ({
         token.timestamp,
         sellerId
       );
+      // console.log("Warehouse creation result:", whResult);
 
-      if (!whResult.success)
-        throw new Error(
-          "Pickup pincode not registered. Please add a pickup address first."
-        );
+      if (!whResult.success) {
+        return {
+          success: false,
+          message:
+            "Pickup address is not registered. Please register it using the Warehouse API.",
+        };
+      }
+
+      // throw new Error(
+      //   "Pickup pincode not registered. Please add a pickup address first."
+      // );
 
       warehouseCache.set(whKey, whResult.warehouseId);
       warehouseId = whResult.warehouseId;
@@ -264,7 +272,7 @@ const createZipypostShipment = async ({
     currentOrder.zone = zone.zone;
 
     // 🔹 Take estimatedDeliveryDate from DB
-    currentOrder.estimatedDeliveryDate =estimateDate || "";
+    currentOrder.estimatedDeliveryDate = estimateDate || "";
 
     currentOrder.tracking.push({
       status: "Booked",

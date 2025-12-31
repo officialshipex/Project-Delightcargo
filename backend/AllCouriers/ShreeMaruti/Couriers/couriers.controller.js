@@ -116,28 +116,31 @@ const createOrder = async (req, res) => {
         message: "Order is already being processed or not in 'new' status.",
       });
     }
-function sanitizeAddress(str) {
+    function sanitizeAddress(str) {
       return str
         .replace(/[^a-zA-Z\s]/g, "")
         .replace(/\s+/g, " ")
         .trim();
     }
     function normalizeState(state) {
-  if (!state) return "";
+      if (!state) return "";
 
-  const cleaned = state.replace(/[^a-zA-Z\s]/g, "").trim().toLowerCase();
+      const cleaned = state
+        .replace(/[^a-zA-Z\s]/g, "")
+        .trim()
+        .toLowerCase();
 
-  if (
-    cleaned === "jammu kashmir" ||
-    cleaned === "jammu and kashmir" ||
-    cleaned === "jammu  kashmir" ||
-    cleaned === "jammu   kashmir"
-  ) {
-    return "Jammu and Kashmir";
-  }
+      if (
+        cleaned === "jammu kashmir" ||
+        cleaned === "jammu and kashmir" ||
+        cleaned === "jammu  kashmir" ||
+        cleaned === "jammu   kashmir"
+      ) {
+        return "Jammu and Kashmir";
+      }
 
-  return state.trim();
-}
+      return state.trim();
+    }
 
     const users = await user
       .findById({ _id: currentOrder.userId })
@@ -149,9 +152,11 @@ function sanitizeAddress(str) {
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
     );
-
+    const effectiveBalance =
+      currentWallet.balance - (currentWallet.holdAmount || 0);
+    const balance = effectiveBalance + currentWallet.creditLimit;
     // Check wallet balance
-    if (currentWallet.balance < finalCharges) {
+    if (balance < finalCharges) {
       await session.abortTransaction();
       await Order.findByIdAndUpdate(id, { status: "new" });
       session.endSession();
@@ -250,14 +255,14 @@ function sanitizeAddress(str) {
         services.courierType === "Domestic (Surface)" ? "SURFACE" : "AIR",
     };
 
-    const effectiveBalance =
-      currentWallet.balance - (currentWallet.holdAmount || 0);
-    const balance = effectiveBalance + currentWallet.creditLimit;
-    if (balance < finalCharges) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Insufficient Wallet Balance" });
-    }
+    // const effectiveBalance =
+    //   currentWallet.balance - (currentWallet.holdAmount || 0);
+    // const balance = effectiveBalance + currentWallet.creditLimit;
+    // if (balance < finalCharges) {
+    //   return res
+    //     .status(400)
+    //     .json({ success: false, message: "Insufficient Wallet Balance" });
+    // }
 
     // console.log("Payload for Shipment API:", payload);
 

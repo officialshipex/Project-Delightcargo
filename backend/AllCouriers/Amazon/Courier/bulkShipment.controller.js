@@ -135,7 +135,7 @@ const createShipmentAmazon = async (
     );
 
     const result = response.data?.payload;
-    console.log("resulttttttttreress", result);
+    // console.log("resulttttttttreress", result);
     if (!result) {
       console.log("amazon result");
       return {

@@ -2,70 +2,112 @@ const Order = require("../../../../../../models/newOrder.model");
 const BASE_URL = process.env.B2B_SHIPROCKET_URL;
 const { refreshToken } = require("../Authorize/shiprocket.controller");
 const axios = require("axios");
+const User = require("../../../../../../models/User.model");
+const Wallet = require("../../../../../../models/wallet");
+const mongoose = require("mongoose");
 
 exports.createShiprocketCargoShipment = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
-    const { id,provider,courierServiceName,finalCharges,rateBreakup } = req.body;
-    const order = await Order.findOne({ _id:id });
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" });
-    }
+    const { id, provider, courierServiceName, finalCharges, rateBreakup } =
+      req.body;
 
-    if (order.orderType !== "B2B") {
-      return res
-        .status(400)
-        .json({ message: "Shiprocket Cargo supports B2B only" });
-    }
-
-    const token = await refreshToken();
+    session.startTransaction();
 
     /* ================================
-       STEP 1: ORDER CREATION
+       1️⃣ LOCK ORDER
     ================================= */
-
-    const packaging_unit_details = order.B2BPackageDetails.packages.map(
-      (pkg) => ({
-        units: pkg.noOfBox,
-        weight: pkg.weightPerBox,
-        length: pkg.length,
-        width: pkg.width,
-        height: pkg.height,
-      })
+    const order = await Order.findOneAndUpdate(
+      { _id: id, status: "new" },
+      { $set: { status: "processing" } },
+      { new: true, session }
     );
 
-    const no_of_packages = packaging_unit_details.reduce(
-      (sum, p) => sum + p.units,
-      0
+    if (!order) throw new Error("Order already processed");
+
+    if (order.orderType !== "B2B")
+      throw new Error("Shiprocket Cargo supports B2B only");
+
+    /* ================================
+       2️⃣ WALLET CHECK
+    ================================= */
+    const user = await User.findById(order.userId).session(session);
+    const wallet = await Wallet.findById(user.Wallet).session(session);
+
+    const effectiveBalance = wallet.balance - (wallet.holdAmount || 0);
+    const balance = effectiveBalance + wallet.creditLimit;
+
+    if (balance < finalCharges) throw new Error("Insufficient Wallet Balance");
+
+    /* ================================
+       3️⃣ DEDUCT WALLET (IMMEDIATE)
+    ================================= */
+    const newBalance = wallet.balance - Number(finalCharges);
+    await Wallet.findByIdAndUpdate(
+      user.Wallet,
+      {
+        $inc: { balance: -finalCharges },
+        $push: {
+          transactions: {
+            channelOrderId: order.orderId,
+            category: "debit",
+            amount: finalCharges,
+            balanceAfterTransaction: newBalance,
+            description: "Freight Charges Applied",
+            date: new Date(),
+          },
+        },
+      },
+      { session }
     );
 
-    const orderPayload = {
-      no_of_packages,
+    const orderCreationPayload = {
+      no_of_packages: order.B2BPackageDetails.packages.reduce(
+        (s, p) => s + p.noOfBox,
+        0
+      ),
       invoice_value: order.paymentDetails.amount,
       approx_weight: order.B2BPackageDetails.applicableWeight,
       is_insured: false,
       is_to_pay: false,
+
+      /* ===== PICKUP ===== */
       source_warehouse_name: order.pickupAddress.contactName,
       source_address_line1: order.pickupAddress.address,
       source_address_line2: "",
       source_pincode: order.pickupAddress.pinCode,
       source_city: order.pickupAddress.city,
       source_state: order.pickupAddress.state,
+
       sender_contact_person_name: order.pickupAddress.contactName,
-      sender_contact_person_email: order.pickupAddress.email,
+      sender_contact_person_email:
+        order.pickupAddress.email || "noreply@shipex.in",
       sender_contact_person_contact_no: order.pickupAddress.phoneNumber,
 
-      destination_warehouse_name: order.receiverAddress.contactName,
+      /* ===== DELIVERY ===== */
+      destination_warehouse_name: order.receiverAddress.contactName, // ✅ REQUIRED
       destination_address_line1: order.receiverAddress.address,
       destination_address_line2: "",
       destination_pincode: order.receiverAddress.pinCode,
       destination_city: order.receiverAddress.city,
       destination_state: order.receiverAddress.state,
+
       recipient_contact_person_name: order.receiverAddress.contactName,
-      recipient_contact_person_email: order.receiverAddress.email,
+      recipient_contact_person_email:
+        order.receiverAddress.email || "noreply@shipex.in",
       recipient_contact_person_contact_no: order.receiverAddress.phoneNumber,
 
+      /* ===== OTHER ===== */
       client_id: Number(process.env.SHIPROCKET_CARGO_CLIENT_ID),
-      packaging_unit_details,
+
+      packaging_unit_details: order.B2BPackageDetails.packages.map((pkg) => ({
+        units: pkg.noOfBox,
+        weight: pkg.weightPerBox,
+        length: pkg.length,
+        width: pkg.width,
+        height: pkg.height,
+      })),
 
       is_cod: order.paymentDetails.method === "COD",
       cod_amount:
@@ -75,11 +117,21 @@ exports.createShiprocketCargoShipment = async (req, res) => {
 
       mode_name: "surface",
       source: "API",
+
+      supporting_docs: [
+        "https://shipex-india.s3.ap-south-1.amazonaws.com/invoices/6877cd814b130b3f25a64711/SHI-20251127-7800.pdf",
+      ],
     };
 
+    /* ================================
+       4️⃣ SHIPROCKET API CALLS
+    ================================= */
+    const token = await refreshToken();
+
+    // ---- order_creation ----
     const orderRes = await axios.post(
-      `${process.env.SHIPROCKET_CARGO_BASE_URL}/api/external/order_creation/`,
-      orderPayload,
+      `${BASE_URL}/api/external/order_creation/`,
+      orderCreationPayload,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -87,123 +139,292 @@ exports.createShiprocketCargoShipment = async (req, res) => {
         },
       }
     );
+    console.log("Order Creation Response:", orderRes.data);
 
-    const { order_id, mode_id, delivery_partner_id, transportar_id } =
-      orderRes.data;
-
-    /* ================================
-       STEP 2: SHIPMENT CREATION (ASYNC)
-    ================================= */
-
-    if (order.paymentDetails.amount > 50000 && !order.otherDetails?.ewaybill) {
-      return res.status(400).json({
-        message: "E-way bill is mandatory for invoice value above 50,000",
-      });
-    }
-
-    const shipmentPayload = {
+    const { order_id, mode_id, delivery_partner_id } = orderRes.data;
+    const shipmentAssociationPayload = {
       client_id: Number(process.env.SHIPROCKET_CARGO_CLIENT_ID),
       order_id,
       remarks: "Shipment booked via API",
-      recipient_GST: order.otherDetails?.gstin || null,
+
+      // REQUIRED
       to_pay_amount: "0",
       mode_id,
       delivery_partner_id,
+
+      // REQUIRED FORMAT: "YYYY-MM-DD HH:mm:ss"
       pickup_date_time: new Date().toISOString().slice(0, 19).replace("T", " "),
-      eway_bill_no: order.otherDetails?.ewaybill || null,
+
+      // GST / EWAY
+      recipient_GST: order.otherDetails?.gstin || null,
+      eway_bill_no: order.otherDetails?.ewaybill || "",
+
+      // INVOICE
       invoice_value: order.paymentDetails.amount,
-      invoice_number: order.compositeOrderId,
+      invoice_number: `INV-${order.orderId}`.slice(0, 25),
       invoice_date: new Date().toISOString().split("T")[0],
+
       source: "API",
+
+      // REQUIRED
+      supporting_docs: [
+        "https://shipex-india.s3.ap-south-1.amazonaws.com/invoices/6877cd814b130b3f25a64711/SHI-20251127-7800.pdf",
+      ],
     };
 
+    // ---- shipment_association ----
     const shipmentRes = await axios.post(
-      `${process.env.SHIPROCKET_CARGO_BASE_URL}/api/order_shipment_association/`,
-      shipmentPayload,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      }
+      `${BASE_URL}/api/order_shipment_association/`,
+      shipmentAssociationPayload,
+      { headers: { Authorization: `Bearer ${token}` } }
     );
 
+    console.log("Shipment Association Response:", shipmentRes.data);
+
     /* ================================
-       STEP 3: SAVE DB (ASYNC FLOW)
+       5️⃣ SAVE ORDER
     ================================= */
+    await Order.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: "Booked",
+          provider: "shiprocket",
+          courierServiceName,
+          shipment_id: shipmentRes.data.id,
+          shipmentCreatedAt: new Date(),
+          totalFreightCharges: finalCharges,
+          rateBreakup,
+          walletDeducted: true,
+        },
+        $push: {
+          tracking: {
+            status: "Booked",
+            Instructions: "Shipment booked, awaiting AWB",
+            StatusDateTime: new Date(),
+          },
+        },
+      },
+      { session }
+    );
 
-    order.shipment_id = shipmentRes.data.id;
-    order.provider = "shiprocket_cargo";
-    order.partner = shipmentRes.data.delivery_partner?.name;
-    order.courierServiceName = shipmentRes.data.delivery_partner?.common_name;
-    order.shipmentCreatedAt = new Date();
-    order.status = "Shipment Created";
+    await session.commitTransaction();
+    session.endSession();
 
-    await order.save();
+    res.json({ success: true, shipment_id: shipmentRes.data.id });
 
-    return res.json({
-      success: true,
-      message: "Shipment created successfully (Async)",
-      shipment_id: shipmentRes.data.id,
-      shiprocket_order_id: order_id,
-    });
-  } catch (error) {
-    console.error("Shiprocket Cargo Error:", error?.response?.data || error);
+    /* ================================
+       6️⃣ ASYNC STATUS CHECK
+    ================================= */
+    setTimeout(
+      () => getShiprocketCargoShipmentDetailsInternal(shipmentRes.data.id),
+      60 * 1000
+    );
+  } catch (err) {
+    console.log("Error in Shiprocket Cargo Shipment:", err.response.data);
+    await session.abortTransaction();
+    session.endSession();
+
+    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
+
     return res.status(500).json({
       success: false,
-      message: "Shiprocket Cargo shipment creation failed",
-      error: error?.response?.data || error.message,
+      message: err.message,
     });
   }
 };
 
-exports.getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
-  const order = await Order.findOne({ shipment_id: shipmentId });
-  if (!order) return;
+const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
+  try {
+    const order = await Order.findOne({ shipment_id: shipmentId });
+    if (!order) return;
 
-  if (order.awb_number && order.label) return;
+    const token = await refreshToken();
 
-  const token = await getShiprocketCargoToken();
+    const { data } = await axios.get(
+      `${BASE_URL}/api/external/get_shipment/${shipmentId}/`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
 
-  const { data } = await axios.get(
-    `${process.env.SHIPROCKET_CARGO_BASE_URL}/api/external/get_shipment/${shipmentId}/`,
-    {
+    console.log("Shiprocket Cargo Shipment Details:", data);
+    const user = await User.findById(order.userId);
+    const wallet = await Wallet.findById(user.Wallet);
+    /* ================================
+       ❌ SHIPMENT FAILED → REFUND
+    ================================= */
+    if (
+      data.status === "Failed" &&
+      order.walletDeducted &&
+      !order.walletRefunded
+    ) {
+      const refundAmount = Number(order.totalFreightCharges);
+      const newBalance = wallet.balance + refundAmount;
+      const awbRef = data.waybill_no || order.awb_number || null;
+      await Wallet.findByIdAndUpdate(user.Wallet, {
+        $set: { balance: newBalance },
+        $push: {
+          transactions: {
+            category: "credit",
+            channelOrderId: order.orderId,
+            awb_number: awbRef,
+            amount: refundAmount,
+            balanceAfterTransaction: newBalance,
+            description: "Shipment Failed - Freight Charges Refunded",
+            date: new Date(),
+          },
+        },
+      });
+
+      await Order.findByIdAndUpdate(order._id, {
+        walletRefunded: true,
+        status: "Cancelled",
+        $push: {
+          tracking: {
+            status: "Cancelled",
+            Instructions: data.api_error || "Carrier rejected shipment",
+            StatusDateTime: new Date(),
+          },
+        },
+      });
+
+      return;
+    }
+
+    /* ================================
+       ⏳ STILL PROCESSING
+    ================================= */
+    if (!data.waybill_no) return;
+
+    /* ================================
+       ✅ SUCCESS → SAVE AWB + CHILD AWBs
+    ================================= */
+    await Order.findByIdAndUpdate(order._id, {
+      $set: {
+        awb_number: data.waybill_no,
+        label: data.label_url,
+        partner: data.delivery_partner?.name,
+        courierServiceName: data.delivery_partner?.common_name,
+        status: "Ready To Ship",
+      },
+      $addToSet: {
+        child_awb_numbers: {
+          $each: data.child_waybill_nos || [],
+        },
+      },
+      $push: {
+        tracking: {
+          status: "Ready To Ship",
+          Instructions: "AWB generated successfully",
+          StatusDateTime: new Date(),
+        },
+      },
+    });
+    await Wallet.updateOne(
+      {
+        _id: user.Wallet,
+        "transactions.channelOrderId": order.orderId,
+        "transactions.category": "debit",
+      },
+      {
+        $set: {
+          "transactions.$.awb_number": data.waybill_no,
+        },
+      }
+    );
+  } catch (err) {
+    console.error("Shiprocket async error:", err.message);
+  }
+};
+
+// getShiprocketCargoShipmentDetailsInternal("1398451");
+
+const trackShiprocketCargoShipmentInternal = async (awb) => {
+  try {
+    if (!awb) {
+      throw new Error("AWB number is required");
+    }
+
+    const token = await refreshToken();
+
+    const { data } = await axios.get(`${BASE_URL}/api/shipment/track/${awb}/`, {
       headers: {
         Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    console.log("🚚 Shiprocket Cargo Tracking Response:");
+    console.log(data);
+
+    return data; // optional, useful if you want to reuse
+  } catch (error) {
+    console.error(
+      "❌ Shiprocket Cargo Tracking Error:",
+      error?.response?.data || error.message
+    );
+    throw error;
+  }
+};
+
+// trackShiprocketCargoShipmentInternal("20894534977234")
+
+exports.getCargoServiceableCouriers = async ({ order, packages }) => {
+  const accessToken = await refreshToken();
+  if (!accessToken) {
+    throw new Error("Shiprocket Cargo access token missing");
+  }
+
+  const payload = {
+    from_pincode: order.pickupAddress.pinCode,
+    from_city: order.pickupAddress.city,
+    from_state: order.pickupAddress.state,
+
+    to_pincode: order.receiverAddress.pinCode,
+    to_city: order.receiverAddress.city,
+    to_state: order.receiverAddress.state,
+
+    quantity: packages.reduce((sum, p) => sum + Number(p.noOfBox || 0), 0),
+
+    invoice_value: Number(order.paymentDetails?.amount || 0),
+    calculator_page: "true",
+
+    packaging_unit_details: packages.map((pkg) => ({
+      units: Number(pkg.noOfBox),
+      length: Number(pkg.length),
+      width: Number(pkg.width),
+      height: Number(pkg.height),
+      weight: Number(pkg.weightPerBox),
+      unit: "cm",
+    })),
+  };
+
+  // console.log("Payload:", payload);
+
+  const response = await axios.post(
+    `${BASE_URL}/api/shipment/charges/`,
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
       },
     }
   );
 
-  if (!data || !data.waybill_no) {
-    throw new Error("Shipment not ready yet");
+  const services = response.data || {};
+  const serviceableCouriersSet = new Set();
+
+  for (const key of Object.keys(services)) {
+    if (key === "success") continue;
+
+    const service = services[key];
+    if (service?.transporter_name) {
+      serviceableCouriersSet.add(service.transporter_name.toLowerCase().trim());
+    }
   }
 
-  order.awb_number = data.waybill_no;
-  order.label = data.label_url || order.label;
-  order.child_awb_numbers = [
-    ...new Set([
-      ...(order.child_awb_numbers || []),
-      ...(data.child_waybill_nos || []),
-    ]),
-  ];
-
-  order.courierServiceName = data.delivery_partner?.common_name;
-  order.partner = data.delivery_partner?.name;
-  order.status = data.status;
-
-  const awbTrackingExists = order.tracking.some(
-    (t) => t.status === "AWB Generated"
-  );
-
-  if (!awbTrackingExists) {
-    order.tracking.push({
-      status: "AWB Generated",
-      StatusLocation: order.pickupAddress.city,
-      StatusDateTime: new Date(),
-      Instructions: "AWB auto-fetched via async job",
-    });
-  }
-  await order.save();
+  // ✅ RETURN AS ARRAY
+  return Array.from(serviceableCouriersSet);
 };
 
 const getCargoShipmentCharges = async () => {
@@ -214,22 +435,30 @@ const getCargoShipmentCharges = async () => {
     }
 
     const payload = {
-      from_pincode: "110019",
-      from_city: "Gurgaon",
-      from_state: "Haryana",
-      to_pincode: "110017",
-      to_city: "Mumbai",
-      to_state: "Maharashtra",
-      quantity: 2,
+      from_pincode: "756036",
+      from_city: "Bengaluru",
+      from_state: "KARNATAKA",
+      to_pincode: "756036",
+      to_city: "Baliapal",
+      to_state: "ODISHA",
+      quantity: 4,
       invoice_value: 1111,
       calculator_page: "true",
       packaging_unit_details: [
         {
           units: 2,
-          length: 11,
-          height: 11,
-          weight: 12,
-          width: 11,
+          length: 20,
+          height: 20,
+          weight: 5,
+          width: 20,
+          unit: "cm",
+        },
+        {
+          units: 2,
+          length: 20,
+          height: 20,
+          weight: 5,
+          width: 20,
           unit: "cm",
         },
       ],
@@ -250,7 +479,7 @@ const getCargoShipmentCharges = async () => {
     console.log(response.data);
   } catch (error) {
     console.error("❌ Shiprocket Cargo Charges Error:");
-    console.error(error?.response?.data || error.message);
+    // console.error(error?.response?.data || error.message);
   }
 };
 

@@ -346,12 +346,16 @@ const walletUpdation = async (req, res) => {
   try {
     const { amount, description, awbNumber, userId, category } = req.body;
 
-    console.log("req data", req.body);
+    // console.log("req data", req.body);
+    const isCreditNote = description === "Credit Note";
 
     // ✅ Validate required fields
     if (!userId) return res.status(400).json({ error: "User ID is required" });
-    if (!awbNumber)
+    
+    if (!isCreditNote && !awbNumber) {
       return res.status(400).json({ error: "AWB Number is required" });
+    }
+
     if (!description)
       return res.status(400).json({ error: "Description is required" });
     if (!amount) return res.status(400).json({ error: "Amount is required" });
@@ -375,20 +379,26 @@ const walletUpdation = async (req, res) => {
       return res.status(404).json({ error: "Wallet not found" });
     }
 
-    // ✅ Check if AWB Number already exists
-    const existingTxn = wallet.transactions.find(
-      (txn) => txn.awb_number === awbNumber
-    );
+    let existingTxn = null;
 
-    if (!existingTxn) {
-      return res.status(404).json({
-        success: false,
-        message: `No transaction found with AWB Number: ${awbNumber}`,
-      });
+    if (!isCreditNote) {
+      existingTxn = wallet.transactions.find(
+        (txn) => txn.awb_number === awbNumber
+      );
+
+      if (!existingTxn) {
+        return res.status(404).json({
+          success: false,
+          message: `No transaction found with AWB Number: ${awbNumber}`,
+        });
+      }
     }
 
-    // ✅ Fetch Order
-    const order = await Order.findOne({ awb_number: awbNumber });
+    let order = null;
+
+    if (!isCreditNote) {
+      order = await Order.findOne({ awb_number: awbNumber });
+    }
 
     // ===== Orders Validations =====
     if (
@@ -467,14 +477,19 @@ const walletUpdation = async (req, res) => {
     const normalizedCategory = category.trim().toLowerCase();
 
     // ✅ Duplicate prevention (DB desc INCLUDES req desc)
-    const duplicateTxn = wallet.transactions.find(
-      (txn) =>
-        txn.awb_number === awbNumber &&
+    const duplicateTxn = wallet.transactions.find((txn) => {
+      const sameDesc =
         txn.description &&
-        txn.description.trim().toLowerCase().includes(normalizedReqDesc) &&
-        txn.category &&
-        txn.category.trim().toLowerCase() === normalizedCategory
-    );
+        txn.description.toLowerCase().includes(normalizedReqDesc);
+      const sameCat =
+        txn.category && txn.category.toLowerCase() === normalizedCategory;
+
+      if (isCreditNote) {
+        return !txn.awb_number && sameDesc && sameCat;
+      }
+
+      return txn.awb_number === awbNumber && sameDesc && sameCat;
+    });
 
     if (duplicateTxn) {
       return res.status(409).json({
@@ -498,9 +513,10 @@ const walletUpdation = async (req, res) => {
     } else {
       updatedCategory = "Applied";
     }
+
     wallet.transactions.push({
-      channelOrderId: order.orderId,
-      awb_number: awbNumber,
+      channelOrderId: order?.orderId || null,
+      awb_number: isCreditNote ? null : awbNumber,
       description: `${description} ${updatedCategory}`,
       category,
       amount: parsedAmount,

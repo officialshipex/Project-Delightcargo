@@ -56,6 +56,7 @@ const RateCardSchema = new mongoose.Schema(
       cpl: OverheadSchema,
       sdl: OverheadSchema,
       rovOwner: OverheadSchema,
+      rovCarrier: OverheadSchema,
       greenCharges: OverheadSchema,
       odaCharges: OverheadSchema,
       fuelSurcharge: OverheadSchema,

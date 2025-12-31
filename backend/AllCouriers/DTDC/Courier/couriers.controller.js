@@ -178,12 +178,12 @@ const createOrder = async (req, res) => {
         },
       ],
     };
-    console.log(
-      "consignments",
-      shipmentData,
-      shipmentData.consignments[0].origin_details,
-      shipmentData.consignments[0].destination_details
-    );
+    // console.log(
+    //   "consignments",
+    //   shipmentData,
+    //   shipmentData.consignments[0].origin_details,
+    //   shipmentData.consignments[0].destination_details
+    // );
 
     // --- Create shipment API call ---
     let response;
@@ -475,7 +475,7 @@ const checkServiceabilityDTDC = async (
 
     if (paymentType?.toUpperCase() === "COD") {
       isPaymentTypeServiceable =
-        serviceList.COD_Serviceable === "YES" ||
+        serviceList.COD_Serviceable === "YES" &&
         serviceList.b2C_COD_Serviceable === "YES";
       // serviceList.b2B_COD_Serviceable === "YES";
     } else {

@@ -4,8 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const csv = require("fast-csv");
 const XLSX = require("xlsx");
-const CourierPincodeB2B=require("../../models/serviceableCourierPincode.model")
-
+const CourierPincodeB2B = require("../../models/serviceableCourierPincode.model");
 
 const getAllCouriers = async (req, res) => {
   try {
@@ -27,7 +26,7 @@ const getAllCourierServices = async (req, res) => {
 // ✅ Create New Courier Service
 const createCourier = async (req, res) => {
   try {
-    const { provider, courier, courierType, name,weight, status } = req.body;
+    const { provider, courier, courierType, name, weight, status } = req.body;
 
     const newCourier = new CourierServicesB2B({
       provider,
@@ -361,6 +360,17 @@ const downloadPincode = async (req, res) => {
   }
 };
 
+const getShiprocketCourierServices = async (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: [
+      {
+        service: "Delhivery Enterprise",
+      },
+    ],
+  });
+};
+
 module.exports = {
   getAllCouriers,
   getAllCourierServices,
@@ -371,5 +381,6 @@ module.exports = {
   updateCourierStatus,
   uploadPincode,
   downloadPincode,
-  loadCourierPincodes
+  loadCourierPincodes,
+  getShiprocketCourierServices,
 };
