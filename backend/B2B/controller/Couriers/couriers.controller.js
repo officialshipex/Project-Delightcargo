@@ -28,20 +28,37 @@ const createCourier = async (req, res) => {
   try {
     const { provider, courier, courierType, name, weight, status } = req.body;
 
+    // 🔒 Duplicate check (same provider + same courier)
+    const existingCourier = await CourierServicesB2B.findOne({
+      provider: provider.trim(),
+      courier: courier.trim(),
+      name: name.trim(),
+    });
+
+    if (existingCourier) {
+      return res.status(409).json({
+        error: "Courier already exists for this provider",
+      });
+    }
+
     const newCourier = new CourierServicesB2B({
-      provider,
-      courier,
+      provider: provider.trim(),
+      courier: courier.trim(),
       courierType,
       name,
       weight,
       status,
     });
 
-    // console.log(req.body);
     await newCourier.save();
-    res.status(201).json(newCourier);
+
+    res.status(201).json({
+      success: true,
+      message: "Courier created successfully",
+      courier: newCourier,
+    });
   } catch (error) {
-    console.log(error);
+    console.error("Create Courier Error:", error);
     res.status(400).json({ error: error.message });
   }
 };

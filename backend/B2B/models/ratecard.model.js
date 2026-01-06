@@ -32,8 +32,8 @@ const RateCardSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    courierProviderName:{
-      type:String,
+    courierProviderName: {
+      type: String,
     },
     plan: {
       type: mongoose.Schema.Types.ObjectId,
@@ -51,20 +51,29 @@ const RateCardSchema = new mongoose.Schema(
     },
     rates: [RateCellSchema],
     /* ===== OVERHEAD CHARGES ===== */
+    
     overheadCharges: {
-      peakSurcharge: OverheadSchema,
-      cpl: OverheadSchema,
-      sdl: OverheadSchema,
+      pickupCharge: OverheadSchema,
+      handlingCharge: OverheadSchema,
+      codCharges: OverheadSchema,
+      fodCharges: OverheadSchema,
+
       rovOwner: OverheadSchema,
       rovCarrier: OverheadSchema,
-      greenCharges: OverheadSchema,
+
       odaCharges: OverheadSchema,
-      fuelSurcharge: OverheadSchema,
-      awbCharges: OverheadSchema,
+      fuelCharge: OverheadSchema,
+
+      docketCharge: OverheadSchema,
+      appointmentDelivery: OverheadSchema,
+      greenTax: OverheadSchema,
+
       divisor: OverheadSchema,
-      minimumCharge: OverheadSchema,
+      minimumFreight: OverheadSchema,
+
       gst: OverheadSchema,
     },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

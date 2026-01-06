@@ -100,11 +100,8 @@ const resolveDivisor = (divisorConfig) => {
 const calculateCodCharge = ({ codConfig, orderValue }) => {
   if (!codConfig) return 0;
 
-  const flat = Number(codConfig.flat || 0);
-  const percent = Number(codConfig.percent || 0);
-
-  const percentValue = (orderValue * percent) / 100;
-  let codCharge = Math.max(flat, percentValue);
+  const percentValue = (orderValue * Number(codConfig.value || 0)) / 100;
+  let codCharge = percentValue;
 
   if (codConfig.min && codCharge < codConfig.min) {
     codCharge = codConfig.min;
@@ -125,10 +122,7 @@ const calculateB2BCargoRate = ({
 }) => {
   const divisor = resolveDivisor(rateCard.overheadCharges?.divisor);
 
-  // 1️⃣ actual chargeable weight
   const actualChargeableWeight = calculateChargeableWeight(packages, divisor);
-
-  // 2️⃣ apply minimum courier weight
   const billableWeight = Math.max(actualChargeableWeight, minWeight);
 
   const rateCell = rateCard.rates.find(
@@ -139,60 +133,85 @@ const calculateB2BCargoRate = ({
   if (!rateCell) return null;
 
   const ratePerKg = rateCell.price;
-
-  // 🔥 FREIGHT ON BILLABLE WEIGHT
   const freight = billableWeight * ratePerKg;
 
   const overheads = rateCard.overheadCharges || {};
 
-  const awb = calculateOverhead(overheads.awbCharges, freight, billableWeight);
-  let rov = 0;
-
-  if (rovType === "ROV Carrier") {
-    rov = calculateOverhead(overheads.rovCarrier, freight, billableWeight);
-  } else {
-    // Default → ROV Owner
-    rov = calculateOverhead(overheads.rovOwner, freight, billableWeight);
-  }
-
-  const fsc = calculateOverhead(
-    overheads.fuelSurcharge,
+  const docket = calculateOverhead(
+    overheads.docketCharge,
     freight,
     billableWeight
   );
+
+  const rov =
+    rovType === "ROV Carrier"
+      ? calculateOverhead(overheads.rovCarrier, freight, billableWeight)
+      : calculateOverhead(overheads.rovOwner, freight, billableWeight);
+
+  const fsc = calculateOverhead(overheads.fuelCharge, freight, billableWeight);
   const oda = calculateOverhead(overheads.odaCharges, freight, billableWeight);
-  const green = calculateOverhead(
-    overheads.greenCharges,
+  const green = calculateOverhead(overheads.greenTax, freight, billableWeight);
+  const pickup = calculateOverhead(
+    overheads.pickupCharge,
+    freight,
+    billableWeight
+  );
+  const handling = calculateOverhead(
+    overheads.handlingCharge,
+    freight,
+    billableWeight
+  );
+  const appointment = calculateOverhead(
+    overheads.appointmentDelivery,
     freight,
     billableWeight
   );
 
   const codCharge = isCOD
     ? calculateCodCharge({
-        codConfig: overheads.cod,
+        codConfig: overheads.codCharges,
         orderValue,
       })
     : 0;
 
-  const subtotal = freight + awb + rov + fsc + oda + green + codCharge;
+  let subtotal =
+    freight +
+    docket +
+    rov +
+    fsc +
+    oda +
+    green +
+    pickup +
+    handling +
+    appointment +
+    codCharge;
+
+  // 🔒 Minimum Freight
+  if (overheads.minimumFreight && subtotal < overheads.minimumFreight.value) {
+    subtotal = overheads.minimumFreight.value;
+  }
+
   const gstRate = overheads.gst?.value || 18;
   const gst = (subtotal * gstRate) / 100;
 
   return {
     actual_chargeable_weight: +actualChargeableWeight.toFixed(2),
-    min_weight_applied: minWeight,
     billable_weight: +billableWeight.toFixed(2),
 
     rate: ratePerKg,
     freight: +freight.toFixed(2),
+
+    docket_charges: docket,
+    pickup_charge: pickup,
+    handling_charge: handling,
+    appointment_charge: appointment,
     cod_charges: codCharge,
-    awb_charges: awb,
     rov,
     fsc,
     oda,
     green_tax: green,
 
-    total: +subtotal.toFixed(2),
+    subtotal: +subtotal.toFixed(2),
     gst: +gst.toFixed(2),
     grand_total: +(subtotal + gst).toFixed(2),
   };

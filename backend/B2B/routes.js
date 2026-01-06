@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const multer = require('multer');
 const { isAuthorized } = require("../middleware/auth.middleware");
 const {
   adminB2BOrders,
@@ -30,6 +31,8 @@ const {getB2BPackages,updateB2BPackages} = require("./controller/Orders/b2bPacka
 const {CalculateB2BRateWithoutOrder}=require("./controller/Orders/rateCalculator.controller");
 
 const {generateLabel} = require("./controller/labelInvoiceManifest/label.controller");
+
+const {downloadSampleExcelB2B,bulkOrderB2B} = require("./controller/Orders/addBulkOrder.controller");
 
 
 router.get("/getb2badminorder", adminB2BOrders);
@@ -98,5 +101,9 @@ router.put(
 router.get("/generate-label/:id", generateLabel);
 
 router.post("/rateCalculator/calculateB2BRateWithoutOrder", isAuthorized, CalculateB2BRateWithoutOrder);
+
+const upload = multer({ dest: 'uploads/' });
+router.get("/bulkOrderUpload/download-excel", isAuthorized, downloadSampleExcelB2B);
+router.post("/bulkOrderUpload/upload",upload.single('file'), isAuthorized, bulkOrderB2B);
 
 module.exports = router;

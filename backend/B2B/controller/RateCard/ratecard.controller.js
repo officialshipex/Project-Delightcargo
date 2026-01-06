@@ -5,6 +5,30 @@ const ZoneMatrix = require("../../models/zoneMatrix.model");
 const Audit = require("../../models/ratecardAudit.model");
 const Plans = require("../../../models/Plan.model");
 
+const DEFAULT_OVERHEAD_CHARGES = {
+  pickupCharge: { type: "percentage", value: 4, min: 0 },
+  handlingCharge: { type: "flat", value: 0 },
+  codCharges: { type: "percentage", value: 0, min: 0 },
+  fodCharges: { type: "flat", value: 0 },
+  rovOwner: { type: "percentage", value: 0, min: 70 },
+  rovCarrier: { type: "percentage", value: 0, min: 50 },
+  odaCharges: { type: "perKg", value: 10, min: 1000 },
+  fuelCharge: { type: "percentage", value: 20 },
+  docketCharge: { type: "flat", value: 0 },
+  appointmentDelivery: { type: "flat", value: 0 },
+  greenTax: { type: "flat", value: 0 },
+  divisor: { type: "formula", value: 4500 },
+  minimumFreight: { type: "flat", value: 220 },
+  gst: { type: "percentage", value: 18 },
+};
+
+const normalizeOverheadCharges = (incoming = {}) => {
+  return {
+    ...DEFAULT_OVERHEAD_CHARGES,
+    ...incoming,
+  };
+};
+
 /* ================= META ================= */
 exports.getMeta = async (req, res) => {
   const couriers = await CourierServiceB2B.find({ status: "Enable" });
@@ -28,7 +52,10 @@ exports.getRateCard = async (req, res) => {
     plan: planId,
   });
 
-  res.json(card || null);
+  if (!card) return res.json(null);
+
+  card.overheadCharges = normalizeOverheadCharges(card.overheadCharges);
+  res.json(card);
 };
 
 /* ================= CREATE ================= */
@@ -50,7 +77,7 @@ exports.createRateCard = async (req, res) => {
     plan,
     planName: planData.name,
     rates,
-    overheadCharges,
+    overheadCharges: normalizeOverheadCharges(overheadCharges),
     status,
     createdBy: req.user._id,
   });
@@ -109,7 +136,12 @@ exports.updateRateCard = async (req, res) => {
     return res.status(404).json({ message: "Rate card not found" });
   }
 
-  const updated = await RateCard.findByIdAndUpdate(req.params.id, req.body, {
+  const payload = {
+    ...req.body,
+    overheadCharges: normalizeOverheadCharges(req.body.overheadCharges),
+  };
+
+  const updated = await RateCard.findByIdAndUpdate(req.params.id, payload, {
     new: true,
   });
 
@@ -182,7 +214,7 @@ exports.copyRateCard = async (req, res) => {
     plan: targetPlan,
     planName: planData.name,
     rates: source.rates,
-    overheadCharges: source.overheadCharges,
+    overheadCharges: normalizeOverheadCharges(source.overheadCharges),
     status: "active",
     createdBy: req.user._id,
   });
@@ -204,3 +236,18 @@ exports.copyRateCard = async (req, res) => {
 
   res.status(201).json(newCard);
 };
+
+// Minimum weight   /
+// Docket charge
+// Fuel charge
+// ROV Owner
+// ROV Carrier
+// ODA Charge
+// COD Charges
+// To Pay Charges (FOD)
+// Handling Charge
+// Pickup Charge
+// Appointment Delivery Charge
+// Green Tax
+// Divisor
+// Minimum Freight

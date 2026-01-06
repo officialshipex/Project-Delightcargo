@@ -1,13 +1,11 @@
-const express = require("express");
 const PDFDocument = require("pdfkit");
 const bwipjs = require("bwip-js");
-const Order = require("../../../models/newOrder.model");
 const https = require("https");
 
-const router = express.Router();
+const Order = require("../../../models/newOrder.model");
 
 /* ===============================
-   HELPERS
+   IMAGE FETCH HELPER
 ================================ */
 const fetchImageBuffer = (url) =>
   new Promise((resolve, reject) => {
@@ -23,184 +21,216 @@ const fetchImageBuffer = (url) =>
 /* ===============================
    CONTROLLER
 ================================ */
-const generateLabel = async (req, res) => {
+exports.generateLabel = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
-    if (!order) return res.status(404).send("Order not found");
-    if (order.orderType !== "B2B")
-      return res.status(400).send("Not a B2B order");
+    if (!order || order.orderType !== "B2B") {
+      return res.status(400).send("Invalid B2B order");
+    }
 
-    const packages = order.B2BPackageDetails?.packages || [];
-    if (!packages.length)
-      return res.status(400).send("No B2B packages found");
+    const masterAwb = order.awb_number;
+    const lrn = order.lrn || "N/A";
+    const oid = order.oid || "N/A";
+    const orderId = order.orderId;
 
-    const doc = new PDFDocument({ size: "A4", margin: 20 });
+    const childAwbs = order.child_awb_numbers || [];
+    const totalBoxes = 1 + childAwbs.length;
 
+    const paymentType =
+      order.paymentDetails?.method?.toUpperCase() === "COD" ? "COD" : "PREPAID";
+
+    const doc = new PDFDocument({ size: "A4", margin: 0 });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=B2B-Label-${order.orderId}.pdf`
+      `attachment; filename=B2B-Label-${orderId}.pdf`
     );
-
     doc.pipe(res);
-
-    /* ===============================
-       BARCODE (MASTER AWB – SINGLE)
-    ================================ */
-    const awbBarcode = order.awb_number
-      ? await bwipjs.toBuffer({
-          bcid: "code128",
-          text: String(order.awb_number),
-          scale: 3,
-          height: 10,
-          includetext: false,
-        })
-      : null;
 
     /* ===============================
        LOGOS
     ================================ */
-    // 🔹 Replace with real URLs
-    const companyLogoUrl = "https://shipex-india.s3.ap-south-1.amazonaws.com/uploads/1767099868221_Shipex.jpg";
-    const courierLogoUrl = "https://your-courier-logo-url.png";
+    const shipexLogo = await fetchImageBuffer(
+      "https://shipex-india.s3.ap-south-1.amazonaws.com/uploads/1767099868221_Shipex.jpg"
+    );
 
-    let companyLogo = null;
-    let courierLogo = null;
-
-    try {
-      companyLogo = await fetchImageBuffer(companyLogoUrl);
-      courierLogo = await fetchImageBuffer(courierLogoUrl);
-    } catch (e) {
-      console.warn("Logo load failed:", e.message);
-    }
+    const courierLogo = await fetchImageBuffer(
+      "https://shipex-india.s3.ap-south-1.amazonaws.com/uploads/1767333425857_Delhivery.png"
+    );
 
     /* ===============================
-       LABEL GRID CONFIG
+       LABEL & PAGE CONFIG
     ================================ */
-    const LABEL_W = 270;
-    const LABEL_H = 380;
-    const GAP_X = 20;
-    const GAP_Y = 20;
+    const LABEL_W = 265;
+    const LABEL_H = 320; // ⬅ reduced height
+    const GAP = 16; // ⬅ tighter gap
 
-    let startX = 20;
-    let startY = 20;
+    const PAGE_W = 595;
+    const PAGE_H = 842;
+
+    const GRID_W = LABEL_W * 2 + GAP;
+    const GRID_H = LABEL_H * 2 + GAP;
+
+    const START_X = (PAGE_W - GRID_W) / 2;
+    const START_Y = (PAGE_H - GRID_H) / 2;
+
     let col = 0;
+    let row = 0;
 
-    packages.forEach((pkg, index) => {
-      if (index > 0 && index % 4 === 0) {
+    const drawLabel = async ({ awb, boxNo, type }) => {
+      if ((boxNo - 1) % 4 === 0 && boxNo !== 1) {
         doc.addPage();
-        startX = 20;
-        startY = 20;
         col = 0;
+        row = 0;
       }
 
-      const x = startX + col * (LABEL_W + GAP_X);
-      const y = startY + Math.floor((index % 4) / 2) * (LABEL_H + GAP_Y);
+      const x = START_X + col * (LABEL_W + GAP);
+      const y = START_Y + row * (LABEL_H + GAP);
+      let cy = y;
 
-      /* ===============================
-         LABEL BORDER
-      ================================ */
+      /* OUTER BORDER */
       doc.rect(x, y, LABEL_W, LABEL_H).stroke();
 
-      /* ===============================
-         LOGOS ROW
-      ================================ */
-      if (courierLogo)
-        doc.image(courierLogo, x + 5, y + 5, { width: 80 });
-      if (companyLogo)
-        doc.image(companyLogo, x + LABEL_W - 85, y + 5, { width: 80 });
+      /* ================= LOGO ROW ================= */
+      const LOGO_H = 36;
+      doc.rect(x, cy, LABEL_W, LOGO_H).stroke();
+      doc
+        .moveTo(x + LABEL_W / 2, cy)
+        .lineTo(x + LABEL_W / 2, cy + LOGO_H)
+        .stroke();
 
-      /* ===============================
-         BARCODE
-      ================================ */
-      if (awbBarcode) {
-        doc.image(awbBarcode, x + 30, y + 50, { width: 210 });
-        doc
-          .font("Helvetica-Bold")
-          .fontSize(10)
-          .text(order.awb_number, x, y + 65, {
-            width: LABEL_W,
-            align: "center",
-          });
-      }
+      doc.image(courierLogo, x + 10, cy + 9, { width: 60 });
+      doc.image(shipexLogo, x + LABEL_W / 2 + 10, cy + 6, { width: 60 });
 
-      /* ===============================
-         BOX INFO
-      ================================ */
+      cy += LOGO_H;
+
+      /* ================= META ROW ================= */
+      const META_H = 40;
+      doc.rect(x, cy, LABEL_W, META_H).stroke();
+      doc
+        .moveTo(x + LABEL_W / 2, cy)
+        .lineTo(x + LABEL_W / 2, cy + META_H)
+        .stroke();
+
+      doc.font("Helvetica-Bold").fontSize(7.5);
+      doc.text(`Order ID: ${orderId}`, x + 6, cy + 5);
+      doc.text(`Master AWB: ${masterAwb}`, x + 6, cy + 20);
+
+      doc.text(`LRN: ${lrn}`, x + LABEL_W / 2 + 6, cy + 5);
+      doc.text(`OID: ${oid}`, x + LABEL_W / 2 + 6, cy + 20);
+
+      cy += META_H;
+
+      /* ================= BARCODE ROW ================= */
+      const BAR_H = 48;
+      doc.rect(x, cy, LABEL_W, BAR_H).stroke();
+
+      const barcode = await bwipjs.toBuffer({
+        bcid: "code128",
+        text: String(awb),
+        scale: 1.2,
+        height: 6,
+        includetext: false,
+      });
+
+      const BAR_W = LABEL_W * 0.7;
+      doc.image(barcode, x + (LABEL_W - BAR_W) / 2, cy + 6, {
+        width: BAR_W,
+      });
+
       doc
         .font("Helvetica-Bold")
-        .fontSize(10)
-        .text(
-          `Box : ${index + 1} / ${packages.length}`,
-          x + 10,
-          y + 95
-        );
+        .fontSize(7.5)
+        .text(awb, x, cy + 40, {
+          width: LABEL_W,
+          align: "center",
+        });
 
-      /* ===============================
-         CONSIGNEE
-      ================================ */
+      cy += BAR_H;
+
+      /* ================= BOX / PAYMENT ROW ================= */
+      const INFO_H = 26;
+      doc.rect(x, cy, LABEL_W, INFO_H).stroke();
+      doc
+        .moveTo(x + LABEL_W / 2, cy)
+        .lineTo(x + LABEL_W / 2, cy + INFO_H)
+        .stroke();
+
+      doc.text(`Box: ${boxNo}/${totalBoxes}`, x + 6, cy + 5);
+      doc.text(`Payment: ${paymentType}`, x + 6, cy + 15);
+      doc.text(type, x + LABEL_W / 2 + 6, cy + 10);
+
+      cy += INFO_H;
+
+      /* ================= SHIPPING ================= */
+      const SHIP_H = 86;
+      doc.rect(x, cy, LABEL_W, SHIP_H).stroke();
+
       doc
         .font("Helvetica-Bold")
-        .fontSize(9)
-        .text("Shipping Address:", x + 10, y + 115);
+        .fontSize(7.5)
+        .text("Shipping Address:", x + 6, cy + 4);
 
       doc
         .font("Helvetica")
-        .fontSize(9)
+        .fontSize(7.5)
         .text(
           `${order.receiverAddress.contactName}
 ${order.receiverAddress.address}
 ${order.receiverAddress.city}, ${order.receiverAddress.state} - ${order.receiverAddress.pinCode}
 Ph: ${order.receiverAddress.phoneNumber}`,
-          x + 10,
-          y + 130,
-          { width: LABEL_W - 20 }
+          x + 6,
+          cy + 16,
+          { width: LABEL_W - 12 }
         );
 
-      /* ===============================
-         RETURN ADDRESS
-      ================================ */
+      cy += SHIP_H;
+
+      /* ================= RETURN ================= */
+      const RETURN_H = LABEL_H - (cy - y);
+      doc.rect(x, cy, LABEL_W, RETURN_H).stroke();
+
       doc
         .font("Helvetica-Bold")
-        .text("Return Address:", x + 10, y + 215);
+        .fontSize(7.5)
+        .text("Return Address:", x + 6, cy + 4);
 
       doc
         .font("Helvetica")
+        .fontSize(7.5)
         .text(
           `${order.pickupAddress.contactName}
 ${order.pickupAddress.address}
 ${order.pickupAddress.city}, ${order.pickupAddress.state} - ${order.pickupAddress.pinCode}`,
-          x + 10,
-          y + 230,
-          { width: LABEL_W - 20 }
+          x + 6,
+          cy + 16,
+          { width: LABEL_W - 12 }
         );
 
-      /* ===============================
-         PACKAGE DETAILS
-      ================================ */
-      doc
-        .font("Helvetica-Bold")
-        .text("Box Details:", x + 10, y + 295);
+      col++;
+      if (col === 2) {
+        col = 0;
+        row++;
+      }
+    };
 
-      doc
-        .font("Helvetica")
-        .text(
-          `L x W x H : ${pkg.length} x ${pkg.width} x ${pkg.height} cm
-Weight     : ${pkg.weightPerBox} Kg`,
-          x + 10,
-          y + 310
-        );
+    /* ================= MASTER ================= */
+    await drawLabel({ awb: masterAwb, boxNo: 1, type: "Master" });
 
-      col = col === 0 ? 1 : 0;
-    });
+    /* ================= CHILD ================= */
+    for (let i = 0; i < childAwbs.length; i++) {
+      await drawLabel({
+        awb: childAwbs[i],
+        boxNo: i + 2,
+        type: "Child",
+      });
+    }
 
     doc.end();
   } catch (err) {
-    console.error("B2B label error:", err);
+    console.error("B2B Label Error:", err);
     if (!res.headersSent) {
-      res.status(500).json({ error: "Failed to generate B2B label" });
+      res.status(500).send("Failed to generate label");
     }
   }
 };
-
-module.exports = { generateLabel };
