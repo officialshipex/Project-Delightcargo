@@ -221,7 +221,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
       60 * 1000
     );
   } catch (err) {
-    console.log("Error in Shiprocket Cargo Shipment:", err.response.data);
+    console.log("Error in Shiprocket Cargo Shipment:", err);
     await session.abortTransaction();
     session.endSession();
 
@@ -301,6 +301,8 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
     await Order.findByIdAndUpdate(order._id, {
       $set: {
         awb_number: data.waybill_no,
+        lrn: data.lrn,
+        oid: data.order_id,
         label: data.label_url,
         partner: data.delivery_partner?.name,
         courierServiceName: data.delivery_partner?.common_name,
