@@ -1,9 +1,10 @@
 const RateCard = require("../../models/ratecard.model");
 const CourierServiceB2B = require("../../models/courierService.model");
-const PlanName = require("../../../models/createPlanName.model");
+const PlanName = require("../../models/createPlanName.model");
 const ZoneMatrix = require("../../models/zoneMatrix.model");
 const Audit = require("../../models/ratecardAudit.model");
-const Plans = require("../../../models/Plan.model");
+const Plans = require("../../models/plan.model");
+const createPlanNameSchema = require("../../models/createPlanName.model");
 
 const DEFAULT_OVERHEAD_CHARGES = {
   pickupCharge: { type: "percentage", value: 4, min: 0 },
@@ -45,12 +46,14 @@ exports.getMeta = async (req, res) => {
 
 /* ================= GET ================= */
 exports.getRateCard = async (req, res) => {
+  // console.log("Fetching Rate Card with query:", req.query);
   const { courierId, planId } = req.query;
-
+// console.log("Fetching Rate Card for Courier:", courierId, "Plan:", planId);
   const card = await RateCard.findOne({
     courierService: courierId,
     plan: planId,
   });
+  // console.log("Fetched Rate Card:", card);
 
   if (!card) return res.json(null);
 
@@ -174,7 +177,9 @@ exports.updateRateCard = async (req, res) => {
 
 /* ================= DELETE ================= */
 exports.deleteRateCard = async (req, res) => {
+  console.log("Deleting Rate Card:", req.params.id);
   const card = await RateCard.findById(req.params.id);
+  
   if (!card) {
     return res.status(404).json({ message: "Rate card not found" });
   }
@@ -235,6 +240,65 @@ exports.copyRateCard = async (req, res) => {
   });
 
   res.status(201).json(newCard);
+};
+
+exports.createPlanName = async (req, res) => {
+  try {
+    const userId = req.user._id; // Assuming user ID is in req.user from auth middleware
+    const { planName } = req.body;
+
+    if (!planName || planName.trim() === "") {
+      return res.status(400).json({ message: "Plan name is required" });
+    }
+
+    const existing = await createPlanNameSchema.findOne({
+      name: planName.trim(),
+    });
+    if (existing) {
+      return res.status(409).json({ message: "Plan already exists" });
+    }
+
+    const plan = new createPlanNameSchema({
+      name: planName.trim(),
+      createdBy: userId, // Save userId here
+    });
+
+    await plan.save();
+    return res.status(201).json({ message: "Plan created successfully", plan });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getPlanNames = async (req, res) => {
+  try {
+    const plans = await createPlanNameSchema
+      .find({}, { name: 1, _id: 0 })
+      .sort({ createdAt: -1 }) // Sort by newest first
+      .lean();
+
+    const planNames = plans.map((plan) => plan.name);
+
+    return res.status(200).json({ planNames });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getRateCardName = async (req, res) => {
+  try {
+   
+    const b2bRateCard = await RateCard.find();
+    res.status(200).json({
+      message: "Rate cards retrieved successfully",
+      B2BRateCard: b2bRateCard
+    });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Error retrieving rate cards" }); // Handle errors
+  }
 };
 
 // Minimum weight   /

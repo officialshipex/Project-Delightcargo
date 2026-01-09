@@ -388,6 +388,8 @@ const bulkOrderB2B = async (req, res) => {
           totalActualWeight += actualWeight;
           totalVolumetricWeight += volumetricWeight;
         }
+        // console.log("actual weight", totalActualWeight);
+        // console.log("volumetric", totalVolumetricWeight);
 
         const applicableWeight = Math.max(
           totalActualWeight,

@@ -69,6 +69,9 @@ router.delete(
   ratecard.deleteRateCard
 );
 router.post("/ratecard/copyRateCard", isAuthorized, ratecard.copyRateCard);
+router.post("/saveRate/createPlanName", isAuthorized, ratecard.createPlanName);
+router.get("/saveRate/getPlanNames", isAuthorized, ratecard.getPlanNames);
+router.get("/saveRate/getRateCard", isAuthorized, ratecard.getRateCardName);
 
 router.get("/couriers/getAllCouriers", getAllCouriers);
 router.post("/couriers/updateCourierStatus", updateCourierStatus);

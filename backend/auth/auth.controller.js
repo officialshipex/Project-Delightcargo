@@ -5,7 +5,9 @@ const { validateForm, validateEmail } = require("../utils/afv");
 const User = require("../models/User.model");
 const Role = require("../models/roles.modal");
 const RateCard = require("../models/rateCards");
+const B2BRateCard=require("../B2B/models/ratecard.model")
 const Plan = require("../models/Plan.model");
+const B2BPlan = require("../B2B/models/plan.model");
 const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
@@ -147,15 +149,29 @@ const register = async (req, res) => {
         message: "Bronze rate card not found",
       });
     }
-
     const newPlan = new Plan({
       userId: newUser._id,
       userName: fullname,
       planName: "Bronze",
       rateCard: bronzeRateCard,
     });
-
     await newPlan.save();
+
+    //Assign "LITE" B2B rate card
+    const liteRateCard = await b2bRateCard.find({ plan: "LITE" });
+    if (!liteRateCard) {
+      return res.status(500).json({
+        success: false,
+        message: "LITE rate card not found",
+      });
+    }
+    const b2bPlan = new B2BPlan({
+      userId: newUser._id,
+      userName: fullname,
+      planName: "LITE",
+      b2bRateCard: liteRateCard,
+    });
+    await b2bPlan.save();
 
     const payload = {
       user: {

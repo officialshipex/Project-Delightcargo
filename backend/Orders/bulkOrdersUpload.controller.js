@@ -18,7 +18,7 @@ const downloadSampleExcel = async (req, res) => {
     // Define headers
     worksheet.columns = [
       { header: "*Receiver Contact Name", key: "contactName", width: 30 },
-      { header: "*Receiver Email", key: "email", width: 30 },
+      { header: "Receiver Email", key: "email", width: 30 },
       { header: "*Receiver Phone Number", key: "phoneNumber", width: 30 },
       { header: "*Receiver Address", key: "address", width: 40 },
       { header: "*Receiver Pin Code", key: "pinCode", width: 15 },
