@@ -133,11 +133,9 @@ const saveRate = async (req, res) => {
 const getRateCard = async (req, res) => {
   try {
     const allRateCard = await RateCard.find();
-    const b2bRateCard = await B2BRateCard.find();
     res.status(200).json({
       message: "Rate cards retrieved successfully",
       rateCards: allRateCard,
-      B2BRateCard: b2bRateCard
     });
   } catch (err) {
     console.log(err);

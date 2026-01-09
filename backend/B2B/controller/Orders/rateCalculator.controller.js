@@ -1,5 +1,5 @@
 const ZoneMatrix = require("../../models/zoneMatrix.model");
-const Plan = require("../../../models/Plan.model");
+const Plan = require("../../models/plan.model");
 const courierServiceB2B = require("../../models/courierService.model");
 const { findByPincode } = require("../../pincodeLoader");
 const {

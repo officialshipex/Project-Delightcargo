@@ -1,5 +1,6 @@
 const User = require("../models/User.model");
 const Plan = require("../models/Plan.model");
+const B2BPlan = require("../B2B/models/plan.model");
 const mongoose = require("mongoose");
 const Account = require("../models/BankAccount.model");
 const Aadhar = require("../models/Aadhaar.model");
@@ -469,9 +470,10 @@ const getUserById = async (req, res) => {
     }
     const kamDetails = await KamDetails.findOne({ userId: user._id }).lean();
 
-    const [plan, codPlan, account, aadhar, pan, gst, billingAddress] =
+    const [plan, b2bPlan, codPlan, account, aadhar, pan, gst, billingAddress] =
       await Promise.all([
         Plan.findOne({ userId: user._id }).lean(),
+        B2BPlan.findOne({ userId: user._id }).lean(),
         CodPlans.findOne({ user: user._id }).lean(),
         Account.findOne({ user: user._id }).lean(),
         Aadhar.findOne({ user: user._id }).lean(),
@@ -497,6 +499,7 @@ const getUserById = async (req, res) => {
       holdAmount: holdAmount,
       creditLimit: user.Wallet?.creditLimit || 0,
       rateCard: plan?.planName || "N/A",
+      b2bRateCard: b2bPlan?.planName || "N/A",
       codPlan: codPlan?.planName || "N/A",
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
@@ -869,7 +872,7 @@ const assignPlan = async (req, res) => {
       userName,
       planName,
       rateCards = [],
-      B2BRateCard = [],
+      // B2BRateCard = [],
     } = req.body;
 
     // console.log("Assign Plan Payload:", req.body);
@@ -880,9 +883,9 @@ const assignPlan = async (req, res) => {
       });
     }
 
-    if (rateCards.length === 0 && B2BRateCard.length === 0) {
+    if (rateCards.length === 0) {
       return res.status(400).json({
-        error: "At least one rate card (B2C or B2B) is required",
+        error: "At least one rate card (B2C) is required",
       });
     }
 
@@ -893,7 +896,7 @@ const assignPlan = async (req, res) => {
       // ✅ Update existing plan
       existingPlan.planName = planName;
       existingPlan.rateCard = rateCards;
-      existingPlan.B2BRateCard = B2BRateCard; // 🔥 NEW
+      // existingPlan.B2BRateCard = B2BRateCard; // 🔥 NEW
       existingPlan.assignedAt = new Date();
 
       await existingPlan.save();
@@ -910,7 +913,7 @@ const assignPlan = async (req, res) => {
       userName,
       planName,
       rateCard: rateCards,
-      B2BRateCard, // 🔥 NEW
+      // B2BRateCard, // 🔥 NEW
       assignedAt: new Date(),
     });
 
@@ -928,6 +931,72 @@ const assignPlan = async (req, res) => {
   }
 };
 
+
+const B2BassignPlan = async (req, res) => {
+  try {
+    const {
+      userId,
+      userName,
+      planName,
+      // rateCards = [],
+      B2BRateCard = [],
+    } = req.body;
+
+    // console.log("Assign Plan Payload:", req.body);
+
+    if (!planName) {
+      return res.status(400).json({
+        error: "Plan name is required",
+      });
+    }
+
+    if (B2BRateCard.length === 0) {
+      return res.status(400).json({
+        error: "At least one rate card (B2B) is required",
+      });
+    }
+
+    // Check if there is an existing plan for the user
+    let existingPlan = await B2BPlan.findOne({ userId });
+
+    if (existingPlan) {
+      // ✅ Update existing plan
+      existingPlan.planName = planName;
+      // existingPlan.rateCard = rateCards;
+      existingPlan.B2BRateCard = B2BRateCard; // 🔥 NEW
+      existingPlan.assignedAt = new Date();
+
+      await existingPlan.save();
+
+      return res.status(200).json({
+        message: "Plan updated successfully",
+        plan: existingPlan,
+      });
+    }
+
+    // ✅ Create new plan
+    const newPlan = new B2BPlan({
+      userId,
+      userName,
+      planName,
+      // rateCard: rateCards,
+      B2BRateCard, // 🔥 NEW
+      assignedAt: new Date(),
+    });
+
+    await newPlan.save();
+
+    return res.status(201).json({
+      message: "Plan assigned successfully",
+      plan: newPlan,
+    });
+  } catch (err) {
+    console.error("Assign Plan Error:", err);
+    return res.status(500).json({
+      error: "Failed to assign plan",
+    });
+  }
+};
 
 const makeAdmin = async () => {
   try {
@@ -1137,6 +1206,7 @@ module.exports = {
   getUserDetails,
   getAllPlans,
   assignPlan,
+  B2BassignPlan,
   getRatecards,
   getAllUsers,
   changeUser,

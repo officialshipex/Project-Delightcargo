@@ -1,6 +1,6 @@
 const ZoneMatrix = require("../../models/zoneMatrix.model");
 const Order = require("../../../models/newOrder.model");
-const Plan = require("../../../models/Plan.model");
+const Plan = require("../../models/plan.model");
 const B2BRateCard = require("../../models/ratecard.model");
 const courierServiceB2B = require("../../models/courierService.model");
 const {
@@ -36,14 +36,16 @@ const getZoneByCityOrState = async (city, state) => {
 const calculateChargeableWeight = (packages, divisor = 5000) => {
   let deadWeight = 0;
   let volumetricWeight = 0;
-
+  // console.log("divisor",divisor)
+// console.log("packages",packages)
   for (const pkg of packages) {
-    deadWeight += pkg.noOfBox * pkg.weightPerBox;
+    deadWeight += Number(pkg.noOfBox) * Number(pkg.weightPerBox);
 
     volumetricWeight +=
-      (pkg.length * pkg.width * pkg.height * pkg.noOfBox) / divisor;
+      (Number(pkg.length) * Number(pkg.width) * Number(pkg.height) * Number(pkg.noOfBox)) / divisor;
   }
-
+  // console.log("dead weight", deadWeight);
+  // console.log("volumetric", volumetricWeight);
   return Math.max(deadWeight, volumetricWeight);
 };
 
@@ -74,7 +76,7 @@ const calculateOverhead = (overhead, base, weight) => {
     value = overhead.min;
   }
 
-  return Number(value.toFixed(2));
+  return Number(value.toFixed(2));  
 };
 
 const resolveDivisor = (divisorConfig) => {
@@ -120,8 +122,9 @@ const calculateB2BCargoRate = ({
   orderValue = 0,
   rovType = "ROV Owner",
 }) => {
-  const divisor = resolveDivisor(rateCard.overheadCharges?.divisor);
-
+  // console.log("rate",rateCard)
+  const divisor = Number(rateCard.overheadCharges?.divisor.value);
+// console.log("divisor",divisor)
   const actualChargeableWeight = calculateChargeableWeight(packages, divisor);
   const billableWeight = Math.max(actualChargeableWeight, minWeight);
 
@@ -133,6 +136,7 @@ const calculateB2BCargoRate = ({
   if (!rateCell) return null;
 
   const ratePerKg = rateCell.price;
+  // console.log("billable", billableWeight);
   const freight = billableWeight * ratePerKg;
 
   const overheads = rateCard.overheadCharges || {};
@@ -260,30 +264,26 @@ const ShipNowB2BOrder = async (req, res) => {
     // console.log("Serviceable Couriers:", serviceableCouriers);
 
     for (const rc of rateCards) {
-      // const providerName = rc.courierServiceName?.toLowerCase()?.trim();
-
-      // ❌ Skip non-serviceable courier
-      // if (!serviceableCouriers.has(providerName)) {
-      //   continue;
-      // }
-
       const courier = await courierServiceB2B
         .findById(rc.courierService)
         .select("weight")
         .select("courier");
       // console.log("Evaluating Courier Service:", courier);
 
-      const serviceName = courier?.courier?.toLowerCase()?.trim() || "";
-      // console.log("Evaluating Courier Service:", serviceName);
-      // ❌ Skip non-serviceable courier
-      if (!serviceableCouriers.includes(serviceName)) {
+      const serviceName = courier?.courier?.trim() || "";
+      // ✅ Find matching serviceable courier
+      const matchedService = serviceableCouriers.find(
+        (s) => s.key === serviceName
+      );
+
+      if (!matchedService) {
         continue;
       }
 
       const minWeight = courier?.weight || 10;
       const isCOD = order.paymentDetails?.method?.toUpperCase() === "COD";
       const orderValue = Number(order.paymentDetails?.amount || 0);
-
+// console.log("weight",order.B2BPackageDetails.packages)
       const working = calculateB2BCargoRate({
         rateCard: rc,
         fromZone,
@@ -305,6 +305,8 @@ const ShipNowB2BOrder = async (req, res) => {
           : "surface",
         working,
         tat: 3,
+        serviceId: matchedService.id,
+        modeId: matchedService.modeId,
       });
     }
 

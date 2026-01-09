@@ -27,11 +27,15 @@ const getAllCourierServices = async (req, res) => {
 const createCourier = async (req, res) => {
   try {
     const { provider, courier, courierType, name, weight, status } = req.body;
+    // console.log("Creating Courier with data:", req.body);
+    const courierValue = Array.isArray(courier)
+      ? courier[0].trim()
+      : courier.trim();
 
     // 🔒 Duplicate check (same provider + same courier)
     const existingCourier = await CourierServicesB2B.findOne({
       provider: provider.trim(),
-      courier: courier.trim(),
+      courier: courierValue,
       name: name.trim(),
     });
 
@@ -43,7 +47,7 @@ const createCourier = async (req, res) => {
 
     const newCourier = new CourierServicesB2B({
       provider: provider.trim(),
-      courier: courier.trim(),
+      courier: courierValue,
       courierType,
       name,
       weight,
@@ -382,7 +386,31 @@ const getShiprocketCourierServices = async (req, res) => {
     success: true,
     data: [
       {
-        service: "Delhivery Enterprise",
+        service: ["Bluedart-surface"],
+      },
+      {
+        service: ["Delhivery-surface"],
+      },
+      {
+        service: ["Delhivery Heavy-surface"],
+      },
+      {
+        service: ["Gati-surface"],
+      },
+      {
+        service: ["Xpressbees-surface"],
+      },
+      {
+        service: ["VXpress-surface"],
+      },
+      {
+        service: ["DP World-surface"],
+      },
+      {
+        service: ["Movin-air"],
+      },
+      {
+        service: ["Movin-surface"],
       },
     ],
   });

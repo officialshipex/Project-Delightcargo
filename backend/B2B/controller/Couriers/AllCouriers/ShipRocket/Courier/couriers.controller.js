@@ -10,9 +10,16 @@ exports.createShiprocketCargoShipment = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    const { id, provider, courierServiceName, finalCharges, rateBreakup } =
-      req.body;
-
+    const {
+      id,
+      provider,
+      courierServiceName,
+      serviceId,
+      modeId,
+      finalCharges,
+      rateBreakup,
+    } = req.body;
+    // console.log("Creating Shiprocket Cargo Shipment for Order ID:", req.body);
     session.startTransaction();
 
     /* ================================
@@ -149,8 +156,8 @@ exports.createShiprocketCargoShipment = async (req, res) => {
 
       // REQUIRED
       to_pay_amount: "0",
-      mode_id,
-      delivery_partner_id,
+      modeId,
+      serviceId,
 
       // REQUIRED FORMAT: "YYYY-MM-DD HH:mm:ss"
       pickup_date_time: new Date().toISOString().slice(0, 19).replace("T", " "),
@@ -386,7 +393,6 @@ exports.getCargoServiceableCouriers = async ({ order, packages }) => {
     to_state: order.receiverAddress.state,
 
     quantity: packages.reduce((sum, p) => sum + Number(p.noOfBox || 0), 0),
-
     invoice_value: Number(order.paymentDetails?.amount || 0),
     calculator_page: "true",
 
@@ -400,8 +406,6 @@ exports.getCargoServiceableCouriers = async ({ order, packages }) => {
     })),
   };
 
-  // console.log("Payload:", payload);
-
   const response = await axios.post(
     `${BASE_URL}/api/shipment/charges/`,
     payload,
@@ -414,19 +418,16 @@ exports.getCargoServiceableCouriers = async ({ order, packages }) => {
   );
 
   const services = response.data || {};
-  const serviceableCouriersSet = new Set();
+  // console.log("Shiprocket Cargo Serviceability Response:", services);
 
-  for (const key of Object.keys(services)) {
-    if (key === "success") continue;
-
-    const service = services[key];
-    if (service?.transporter_name) {
-      serviceableCouriersSet.add(service.transporter_name.toLowerCase().trim());
-    }
-  }
-
-  // ✅ RETURN AS ARRAY
-  return Array.from(serviceableCouriersSet);
+  // ✅ Return service key + id
+  return Object.keys(services)
+    .filter((key) => key !== "success")
+    .map((key) => ({
+      key,
+      id: services[key]?.id || null,
+      modeId: services[key]?.mode_id || null,
+    }));
 };
 
 const getCargoShipmentCharges = async () => {
