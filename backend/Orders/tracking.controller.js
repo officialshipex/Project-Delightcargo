@@ -208,7 +208,7 @@ const trackSingleOrder = async (order) => {
         );
         // console.log("db mapping dtdc", dbMapping);
         if (dbMapping) {
-          console.log("maped dtdc status",dbMapping.sy_status)
+          console.log("maped dtdc status", dbMapping.sy_status);
           order.status = dbMapping.sy_status;
           order.ndrStatus = dbMapping.sy_status;
           if (
@@ -352,6 +352,15 @@ const trackSingleOrder = async (order) => {
           order.status = "Ready To Ship";
           order.ndrStatus = "Ready To Ship";
         }
+        if (normalizedData.Instructions === "PickupCancelled") {
+          order.status = "Cancelled";
+          order.ndrStatus = "Cancelled";
+          balanceTobeAdded =
+            order.totalFreightCharges === "N/A"
+              ? 0
+              : parseFloat(order.totalFreightCharges);
+          shouldUpdateWallet = true;
+        }
         // console.log("amazon instr", normalizedData);
         if (
           normalizedData.Instructions === "PickupDone" ||
@@ -391,55 +400,52 @@ const trackSingleOrder = async (order) => {
         //     ? order.tracking[order.tracking.length - 2]
         //     : null;
 
-        
-          // normalizedData.Instructions === "DeliveryAttempted"
-          // wasPreviousDeliveryAttempted
+        // normalizedData.Instructions === "DeliveryAttempted"
+        // wasPreviousDeliveryAttempted
         // )
-          // if (order.ndrStatus !== "Action_Requested") {
-          //   order.status = "Undelivered";
-          //   order.ndrStatus = "Undelivered";
+        // if (order.ndrStatus !== "Action_Requested") {
+        //   order.status = "Undelivered";
+        //   order.ndrStatus = "Undelivered";
 
-            
+        //   order.ndrReason = {
+        //     date: normalizedData.StatusDateTime,
+        //     reason: normalizedData.StrRemarks,
+        //   };
 
-          //   order.ndrReason = {
-          //     date: normalizedData.StatusDateTime,
-          //     reason: normalizedData.StrRemarks,
-          //   };
+        //   const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+        //   const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
 
-          //   const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
-          //   const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+        //   const lastEntryDate = lastAction?.date
+        //     ? new Date(lastAction.date).getTime()
+        //     : null;
 
-          //   const lastEntryDate = lastAction?.date
-          //     ? new Date(lastAction.date).getTime()
-          //     : null;
+        //   const currentStatusDate = new Date(
+        //     normalizedData.StatusDateTime
+        //   ).getTime();
 
-          //   const currentStatusDate = new Date(
-          //     normalizedData.StatusDateTime
-          //   ).getTime();
+        //   if (
+        //     (order.ndrHistory.length === 0 ||
+        //       lastEntryDate !== currentStatusDate) &&
+        //     order.ndrHistory.length <= 2
+        //   ) {
+        //     order.reattempt = true;
+        //     const attemptCount = order.ndrHistory?.length + 1 || 0;
 
-          //   if (
-          //     (order.ndrHistory.length === 0 ||
-          //       lastEntryDate !== currentStatusDate) &&
-          //     order.ndrHistory.length <= 2
-          //   ) {
-          //     order.reattempt = true;
-          //     const attemptCount = order.ndrHistory?.length + 1 || 0;
-              
-          //     const newHistoryEntry = {
-          //       actions: [
-          //         {
-          //           action: `NDR ${attemptCount} Raised`,
-          //           actionBy: order.courierServiceName,
-          //           remark: normalizedData.StrRemarks,
-          //           source: order.provider,
-          //           date: normalizedData.StatusDateTime,
-          //         },
-          //       ],
-          //     };
+        //     const newHistoryEntry = {
+        //       actions: [
+        //         {
+        //           action: `NDR ${attemptCount} Raised`,
+        //           actionBy: order.courierServiceName,
+        //           remark: normalizedData.StrRemarks,
+        //           source: order.provider,
+        //           date: normalizedData.StatusDateTime,
+        //         },
+        //       ],
+        //     };
 
-          //     order.ndrHistory.push(newHistoryEntry);
-          //   }
-          // }
+        //     order.ndrHistory.push(newHistoryEntry);
+        //   }
+        // }
       } else {
         // RTO flow
         if (
@@ -1180,8 +1186,7 @@ const startTrackingLoop = async () => {
   }
 };
 
-// startTrackingLoop(); 
-
+// startTrackingLoop();
 
 if (process.env.NODE_ENV === "production") {
   startTrackingLoop();

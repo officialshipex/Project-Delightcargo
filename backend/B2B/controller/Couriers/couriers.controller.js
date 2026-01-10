@@ -412,6 +412,9 @@ const getShiprocketCourierServices = async (req, res) => {
       {
         service: ["Movin-surface"],
       },
+      {
+        service: ["Smart Cargo Advantage-surface"],
+      },
     ],
   });
 };

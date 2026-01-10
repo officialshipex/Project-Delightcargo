@@ -346,7 +346,7 @@ const getShipmentTracking = async (trackingId) => {
         },
       }
     );
-    // console.log("response", response.data.payload.eventHistory);
+    console.log("response", response.data.payload.eventHistory);
     // console.log(
     //   "Tracking Information:",
     //   response.data.payload.eventHistory[
@@ -372,7 +372,7 @@ const getShipmentTracking = async (trackingId) => {
     );
   }
 };
-// getShipmentTracking("365976538415");
+// getShipmentTracking("366282419405");
 
 const getCorrectShipDate = () => {
   const now = new Date();

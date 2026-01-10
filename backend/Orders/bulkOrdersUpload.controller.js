@@ -279,11 +279,14 @@ function parseExcel(filePath) {
 const bulkOrder = async (req, res) => {
   try {
     const userID = req.user._id;
+
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    // Save file metadata
+    /* ===============================
+       SAVE FILE META
+    =============================== */
     const fileData = new File({
       filename: req.file.filename,
       date: new Date(),
@@ -291,42 +294,33 @@ const bulkOrder = async (req, res) => {
     });
     await fileData.save();
 
-    // Determine the file extension
+    /* ===============================
+       FILE VALIDATION
+    =============================== */
     const fileExtension = path.extname(req.file.originalname).toLowerCase();
-    let orders = [];
 
-    // Parse the file based on its extension
-    if (fileExtension === ".csv") {
-      // orders = await parseCSV(req.file.path, fileData);
-    } else if (fileExtension === ".xlsx" || fileExtension === ".xls") {
-      orders = await parseExcel(req.file.path);
-    } else {
+    if (![".xlsx", ".xls"].includes(fileExtension)) {
       return res.status(400).json({ error: "Unsupported file format" });
     }
 
-    // Validation: Check if file contains data
-    if (!orders || orders.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "The uploaded file is empty or contains invalid data" });
+    const orders = await parseExcel(req.file.path);
+
+    if (!orders || !orders.length) {
+      return res.status(400).json({
+        error: "The uploaded file is empty or contains invalid data",
+      });
     }
 
-    // Find user's default pickup address from the DB
+    /* ===============================
+       DEFAULT PICKUP ADDRESS
+    =============================== */
     const defaultAddress = await PickupAddress.findOne({
       userId: userID,
       isPrimary: true,
     });
 
     const defaultPickupAddress = defaultAddress
-      ? {
-          contactName: defaultAddress.pickupAddress.contactName,
-          email: defaultAddress.pickupAddress.email,
-          phoneNumber: defaultAddress.pickupAddress.phoneNumber,
-          address: defaultAddress.pickupAddress.address,
-          pinCode: defaultAddress.pickupAddress.pinCode,
-          city: defaultAddress.pickupAddress.city,
-          state: defaultAddress.pickupAddress.state,
-        }
+      ? defaultAddress.pickupAddress
       : {
           contactName: "Default Name",
           email: "default@example.com",
@@ -337,169 +331,159 @@ const bulkOrder = async (req, res) => {
           state: "Default State",
         };
 
-    const orderDocs = await Promise.all(
-      orders.map(async (row, index) => {
-        const deadWeight = parseFloat(row["*Dead Weight (kg)"] || 0);
+    /* ===============================
+       PROCESS ROWS
+    =============================== */
+    const orderDocs = [];
+    const rowErrors = [];
+
+    for (let i = 0; i < orders.length; i++) {
+      const row = orders[i];
+      const rowNumber = i + 2; // Excel row number
+
+      try {
+        /* ===== Mandatory validations ===== */
+        if (!row["*Receiver Contact Name"]) {
+          throw new Error("Receiver Contact Name is required");
+        }
+
+        if (!row["*Receiver Phone Number"]) {
+          throw new Error("Receiver Phone Number is required");
+        }
+
+        if (!row["*Method (COD/Prepaid)"]) {
+          throw new Error("Payment Method is required");
+        }
+
+        if (!row["*Product 1 Name"]) {
+          throw new Error("Product 1 Name is required");
+        }
+
+        /* ===============================
+           ORDER ID
+        =============================== */
+        let orderId;
+        while (true) {
+          orderId = Math.floor(100000 + Math.random() * 900000);
+          if (!(await Order.findOne({ orderId }))) break;
+        }
+
+        const compositeOrderId = `${userID}-${orderId}`;
+
+        /* ===============================
+           WEIGHT
+        =============================== */
+        const deadWeight = Number(row["*Dead Weight (kg)"] || 0);
         const volumetricWeight =
-          (parseFloat(row["*Length (cm)"] || 0) *
-            parseFloat(row["*Width (cm)"] || 0) *
-            parseFloat(row["*Height (cm)"] || 0)) /
+          (Number(row["*Length (cm)"] || 0) *
+            Number(row["*Width (cm)"] || 0) *
+            Number(row["*Height (cm)"] || 0)) /
           5000;
+
         const applicableWeight = Math.max(deadWeight, volumetricWeight);
 
-        let orderId;
-        let isUnique = false;
+        /* ===============================
+           PRODUCT
+        =============================== */
+        const quantity = Number(row["*Product 1 Quantity"] || 1);
+        const price = Number(row["*Product 1 Unit Price"] || 0);
+        const discount = Number(row["*Product 1 Discount (Optional)"] || 0);
 
-        while (!isUnique) {
-          orderId = Math.floor(100000 + Math.random() * 900000); // Generates a random six-digit number
-          const existingOrder = await Order.findOne({ orderId });
-          if (!existingOrder) {
-            isUnique = true;
-          }
-        }
-        const compositeOrderId = `${req.user._id}-${orderId}`;
-        const product1Quantity = parseInt(row["*Product 1 Quantity"] || 1);
-        const product2Quantity = parseInt(
-          row["Product 2 Quantity (Optional)"] || 1
-        );
-        const product3Quantity = parseInt(
-          row["Product 3 Quantity (Optional)"] || 1
-        );
+        const totalAmount = quantity * price - discount;
 
-        const product1Price = parseFloat(row["*Product 1 Unit Price"] || 0);
-        const product2Price = parseFloat(
-          row["Product 2 Unit Price (Optional)"] || 0
-        );
-        const product3Price = parseFloat(
-          row["Product 3 Unit Price (Optional)"] || 0
-        );
-
-        const product1hsn = row["Product 1 HSN (Optional)"];
-        const product2hsn = row["Product 2 HSN (Optional)"];
-        const product3hsn = row["Product 3 HSN (Optional)"];
-
-        const product1discount = row["*Product 1 Discount (Optional)"];
-        const product2discount = row["Product 2 Discount (Optional)"];
-        const product3discount = row["Product 3 Discount (Optional)"];
-
-        const product1tax = row["*Product 1 Tax (Optional)"];
-        const product2tax = row["Product 2 Tax (Optional)"];
-        const product3tax = row["Product 3 Tax (Optional)"];
-
-        let totalAmount =
-          product1Quantity * product1Price +
-          product2Quantity * product2Price +
-          product3Quantity * product3Price;
-        const totalDiscount =
-          product1discount + product2discount + product3discount;
-        totalAmount = totalAmount - totalDiscount;
-        return {
+        /* ===============================
+           ORDER DOC
+        =============================== */
+        orderDocs.push({
           userId: userID,
-          orderId: orderId,
+          orderId,
+          compositeOrderId,
           pickupAddress: defaultPickupAddress,
           receiverAddress: {
-            contactName: row["*Receiver Contact Name"] || "Unknown",
+            contactName: row["*Receiver Contact Name"],
             email: row["*Receiver Email"] || "unknown@example.com",
-            phoneNumber: row["*Receiver Phone Number"] || "0000000000",
-            address: row["*Receiver Address"] || "No Address",
-            pinCode: row["*Receiver Pin Code"] || "000000",
-            city: row["*Receiver City"] || "Unknown City",
-            state: row["*Receiver State"] || "Unknown State",
+            phoneNumber: row["*Receiver Phone Number"],
+            address: row["*Receiver Address"] || "",
+            pinCode: row["*Receiver Pin Code"],
+            city: row["*Receiver City"],
+            state: row["*Receiver State"],
           },
           paymentDetails: {
-            method: (row["*Method (COD/Prepaid)"] || "Prepaid").trim(), // ✅ remove spaces
+            method: row["*Method (COD/Prepaid)"].trim(),
             amount: totalAmount,
           },
-
           productDetails: [
             {
               id: 1,
-              name: row["*Product 1 Name"] || "Unknown Product",
-              sku: row["Product 1 SKU"] || "UNKNOWN_SKU",
-              hsn: product1hsn || "",
-              discount: product1discount || "",
-              tax: product1tax || "",
-              quantity: product1Quantity,
-              unitPrice: product1Price,
+              name: row["*Product 1 Name"],
+              quantity,
+              unitPrice: price,
+              sku: row["Product 1 SKU"] || "",
             },
-            ...(row["Product 2 Name (Optional)"]
-              ? [
-                  {
-                    id: 2,
-                    name: row["Product 2 Name (Optional)"],
-                    sku: row["Product 2 SKU (Optional)"] || "UNKNOWN_SKU",
-                    hsn: product2hsn || "",
-                    discount: product2discount || "",
-                    tax: product2tax || "",
-                    quantity: product2Quantity,
-                    unitPrice: product2Price,
-                  },
-                ]
-              : []),
-            ...(row["Product 3 Name (Optional)"]
-              ? [
-                  {
-                    id: 3,
-                    name: row["Product 3 Name (Optional)"],
-                    sku: row["Product 3 SKU (Optional)"] || "UNKNOWN_SKU",
-                    hsn: product3hsn || "",
-                    discount: product3discount || "",
-                    tax: product3tax || "",
-                    quantity: product3Quantity,
-                    unitPrice: product3Price,
-                  },
-                ]
-              : []),
           ],
-
           packageDetails: {
             deadWeight,
-            applicableWeight,
             volumetricWeight: {
               length: parseFloat(row["*Length (cm)"] || 0),
               width: parseFloat(row["*Width (cm)"] || 0),
               height: parseFloat(row["*Height (cm)"] || 0),
             },
-          },
-          otherDetails: {
-            resellerName: row["Reseller Name (Optional)"],
-            gstin: row["GSTIN (Optional)"],
-            ewaybill: row["GST E-Waybill Number"],
+            applicableWeight,
           },
           channel: "custom",
-          compositeOrderId,
           status: "new",
-        };
-      })
-    );
+        });
+      } catch (err) {
+        rowErrors.push({
+          row: rowNumber,
+          message: err.message,
+        });
+      }
+    }
 
-    // Insert all orders in bulk
-    await Order.insertMany(orderDocs);
+    /* ===============================
+       INSERT VALID ORDERS
+    =============================== */
+    if (orderDocs.length) {
+      await Order.insertMany(orderDocs);
+    }
 
-    // Update file metadata
-    fileData.status = "Completed";
-    fileData.noOfOrders = orderDocs.length;
+    /* ===============================
+       FILE STATUS UPDATE
+    =============================== */
+    fileData.status = rowErrors.length
+      ? orderDocs.length
+        ? "Partial"
+        : "Error"
+      : "Completed";
+
+    fileData.noOfOrders = orders.length;
     fileData.successfullyUploaded = orderDocs.length;
+    fileData.errorOrders = rowErrors.length;
+
     await fileData.save();
 
-    // Delete uploaded file
-    fs.unlink(req.file.path, (err) => {
-      if (err) {
-        console.error("⚠️ Failed to delete uploaded file:", err);
-      } else {
-        console.log("🧹 Temporary file deleted:", req.file.path);
-      }
-    });
+    fs.unlinkSync(req.file.path);
 
-    return res.status(200).json({
-      message: "Bulk order uploaded successfully",
+    /* ===============================
+       FINAL RESPONSE
+    =============================== */
+    return res.status(rowErrors.length ? 207 : 200).json({
+      message:
+        rowErrors.length === 0
+          ? "Bulk order uploaded successfully"
+          : "Bulk upload completed with some errors",
+      totalRows: orders.length,
+      successCount: orderDocs.length,
+      failedCount: rowErrors.length,
+      errors: rowErrors,
       file: fileData,
     });
   } catch (error) {
-    console.error(error);
-    res
-      .status(500)
-      .json({ error: "An error occurred while processing the file" });
+    console.error("Bulk Upload Error:", error);
+    return res.status(500).json({
+      error: error.message || "Failed to process bulk upload",
+    });
   }
 };
 

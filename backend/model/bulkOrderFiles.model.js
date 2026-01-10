@@ -11,7 +11,7 @@ const bulkOrdersFileSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['Processing', 'Completed', 'Error'],
+        enum: ['Processing', 'Completed',"Partial", 'Error'],
         default: 'Processing',
     },
     noOfOrders: {
