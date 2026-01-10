@@ -22,6 +22,7 @@ const {
   getShiprocketCourierServices
 } = require("./controller/Couriers/couriers.controller");
 const shiprocketRouter = require("./controller/Couriers/AllCourierRoutes/shiprocket.router");
+const delhiveryRouter=require("./controller/Couriers/AllCourierRoutes/delhivery.router")
 const {
   ShipNowB2BOrder,
 } = require("./controller/Orders/ShipNowB2BOrder.controller");
@@ -79,7 +80,10 @@ router.delete("/couriers/deleteCourier/:id", deleteCourier);
 router.post("/couriers/:courier/uploadPincode", uploadPincode);
 router.get("/couriers/:courier/downloadPincode", downloadPincode);
 router.get("/couriers/getShiprocketCourierServices", getShiprocketCourierServices);
+
+
 router.use("/shiprocket", shiprocketRouter);
+router.use("/delhivery",delhiveryRouter)
 
 router.get("/courierServices/getAllCourierServices", getAllCourierServices);
 router.post("/courierServices/createCourier", createCourier);

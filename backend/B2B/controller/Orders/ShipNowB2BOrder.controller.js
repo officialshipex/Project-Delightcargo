@@ -6,6 +6,7 @@ const courierServiceB2B = require("../../models/courierService.model");
 const {
   getCargoServiceableCouriers,
 } = require("../Couriers/AllCouriers/ShipRocket/Courier/couriers.controller");
+const {checkDelhiveryServiceability}=require("../Couriers/AllCouriers/Delhivery/Courier/couriers.controller")
 
 const normalize = (str) => str?.toLowerCase().replace(/\s+/g, "").trim();
 
@@ -37,12 +38,16 @@ const calculateChargeableWeight = (packages, divisor = 5000) => {
   let deadWeight = 0;
   let volumetricWeight = 0;
   // console.log("divisor",divisor)
-// console.log("packages",packages)
+  // console.log("packages",packages)
   for (const pkg of packages) {
     deadWeight += Number(pkg.noOfBox) * Number(pkg.weightPerBox);
 
     volumetricWeight +=
-      (Number(pkg.length) * Number(pkg.width) * Number(pkg.height) * Number(pkg.noOfBox)) / divisor;
+      (Number(pkg.length) *
+        Number(pkg.width) *
+        Number(pkg.height) *
+        Number(pkg.noOfBox)) /
+      divisor;
   }
   // console.log("dead weight", deadWeight);
   // console.log("volumetric", volumetricWeight);
@@ -76,7 +81,7 @@ const calculateOverhead = (overhead, base, weight) => {
     value = overhead.min;
   }
 
-  return Number(value.toFixed(2));  
+  return Number(value.toFixed(2));
 };
 
 const resolveDivisor = (divisorConfig) => {
@@ -124,7 +129,7 @@ const calculateB2BCargoRate = ({
 }) => {
   // console.log("rate",rateCard)
   const divisor = Number(rateCard.overheadCharges?.divisor.value);
-// console.log("divisor",divisor)
+  console.log("divisor", divisor);
   const actualChargeableWeight = calculateChargeableWeight(packages, divisor);
   const billableWeight = Math.max(actualChargeableWeight, minWeight);
 
@@ -256,34 +261,59 @@ const ShipNowB2BOrder = async (req, res) => {
 
     const results = [];
 
-    // 🔍 SHIPROCKET SERVICEABILITY CHECK (ONCE)
-    const serviceableCouriers = await getCargoServiceableCouriers({
-      order,
-      packages: order.B2BPackageDetails.packages,
-    });
-    // console.log("Serviceable Couriers:", serviceableCouriers);
+    // 🔹 Cache serviceability PER PROVIDER
+    const serviceabilityCache = {};
 
     for (const rc of rateCards) {
       const courier = await courierServiceB2B
         .findById(rc.courierService)
-        .select("weight")
-        .select("courier");
-      // console.log("Evaluating Courier Service:", courier);
+        .select("weight courier");
 
-      const serviceName = courier?.courier?.trim() || "";
-      // ✅ Find matching serviceable courier
-      const matchedService = serviceableCouriers.find(
-        (s) => s.key === serviceName
-      );
+      if (!courier) continue;
 
-      if (!matchedService) {
+      const serviceName = courier.courier?.trim() || "";
+      const provider = rc.courierProviderName;
+
+      // ===============================
+      // SERVICEABILITY CHECK (ONCE PER PROVIDER)
+      // ===============================
+      if (!serviceabilityCache[provider]) {
+        serviceabilityCache[provider] = await checkB2BServiceability({
+          provider,
+          order,
+          packages: order.B2BPackageDetails.packages,
+        });
+      }
+
+      const serviceability = serviceabilityCache[provider];
+
+      // ===============================
+      // AGGREGATOR (SHIPROCKET)
+      // ===============================
+      let matchedService = null;
+
+      if (serviceability.type === "aggregator") {
+        matchedService = serviceability.couriers.find(
+          (s) => s.key === serviceName
+        );
+
+        if (!matchedService) continue;
+      }
+
+      // ===============================
+      // DIRECT COURIER (DELHIVERY / DTDC)
+      // ===============================
+      if (serviceability.type === "direct" && !serviceability.serviceable) {
         continue;
       }
 
-      const minWeight = courier?.weight || 10;
+      // ===============================
+      // RATE CALCULATION
+      // ===============================
+      const minWeight = courier.weight || 10;
       const isCOD = order.paymentDetails?.method?.toUpperCase() === "COD";
       const orderValue = Number(order.paymentDetails?.amount || 0);
-// console.log("weight",order.B2BPackageDetails.packages)
+
       const working = calculateB2BCargoRate({
         rateCard: rc,
         fromZone,
@@ -297,22 +327,23 @@ const ShipNowB2BOrder = async (req, res) => {
 
       if (!working) continue;
 
+      // ===============================
+      // PUSH RESULT
+      // ===============================
       results.push({
         courierServiceName: rc.courierServiceName,
-        provider: rc.courierProviderName,
+        provider,
         mode_name: rc.courierServiceName.toLowerCase().includes("air")
           ? "air"
           : "surface",
         working,
         tat: 3,
-        serviceId: matchedService.id,
-        modeId: matchedService.modeId,
+        serviceId: matchedService?.id || null,
+        modeId: matchedService?.modeId || null,
       });
     }
 
     results.sort((a, b) => a.working.grand_total - b.working.grand_total);
-
-    // console.log("B2B ShipNow Results:", results);
 
     res.status(200).json({
       success: true,
@@ -325,6 +356,48 @@ const ShipNowB2BOrder = async (req, res) => {
     console.error("B2B ShipNow Error:", err);
     res.status(500).json({ error: err.message });
   }
+};
+
+const checkB2BServiceability = async ({ provider, order, packages }) => {
+  const providerName = provider.toLowerCase();
+
+  // ===============================
+  // SHIPROCKET (AGGREGATOR)
+  // ===============================
+  if (providerName === "shiprocket") {
+    const couriers = await getCargoServiceableCouriers({
+      order,
+      packages,
+    });
+
+    return {
+      type: "aggregator",
+      couriers: couriers || [], // [{ key, id, modeId }]
+    };
+  }
+
+  // ===============================
+  // DELHIVERY (DIRECT)
+  // ===============================
+  if (providerName === "delhivery") {
+    const isServiceable = await checkDelhiveryServiceability({
+      order,
+      packages,
+    });
+
+    return {
+      type: "direct",
+      serviceable: isServiceable,
+    };
+  }
+
+  // ===============================
+  // DEFAULT DIRECT COURIER
+  // ===============================
+  return {
+    type: "direct",
+    serviceable: true,
+  };
 };
 
 module.exports = {

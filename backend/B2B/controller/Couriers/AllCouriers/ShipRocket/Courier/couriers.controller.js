@@ -19,7 +19,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
       finalCharges,
       rateBreakup,
     } = req.body;
-    // console.log("Creating Shiprocket Cargo Shipment for Order ID:", req.body);
+    console.log("Creating Shiprocket Cargo Shipment for Order ID:", req.body);
     session.startTransaction();
 
     /* ================================
@@ -46,7 +46,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
     const balance = effectiveBalance + wallet.creditLimit;
 
     if (balance < finalCharges) throw new Error("Insufficient Wallet Balance");
-
+    const isAppointment = rateBreakup.appointment_charge > 0 ? true : false;
     /* ================================
        3️⃣ DEDUCT WALLET (IMMEDIATE)
     ================================= */
@@ -75,6 +75,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
         0
       ),
       invoice_value: order.paymentDetails.amount,
+      is_appointment_taken: isAppointment,
       approx_weight: order.B2BPackageDetails.applicableWeight,
       is_insured: false,
       is_to_pay: false,
@@ -228,7 +229,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
       60 * 1000
     );
   } catch (err) {
-    console.log("Error in Shiprocket Cargo Shipment:", err);
+    console.log("Error in Shiprocket Cargo Shipment:", err.response.data);
     await session.abortTransaction();
     session.endSession();
 
@@ -276,7 +277,7 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
             awb_number: awbRef,
             amount: refundAmount,
             balanceAfterTransaction: newBalance,
-            description: "Shipment Failed - Freight Charges Refunded",
+            description: "Freight Charges Received",
             date: new Date(),
           },
         },
