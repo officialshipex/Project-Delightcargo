@@ -9,7 +9,7 @@ const {getToken}=require("../AllCouriers/Delhivery/Authorize/delhivery.controlle
 
 
 
-// router.post('/getToken', getToken);
+router.post('/getToken', getToken);
 
 
 module.exports = router

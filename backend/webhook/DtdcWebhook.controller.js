@@ -56,12 +56,17 @@ const DTDCWebhook = async (req, res) => {
     // ✔ PROCESS EACH TRACKING EVENT ONE BY ONE
     // -------------------------------------------
     for (const ev of sortedEvents) {
+      if (!statusDoc) continue;
+
+      const dbMapping = statusDoc.data.find(
+        (d) => d.code?.toLowerCase() === normalizedData.Status?.toLowerCase()
+      );
+
+      if (!dbMapping) continue;
+
       const normalizedData = {
-        Status: ev.strAction || "",
-        StatusDateTime: formatDTDCDateTime(
-          ev.strActionDate,
-          ev.strActionTime
-        ),
+        Status: dbMapping.sy_status || "",
+        StatusDateTime: formatDTDCDateTime(ev.strActionDate, ev.strActionTime),
         Instructions: ev.strActionDesc || "",
         StatusLocation: ev.strOrigin || "",
         StrRemarks: ev.strRemarks === "null" ? "" : ev.strRemarks || "",
@@ -74,15 +79,6 @@ const DTDCWebhook = async (req, res) => {
         StatusLocation: normalizedData.StatusLocation,
         Instructions: normalizedData.Instructions,
       });
-
-      if (!statusDoc) continue;
-
-      const dbMapping = statusDoc.data.find(
-        (d) =>
-          d.code?.toLowerCase() === normalizedData.Status?.toLowerCase()
-      );
-
-      if (!dbMapping) continue;
 
       // Update main mapped status
       order.status = dbMapping.sy_status;
@@ -146,8 +142,7 @@ const DTDCWebhook = async (req, res) => {
       // ✔ Refund Logic
       // -------------------------------------------
       if (
-        normalizedData.Instructions ===
-          "Return as per client instruction." &&
+        normalizedData.Instructions === "Return as per client instruction." &&
         order.tracking.length <= 3
       ) {
         order.status = "Cancelled";
@@ -190,7 +185,6 @@ const DTDCWebhook = async (req, res) => {
 
 module.exports = { DTDCWebhook };
 
-
 // {
 //   "shipment": {
 //     "strRefNo": "579511",
@@ -219,4 +213,3 @@ module.exports = { DTDCWebhook };
 //     }
 //   ]
 // }
-

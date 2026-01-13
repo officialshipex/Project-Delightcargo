@@ -104,9 +104,13 @@ const orderSchema = new mongoose.Schema(
       ],
     },
     orderType: { type: String, enum: ["B2C", "B2B"], default: "B2C" },
-    rovType:{type:String,enum:["ROV Owner", "ROV Carrier"],default:"ROV Owner"},
-    lrn:{type:String},
-    oid:{type:String},
+    rovType: {
+      type: String,
+      enum: ["ROV Owner", "ROV Carrier"],
+      default: "ROV Owner",
+    },
+    lrn: { type: String },
+    oid: { type: String },
     otherDetails: {
       resellerName: { type: String },
       gstin: { type: String },
@@ -161,6 +165,7 @@ const orderSchema = new mongoose.Schema(
     estimatedDeliveryDate: { type: Date },
     walletDeducted: { type: Boolean, default: false },
     walletRefunded: { type: Boolean, default: false },
+    manifestJobId: { type: String },
 
     tracking: [
       {

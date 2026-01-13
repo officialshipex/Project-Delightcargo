@@ -57,7 +57,7 @@ const bookOrder = async (req, res) => {
 
   const { orderId, courierServiceName, courierId } = value;
   const provider = providerMap[courierId] || null;
-  console.log("value", value, provider);
+  // console.log("value", value, provider);
   try {
     // ✅ Fetch order
     const order = await Order.findOne({ orderId });

@@ -2,6 +2,7 @@ const Order = require("../../../models/newOrder.model");
 const User = require("../../../models/User.model");
 const mongoose = require("mongoose");
 const AllocatedRole = require("../../../models/allocateRoleSchema");
+const {createDelhiveryPickupRequest}=require("../Couriers/AllCouriers/Delhivery/Courier/couriers.controller")
 
 const adminB2BOrders = async (req, res) => {
   try {
@@ -21,7 +22,7 @@ const adminB2BOrders = async (req, res) => {
     } = req.query;
 
     const filter = {};
-filter.orderType = "B2B";
+    filter.orderType = "B2B";
     // Order-level filters
     if (orderId && !isNaN(orderId)) {
       filter.orderId = Number(orderId);
@@ -408,4 +409,70 @@ const userB2BOrders = async (req, res) => {
   }
 };
 
-module.exports = { adminB2BOrders, userB2BOrders };
+const generatePickupController = async (req, res) => {
+  try {
+    const { orderIds } = req.body;
+    console.log("order pickup",orderIds)
+
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({ message: "orderIds array is required" });
+    }
+
+    const results = [];
+
+    for (const orderId of orderIds) {
+      const order = await Order.findById(orderId)
+        .populate("pickupAddress")
+        .lean();
+
+      if (!order) {
+        results.push({
+          orderId,
+          success: false,
+          error: "Order not found",
+        });
+        continue;
+      }
+
+      const provider = order.provider?.toLowerCase().trim();
+
+      let result;
+
+      switch (provider) {
+        case "delhivery":
+          result = await createDelhiveryPickupRequest(order);
+          break;
+
+        default:
+          result = {
+            orderId,
+            success: false,
+            error: `Pickup not supported for provider: ${provider}`,
+          };
+          break;
+      }
+
+      results.push(result);
+    }
+
+    const hasFailure = results.some((r) => r.success === false);
+
+    res.status(hasFailure ? 207 : 200).json({
+      success: !hasFailure,
+      message: hasFailure
+        ? "Pickup processed with partial failures"
+        : "Pickup generated successfully",
+      results,
+    });
+  } catch (error) {
+    console.error("Pickup controller error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate pickup request",
+    });
+  }
+};
+
+
+
+module.exports = { adminB2BOrders, userB2BOrders,generatePickupController };
