@@ -5,7 +5,7 @@ const BASE_URL = process.env.DEL_URL; // kept as-is
 const getToken = async (req, res) => {
   const email = req.body.credentials.username;
   const password = req.body.credentials.password;
-
+console.log("req data",req.body)
   const courierData = {
     courierName: req.body.courierName,
     courierProvider: req.body.courierProvider,

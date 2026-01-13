@@ -129,7 +129,7 @@ const calculateB2BCargoRate = ({
 }) => {
   // console.log("rate",rateCard)
   const divisor = Number(rateCard.overheadCharges?.divisor.value);
-  console.log("divisor", divisor);
+  // console.log("divisor", divisor);
   const actualChargeableWeight = calculateChargeableWeight(packages, divisor);
   const billableWeight = Math.max(actualChargeableWeight, minWeight);
 

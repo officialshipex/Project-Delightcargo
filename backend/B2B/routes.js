@@ -5,6 +5,7 @@ const { isAuthorized } = require("../middleware/auth.middleware");
 const {
   adminB2BOrders,
   userB2BOrders,
+  generatePickupController
 } = require("./controller/Orders/orders.controller");
 const zoneMatrix = require("./controller/ZoneMatrix/zoneController");
 const ratecard = require("./controller/RateCard/ratecard.controller");
@@ -38,6 +39,7 @@ const {downloadSampleExcelB2B,bulkOrderB2B} = require("./controller/Orders/addBu
 
 router.get("/getb2badminorder", adminB2BOrders);
 router.get("/getb2buserorder", isAuthorized, userB2BOrders);
+router.post("/generatePickup",isAuthorized,generatePickupController)
 router.get("/zonematrix/getAll", isAuthorized, zoneMatrix.getAll);
 router.post("/zonematrix/addLocation", isAuthorized, zoneMatrix.addLocation);
 router.put(

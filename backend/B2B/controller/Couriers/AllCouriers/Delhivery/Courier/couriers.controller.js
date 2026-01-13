@@ -150,16 +150,12 @@ const createDelhiveryB2BShipment = async (req, res) => {
     ================================= */
     const token = await refreshToken();
 
-    const manifestRes = await axios.post(
-      `${BASE_URL}/manifest`,
-      form,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...form.getHeaders(),
-        },
-      }
-    );
+    const manifestRes = await axios.post(`${BASE_URL}/manifest`, form, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...form.getHeaders(),
+      },
+    });
 
     const jobId = manifestRes.data?.job_id;
     if (!jobId) throw new Error("Delhivery manifest failed");
@@ -172,7 +168,7 @@ const createDelhiveryB2BShipment = async (req, res) => {
       {
         $set: {
           status: "Booked",
-          provider: "delhivery",
+          provider: "Delhivery",
           manifestJobId: jobId,
           totalFreightCharges: finalCharges,
           rateBreakup,
@@ -207,26 +203,45 @@ const createDelhiveryB2BShipment = async (req, res) => {
 };
 
 const createDelhiveryPickupRequest = async (order) => {
-  const token = await refreshToken();
+  try {
+    const token = await refreshToken();
 
-  await axios.post(
-    `${BASE_URL}/pickup_requests`,
-    {
-      client_warehouse: order.pickupAddress.contactName,
-      pickup_date: new Date().toISOString().split("T")[0],
-      start_time: "05:00:00",
-      expected_package_count: order.B2BPackageDetails.packages.reduce(
-        (s, p) => s + p.noOfBox,
+    const packageCount =
+      order.B2BPackageDetails?.packages?.reduce(
+        (sum, pkg) => sum + Number(pkg.noOfBox || 0),
         0
-      ),
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+      ) || 1;
+
+    const response = await axios.post(
+      `${BASE_URL}/pickup_requests`,
+      {
+        client_warehouse: order.pickupAddress?.contactName,
+        pickup_date: new Date().toISOString().split("T")[0],
+        start_time: "05:00:00",
+        expected_package_count: packageCount,
       },
-    }
-  );
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    return {
+      success: true,
+      provider: "delhivery",
+      orderId: order._id,
+      data: response.data,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      provider: "delhivery",
+      orderId: order._id,
+      error: error?.response?.data || error.message,
+    };
+  }
 };
 
 const delhiveryManifestCallback = async (req, res) => {
@@ -398,4 +413,9 @@ const checkDelhiveryServiceability = async ({ order, packages }) => {
   }
 };
 
-module.exports = {createDelhiveryB2BShipment,createDelhiveryPickupRequest,delhiveryManifestCallback, checkDelhiveryServiceability };
+module.exports = {
+  createDelhiveryB2BShipment,
+  createDelhiveryPickupRequest,
+  delhiveryManifestCallback,
+  checkDelhiveryServiceability,
+};

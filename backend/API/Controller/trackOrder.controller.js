@@ -1,5 +1,5 @@
 const Order = require("../../models/newOrder.model");
-const User=require("../../models/User.model")
+const User = require("../../models/User.model");
 
 const trackOrder = async (req, res) => {
   try {
@@ -20,12 +20,12 @@ const trackOrder = async (req, res) => {
       });
     }
 
-    const user=await User.findOne({userId:userId})
-    if(!user){
+    const user = await User.findOne({ userId: userId });
+    if (!user) {
       return res.status(404).json({
-        success:false,
-        message:"User not found."
-      })
+        success: false,
+        message: "User not found.",
+      });
     }
 
     // Find order by AWB number and userId
@@ -36,15 +36,15 @@ const trackOrder = async (req, res) => {
         message: "Order not found or invalid userId/AWB combination.",
       });
     }
-
+    // console.log("order",order)
     // Format tracking details
     const tracking = (order.tracking || [])
-      .filter((t) => t.status)
+      .sort((a, b) => new Date(a.StatusDateTime) - new Date(b.StatusDateTime))
       .map((t) => ({
-        status: t.status,
-        location: t.StatusLocation,
-        dateTime: t.StatusDateTime,
-        instructions: t.Instructions,
+        status: t.status || t.Instructions || "Unknown",
+        location: t.StatusLocation || null,
+        dateTime: t.StatusDateTime || null,
+        instructions: t.Instructions || null,
       }));
 
     // Build response object
