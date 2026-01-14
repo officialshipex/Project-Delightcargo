@@ -59,7 +59,7 @@ const DTDCWebhook = async (req, res) => {
       if (!statusDoc) continue;
 
       const dbMapping = statusDoc.data.find(
-        (d) => d.code?.toLowerCase() === normalizedData.Status?.toLowerCase()
+        (d) => d.code?.toLowerCase() === ev?.strAction?.toLowerCase()
       );
 
       if (!dbMapping) continue;
