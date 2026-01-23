@@ -16,7 +16,7 @@ const {
   checkSmartshipHubServiceability,
 } = require("../../AllCouriers/SmartShip/Couriers/couriers.controller.js");
 const {
-  checkAmazonServiceability,
+  checkAmazonServiceabilityWithoutOrder,
 } = require("../../AllCouriers/Amazon/Courier/couriers.controller.js");
 const {
   checkServiceabilityShreeMaruti,
@@ -125,7 +125,7 @@ const pincodeServiceability = async (req, res) => {
           await checkPincodeServiceabilityDelhivery(
             pickUpPincode,
             deliveryPincode,
-            order_type
+            order_type,
           ),
       },
       {
@@ -134,7 +134,7 @@ const pincodeServiceability = async (req, res) => {
           await checkServiceabilityDTDC(
             pickUpPincode,
             deliveryPincode,
-            paymentType
+            paymentType,
           ),
       },
       {
@@ -150,18 +150,19 @@ const pincodeServiceability = async (req, res) => {
       {
         name: "Amazon Shipping",
         check: async () => {
-          // 🟢 Always return success for Amazon Shipping
-          try {
-            await checkAmazonServiceability({
-              pickUpPincode,
-              deliveryPincode,
-              applicableWeight,
-              declaredValue,
-            });
-          } catch (err) {
-            console.log("Amazon API error ignored, defaulting to success");
-          }
-          return { success: true }; // Force Amazon Shipping serviceable = true
+          const dimensions = {
+            length,
+            width,
+            height,
+          };
+          return await checkAmazonServiceabilityWithoutOrder(
+            pickUpPincode,
+            deliveryPincode,
+            applicableWeight,
+            declaredValue,
+            paymentType,
+            dimensions,
+          );
         },
       },
       {
@@ -198,20 +199,22 @@ const pincodeServiceability = async (req, res) => {
     for (let rc of rateCards) {
       const provider = rc.courierProviderName;
       const providerCheck = providers.find((p) => p.name === provider);
+      // console.log("Checking serviceability for provider:", providerCheck);
       if (!providerCheck) continue;
 
       const serviceable = await providerCheck.check();
+      // console.log(`Serviceability for ${provider}:`, serviceable);
       if (!serviceable || serviceable.success === false) continue;
 
       // ✅ Charges calculation
       const basicCharge = parseFloat(rc.weightPriceBasic[0][currentZone]);
       const additionalCharge = parseFloat(
-        rc.weightPriceAdditional[0][currentZone]
+        rc.weightPriceAdditional[0][currentZone],
       );
 
       const count = Math.ceil(
         (chargedWeight - rc.weightPriceBasic[0].weight) /
-          rc.weightPriceAdditional[0].weight
+          rc.weightPriceAdditional[0].weight,
       );
       const finalCharge =
         rc.weightPriceBasic[0].weight >= chargedWeight
@@ -233,7 +236,7 @@ const pincodeServiceability = async (req, res) => {
       // ✅ GST + Final total
       const gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
       const totalCharges = Math.round(
-        finalCharge + cod + parseFloat(gstAmount)
+        finalCharge + cod + parseFloat(gstAmount),
       );
 
       ans.push({

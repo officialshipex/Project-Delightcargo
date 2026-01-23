@@ -1,16 +1,20 @@
-// controllers/invoice.controller.js
 const mongoose = require("mongoose");
 const PDFDocument = require("pdfkit");
+const { PDFDocument: PDFLibDocument } = require("pdf-lib");
+const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const { uploads, s3 } = require("../config/s3");
 const cron = require("node-cron");
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
+const Pan = require("../models/Pan.model");
 
 const Wallet = require("../models/wallet"); // adjust path
 const Order = require("../models/newOrder.model"); // adjust path
 const Invoice = require("./invoice.model"); // adjust path
 const User = require("../models/User.model"); // adjust path
+const GSTIN = require("../models/Gstin.model");
+const billing = require("../models/billingInfo.model");
 
 const GST_RATE = 0.18;
 
@@ -58,142 +62,492 @@ function generateInvoiceNumber(prefix = "SHI") {
 }
 
 // PDF generation with clean layout and AWB table
-async function generateInvoicePDF(invoice, userDetails = {}) {
+async function generateInvoicePDF(invoice, company = {}, customer = {}) {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: "A4", margin: 40 });
       const fileName = `invoice-${invoice.invoiceNumber}.pdf`;
       const outPath = path.join(
         process.env.INVOICE_LOCAL_TMP || "/tmp",
-        fileName
+        fileName,
       );
+
       const stream = fs.createWriteStream(outPath);
       doc.pipe(stream);
 
-      // Header: Company (left) + TAX INVOICE (right)
-      doc.fontSize(14).text(userDetails.companyName || "Your Company Name", {
-        align: "left",
-      });
-      doc.fontSize(18).text("TAX INVOICE", { align: "right" });
-      doc.moveDown(0.5);
+      // ================= OUTER INVOICE BORDER =================
+      doc
+        .rect(
+          20, // left
+          20, // top
+          doc.page.width - 40, // width
+          doc.page.height - 40, // height
+        )
+        .lineWidth(1)
+        .stroke();
 
-      // Invoice meta
-      doc.fontSize(10);
-      doc.text(`Invoice No: ${invoice.invoiceNumber}`);
-      doc.text(
-        `Invoice Date: ${invoice.createdAt.toISOString().split("T")[0]}`
-      );
-      doc.text(
-        `Period: ${invoice.periodStart.toISOString().split("T")[0]} to ${
-          invoice.periodEnd.toISOString().split("T")[0]
-        }`
-      );
-      doc.moveDown(0.8);
+      /* ================= LOGO (TOP LEFT) ================= */
 
-      // Bill To
-      doc.fontSize(12).text("Bill To:", { underline: true });
-      doc.fontSize(10);
-      doc.text(`User ID: ${invoice.userId}`);
-      if (userDetails.fullname) doc.text(`Name: ${userDetails.fullname}`);
-      if (userDetails.email) doc.text(`Email: ${userDetails.email}`);
-      if (userDetails.company) doc.text(`Company: ${userDetails.company}`);
-      doc.moveDown(0.8);
+      const logoPath = path.join(__dirname, "../public/assets/Shipex.jpg");
+      const logoWidth = 90;
+      const logoHeight = 40;
+      const logoX = 40;
+      const logoY = 40;
 
-      // Charges table header
-      doc.fontSize(11).text("Charges Summary", { underline: true });
-      doc.moveDown(0.3);
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, logoX, logoY, { width: logoWidth });
+      }
 
-      // Table columns: AWB | Description | Amount
-      const tableTop = doc.y;
-      const colWidths = { awb: 160, desc: 260, amt: 100 };
+      /* ================= HEADER ================= */
+
+      // 🔑 EVERYTHING starts AFTER logo
+      const contentStartY = logoY + logoHeight + 10;
+
+      /* -------- COMPANY DETAILS (LEFT) -------- */
+
+      doc
+        .fontSize(14)
+        .font("Helvetica-Bold")
+        .text(company.name || "Company", 40, contentStartY);
+
+      doc.moveDown(0.4);
+      doc.fontSize(9).lineGap(4);
+
+      if (company.address) {
+        doc.font("Helvetica").text(company.address, {
+          width: 300,
+        });
+      }
+
+      if (company.phone) {
+        doc.font("Helvetica-Bold").text("Phone:", { continued: true });
+        doc.font("Helvetica").text(` ${company.phone}`);
+      }
+
+      if (company.email) {
+        doc.font("Helvetica-Bold").text("Email:", { continued: true });
+        doc.font("Helvetica").text(` ${company.email}`);
+      }
+
+      if (company.gstin) {
+        doc.font("Helvetica-Bold").text("GSTIN:", { continued: true });
+        doc.font("Helvetica").text(` ${company.gstin}`);
+      }
+
+      if (company.pan) {
+        doc.font("Helvetica-Bold").text("PAN:", { continued: true });
+        doc.font("Helvetica").text(` ${company.pan}`);
+      }
+
+      doc.lineGap(0);
+
+      /* -------- INVOICE META (RIGHT) -------- */
+
+      doc
+        .fontSize(14)
+        .font("Helvetica-Bold")
+        .text("TAX INVOICE", 400, contentStartY, { align: "right" });
+
+      const status = invoice.status || "UNPAID";
+      const statusColor =
+        status === "PAID"
+          ? "green"
+          : status === "PARTIALLY_PAID"
+            ? "orange"
+            : "red";
+
       doc
         .fontSize(10)
-        .text("AWB", 40, tableTop, { width: colWidths.awb, continued: true })
-        .text("Description", 40 + colWidths.awb, tableTop, {
-          width: colWidths.desc,
-          continued: true,
+        .fillColor(statusColor)
+        .text(status, 400, contentStartY + 20, { align: "right" });
+
+      doc.fillColor("black");
+
+      const invoiceDate = new Date(invoice.createdAt);
+      const invoicePeriod = invoiceDate.toLocaleString("en-IN", {
+        month: "long",
+        year: "numeric",
+      });
+
+      doc
+        .fontSize(9)
+        .text(`Invoice No: ${invoice.invoiceNumber}`, 400, contentStartY + 40, {
+          align: "right",
         })
-        .text("Amount (₹)", 40 + colWidths.awb + colWidths.desc, tableTop, {
-          width: colWidths.amt,
+        .text(
+          `Invoice Date: ${invoiceDate.toLocaleDateString()}`,
+          400,
+          contentStartY + 55,
+          { align: "right" },
+        )
+        .text(`Invoice Period: ${invoicePeriod}`, 400, contentStartY + 70, {
           align: "right",
         });
 
-      doc.moveDown(0.2);
-      doc.moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+      /* ================= HEADER SEPARATOR ================= */
 
-      // Rows
-      let y = doc.y + 6;
-      const rowsPerPage = 35;
-      let rowCount = 0;
-      const txns = invoice.chargesBreakup?.transactions || [];
+      const headerEndY = doc.y + 15;
+      doc.moveTo(40, headerEndY).lineTo(550, headerEndY).stroke();
+      doc.y = headerEndY + 5;
 
-      for (const t of txns) {
-        if (rowCount && rowCount % rowsPerPage === 0) {
-          doc.addPage();
-          y = 60;
-        }
-        const awbText = t.awb || "";
-        const descText = t.description || "";
-        const amtText = Number(t.amount || 0).toFixed(2);
+      /* ================= BILL TO (TWO COLUMN) ================= */
+
+      doc.fontSize(10).font("Helvetica-Bold").text("Bill To", 40);
+      doc.moveDown(0.8);
+
+      const leftX = 40;
+      const rightX = 340;
+      const colWidth = 260;
+      const billStartY = doc.y;
+
+      doc.fontSize(9).lineGap(4);
+
+      /* ---------- LEFT COLUMN ---------- */
+
+      doc
+        .font("Helvetica-Bold")
+        .text(customer.name || "N/A", leftX, billStartY, {
+          width: colWidth,
+        });
+
+      doc.font("Helvetica").text(customer.address || "N/A", leftX, doc.y, {
+        width: colWidth,
+      });
+
+      doc
+        .font("Helvetica-Bold")
+        .text("State:", leftX, doc.y, { continued: true });
+      doc.font("Helvetica").text(` ${customer.state || "N/A"}`);
+
+      doc
+        .font("Helvetica-Bold")
+        .text("Pincode:", leftX, doc.y, { continued: true });
+      doc.font("Helvetica").text(` ${customer.pincode || "N/A"}`);
+
+      /* ---------- RIGHT COLUMN ---------- */
+
+      doc.y = billStartY;
+
+      doc
+        .font("Helvetica-Bold")
+        .text("PAN:", rightX, doc.y, { continued: true });
+      doc.font("Helvetica").text(` ${customer.pan || "N/A"}`);
+
+      doc
+        .font("Helvetica-Bold")
+        .text("GSTIN:", rightX, doc.y, { continued: true });
+      doc.font("Helvetica").text(` ${customer.gstin || "N/A"}`);
+
+      doc
+        .font("Helvetica-Bold")
+        .text("Reverse Charge:", rightX, doc.y, { continued: true });
+      doc.font("Helvetica").text(" No");
+
+      /* ---------- MOVE BELOW BILL TO ---------- */
+      doc.y = Math.max(doc.y, billStartY) + 12;
+      doc.lineGap(0);
+
+      doc.moveDown(2);
+
+      /* ================= FREIGHT TABLE (WITH BORDERS) ================= */
+
+      const tableX = 40;
+      const tableWidth = 510; // 550 - 40
+      const descColWidth = 350;
+      const amtColWidth = tableWidth - descColWidth;
+
+      const rowHeight = 24;
+      let tableY = doc.y;
+
+      /* ---- TABLE HEADER ---- */
+
+      doc.fontSize(9).font("Helvetica-Bold");
+
+      doc.rect(tableX, tableY, tableWidth, rowHeight).stroke();
+
+      doc.text("Description", tableX + 8, tableY + 7, {
+        width: descColWidth - 10,
+      });
+
+      doc.text("Total", tableX + descColWidth + 8, tableY + 7, {
+        width: amtColWidth - 10,
+      });
+
+      // Vertical divider
+      doc
+        .moveTo(tableX + descColWidth, tableY)
+        .lineTo(tableX + descColWidth, tableY + rowHeight)
+        .stroke();
+
+      tableY += rowHeight;
+
+      /* ---- ROW: FREIGHT ---- */
+
+      doc.font("Helvetica");
+
+      doc.rect(tableX, tableY, tableWidth, rowHeight).stroke();
+
+      doc.text("Freight Charges", tableX + 8, tableY + 7, {
+        width: descColWidth - 10,
+      });
+
+      doc.text(
+        Number(invoice.taxableValue || 0).toFixed(2),
+        tableX + descColWidth + 8,
+        tableY + 7,
+        {
+          width: amtColWidth - 10,
+        },
+      );
+
+      // Vertical divider
+      doc
+        .moveTo(tableX + descColWidth, tableY)
+        .lineTo(tableX + descColWidth, tableY + rowHeight)
+        .stroke();
+
+      tableY += rowHeight;
+
+      /* ---- ROW: GST ---- */
+
+      doc.rect(tableX, tableY, tableWidth, rowHeight).stroke();
+
+      doc.text("GST @18%", tableX + 8, tableY + 7, {
+        width: descColWidth - 10,
+      });
+
+      doc.text(
+        Number(invoice.tax || 0).toFixed(2),
+        tableX + descColWidth + 8,
+        tableY + 7,
+        {
+          width: amtColWidth - 10,
+        },
+      );
+
+      // Vertical divider
+      doc
+        .moveTo(tableX + descColWidth, tableY)
+        .lineTo(tableX + descColWidth, tableY + rowHeight)
+        .stroke();
+
+      tableY += rowHeight;
+
+      /* ---- ROW: GRAND TOTAL ---- */
+
+      doc.font("Helvetica-Bold");
+
+      doc.rect(tableX, tableY, tableWidth, rowHeight).stroke();
+
+      doc.text("Grand Total", tableX + 8, tableY + 7, {
+        width: descColWidth - 10,
+      });
+
+      doc
+        .fillColor(status === "PAID" ? "green" : "black")
+        .text(
+          Number(invoice.tax + invoice.taxableValue || 0).toFixed(2),
+          tableX + descColWidth + 8,
+          tableY + 7,
+          {
+            width: amtColWidth - 10,
+          },
+        );
+
+      doc.fillColor("black");
+
+      /* ---- MOVE CURSOR BELOW TABLE ---- */
+
+      doc.y = tableY + rowHeight + 15;
+
+      /* ================= PAYMENT DETAILS ================= */
+
+      if (invoice.paymentHistory?.length) {
+        // 🔑 HARD RESET CURSOR
+        const paymentStartX = 40;
+        let paymentStartY = doc.y + 10;
+
+        doc.x = paymentStartX;
+        doc.y = paymentStartY;
 
         doc
           .fontSize(10)
-          .text(awbText, 40, y, { width: colWidths.awb })
-          .text(descText, 40 + colWidths.awb, y, { width: colWidths.desc })
-          .text(amtText, 40 + colWidths.awb + colWidths.desc, y, {
-            width: colWidths.amt,
-            align: "right",
-          });
+          .font("Helvetica-Bold")
+          .text("Payment Details", paymentStartX, paymentStartY);
 
-        y += 18;
-        rowCount++;
+        doc.moveDown(0.6);
+
+        const px = {
+          date: 40,
+          mode: 150,
+          txn: 260,
+          amt: 520,
+        };
+
+        let py = doc.y;
+
+        // Table Header
+        doc.fontSize(9).font("Helvetica-Bold");
+        doc.text("Date", px.date, py);
+        doc.text("Mode", px.mode, py);
+        doc.text("Txn ID", px.txn, py);
+        doc.text("Amount (₹)", px.amt, py, { align: "right" });
+
+        doc
+          .moveTo(40, py + 14)
+          .lineTo(550, py + 14)
+          .stroke();
+
+        py += 22;
+
+        // Rows
+        doc.font("Helvetica");
+        invoice.paymentHistory.forEach((p) => {
+          doc.text(new Date(p.date).toLocaleDateString(), px.date, py);
+          doc.text(p.paymentMode || "-", px.mode, py);
+          doc.text(p.transactionId || "-", px.txn, py);
+
+          doc
+            .fillColor(p.status)
+            .text(Number(p.amount || 0).toFixed(2), px.amt, py, {
+              align: "right",
+            });
+
+          doc.fillColor("black");
+          py += 16;
+        });
+
+        // 🔑 Move cursor below payment table
+        doc.y = py + 10;
       }
 
-      doc.moveDown(1);
-      doc.moveTo(40, y).lineTo(550, y).stroke();
-      y += 8;
+      /* ================= BANK & COMMERCIAL DETAILS ================= */
 
-      // Totals and GST
+      doc.moveDown(1);
+      doc.moveTo(40, doc.y).lineTo(550, doc.y).stroke("black");
+      doc.moveDown(1);
+
       doc
         .fontSize(10)
-        .text(
-          `Taxable Value: ₹${Number(invoice.taxableValue).toFixed(2)}`,
-          40,
-          y
-        );
-      y += 14;
-      doc.text(`GST @18%: ₹${Number(invoice.tax).toFixed(2)}`, 40, y);
-      y += 14;
-      doc
-        .fontSize(12)
-        .text(`Grand Total: ₹${Number(invoice.totalAmount).toFixed(2)}`, 40, y);
-      y += 18;
+        .font("Helvetica-Bold")
+        .text("Bank & Commercial Details", 40);
+      doc.moveDown(0.6);
 
-      // Payment summary
-      doc.moveDown(0.5);
-      doc.fontSize(10).text("Payment Summary", 40, y);
-      doc.moveDown(0.3);
-      doc.text(`Paid Amount: ₹${Number(invoice.paidAmount).toFixed(2)}`);
-      doc.text(`Due Amount: ₹${Number(invoice.dueAmount).toFixed(2)}`);
-      doc.text(`Status: ${invoice.status}`);
+      doc.fontSize(9).lineGap(4);
+
+      doc.font("Helvetica-Bold").text("Account Name:", { continued: true });
+      doc.font("Helvetica").text(` ${company.bank?.accountName || "N/A"}`);
+
+      doc.font("Helvetica-Bold").text("Account Number:", { continued: true });
+      doc.font("Helvetica").text(` ${company.bank?.accountNumber || "N/A"}`);
+
+      doc.font("Helvetica-Bold").text("Bank Name:", { continued: true });
+      doc.font("Helvetica").text(` ${company.bank?.bankName || "N/A"}`);
+
+      doc.font("Helvetica-Bold").text("IFSC Code:", { continued: true });
+      doc.font("Helvetica").text(` ${company.bank?.ifsc || "N/A"}`);
+
+      doc.lineGap(0);
+
+      /* ================= ITEMIZED LINK ================= */
+
       doc.moveDown(1);
-
-      // Footer
       doc
         .fontSize(9)
+        .fillColor("blue")
+        .text("Download Itemized Shipment Details", 40, doc.y, {
+          link: invoice.itemizedUrl,
+          underline: true,
+        });
+
+      doc.fillColor("black");
+
+      /* ================= FOOTER ================= */
+
+      doc
+        .fontSize(8)
         .text(
-          "This invoice is computer generated and does not require signature.",
+          "This is a computer generated invoice. No signature required.",
           40,
-          doc.page.height - 60,
-          { align: "center" }
+          doc.page.height - 50,
+          { align: "center" },
         );
 
       doc.end();
 
       stream.on("finish", () => resolve(outPath));
-      stream.on("error", (err) => reject(err));
+      stream.on("error", reject);
     } catch (err) {
       reject(err);
+    }
+  });
+}
+
+/* =========================
+   PDF: ITEMIZED AWB
+   ========================= */
+async function generateItemizedAwbPDF(invoice) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: "A4", margin: 40 });
+      const fileName = `itemized-awb-${invoice.invoiceNumber}.pdf`;
+      const outPath = path.join("/tmp", fileName);
+
+      const stream = fs.createWriteStream(outPath);
+      doc.pipe(stream);
+
+      doc.fontSize(14).font("Helvetica-Bold").text("Itemized Shipment Details");
+      doc.moveDown(1);
+
+      const col = {
+        order: 40,
+        awb: 120,
+        desc: 220,
+        date: 380,
+        amt: 520,
+      };
+
+      const headerY = doc.y;
+      doc.fontSize(9).font("Helvetica-Bold");
+      doc.text("Order ID", col.order, headerY);
+      doc.text("AWB", col.awb, headerY);
+      doc.text("Description", col.desc, headerY);
+      doc.text("Date", col.date, headerY);
+      doc.text("Amount (₹)", col.amt, headerY, { align: "right" });
+
+      doc
+        .moveTo(40, headerY + 15)
+        .lineTo(550, headerY + 15)
+        .stroke();
+      doc.y = headerY + 25;
+
+      doc.font("Helvetica").fontSize(9);
+
+      for (const t of invoice.chargesBreakup.transactions) {
+        if (doc.y > doc.page.height - 80) doc.addPage();
+
+        const rowY = doc.y;
+        const descHeight = doc.heightOfString(t.description || "", {
+          width: 140,
+        });
+        const rowHeight = Math.max(descHeight, 14);
+
+        doc.text(t.channelOrderId || "-", col.order, rowY, { width: 70 });
+        doc.text(t.awb || "-", col.awb, rowY, { width: 80 });
+        doc.text(t.description || "", col.desc, rowY, { width: 140 });
+        doc.text(new Date(t.date).toLocaleDateString(), col.date, rowY);
+        doc.text(Number(t.amount || 0).toFixed(2), col.amt, rowY, {
+          align: "right",
+        });
+
+        doc.y = rowY + rowHeight + 6;
+      }
+
+      doc.end();
+      stream.on("finish", () => resolve(outPath));
+      stream.on("error", reject);
+    } catch (e) {
+      reject(e);
     }
   });
 }
@@ -208,7 +562,7 @@ async function uploadToS3(localPath, key) {
       Key: key,
       Body: fileContent,
       ContentType: "application/pdf",
-    })
+    }),
   );
 
   return `https://${process.env.AWS_BUCKET_NAME}.s3.${
@@ -223,52 +577,54 @@ async function buildChargesFromWalletTransactions(
   userId,
   periodStart,
   periodEnd,
-  previousAwbs = []
+  previousAwbs = [],
 ) {
   const user = await User.findById(userId);
   const wallet = await Wallet.findOne({ _id: user.Wallet });
   if (!wallet) return { taxableValue: 0, tax: 0, total: 0, txns: [] };
 
-  // Filter debit txns in period with allowed descriptions
   const candidateTxns = (wallet.transactions || []).filter((t) => {
     if (!t) return false;
+
     const d = new Date(t.date);
     if (d < periodStart || d > periodEnd) return false;
     if ((t.category || "").toLowerCase() !== "debit") return false;
     if (!allowedDescription(t.description)) return false;
+
     return true;
   });
 
   const validTxns = [];
 
-  // Validate each txn using AWB -> check Order status and skip duplicates (previousAwbs)
   for (const t of candidateTxns) {
     const awb = extractAwbFromTransaction(t);
     if (!awb) continue;
-
-    // Skip if already invoiced previously
     if (previousAwbs.includes(awb)) continue;
 
     const order = await Order.findOne({ awb_number: awb }).select(
-      "status awb_number"
+      "status awb_number",
     );
-    if (!order) continue; // if order missing, skip (safe)
+    if (!order) continue;
+
     const st = (order.status || "").toLowerCase();
     if (st === "new" || st === "cancelled") continue;
 
-    // If passes all checks, include
     validTxns.push({
       awb,
       description: t.description,
-      amount: Number(t.amount || 0),
+      amount: Number(t.amount || 0), // already includes GST
       date: t.date,
       channelOrderId: t.channelOrderId || null,
     });
   }
 
-  const taxableValue = validTxns.reduce((s, x) => s + x.amount, 0);
-  const tax = Number((taxableValue * GST_RATE).toFixed(2));
-  const total = tax;
+  const total = Number(
+    validTxns.reduce((s, x) => s + Number(x.amount || 0), 0).toFixed(2),
+  );
+
+  // GST extraction (reverse calculation)
+  const taxableValue = Number((total / (1 + GST_RATE)).toFixed(2));
+  const tax = Number((total - taxableValue).toFixed(2));
 
   return { taxableValue, tax, total, txns: validTxns };
 }
@@ -286,21 +642,29 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
       userId,
       periodStart,
       periodEnd,
-      prevAwbs
+      prevAwbs,
     );
-  console.log("Invoice generation for user:", userId, {
-    periodStart,
-    periodEnd,
-    taxableValue,
-    tax,
-    total,
-    txnsCount: txns.length,
-  });
+
   if (!txns || txns.length === 0) {
     return { skipped: true, reason: "No chargeable transactions" };
   }
 
   const invoiceNumber = generateInvoiceNumber();
+
+  const user = await User.findById(userId).select(
+    "fullname email company Wallet",
+  );
+  const wallet = await Wallet.findOne({ _id: user.Wallet });
+
+  const walletBalance = Number(wallet?.balance || 0);
+
+  let status = "PAID";
+  let dueAmount = 0;
+
+  if (walletBalance < 0) {
+    status = "UNPAID";
+    dueAmount = Math.abs(walletBalance);
+  }
 
   const invoice = new Invoice({
     userId,
@@ -310,64 +674,62 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     totalAmount: total,
     taxableValue,
     tax,
-    paidAmount: 0,
-    dueAmount: total,
-    chargesBreakup: { transactionsCount: txns.length, transactions: txns },
+    paidAmount: total - dueAmount,
+    dueAmount,
+    chargesBreakup: {
+      transactionsCount: txns.length,
+      transactions: txns,
+    },
     includedAwbs: txns.map((t) => t.awb),
-    status: "UNPAID",
+    status,
+    isFinalized: false,
   });
-  const user = await User.findById(userId).select(
-    "fullname email company Wallet"
-  );
-  const wallet = await Wallet.findOne({ _id: user.Wallet });
-  if (!wallet) {
-    await invoice.save();
-    return { saved: true, invoice, applied: 0, note: "Wallet not found" };
-  }
-
-  const available = Number(wallet.balance || 0);
-  const toDeduct = Math.min(available, invoice.dueAmount);
-
-  if (toDeduct > 0) {
-    invoice.paidAmount = Number((invoice.paidAmount + toDeduct).toFixed(2));
-    invoice.dueAmount = Number(
-      (invoice.totalAmount - invoice.paidAmount).toFixed(2)
-    );
-    invoice.status = invoice.dueAmount === 0 ? "PAID" : "PARTIALLY_PAID";
-
-    wallet.balance = Number((wallet.balance - toDeduct).toFixed(2));
-    wallet.transactions.push({
-      category: "debit",
-      amount: toDeduct,
-      balanceAfterTransaction: wallet.balance,
-      channelOrderId: invoiceNumber,
-      date: new Date(),
-      description: `Auto deduction for invoice ${invoice.invoiceNumber}`,
-    });
-
-    invoice.paymentHistory.push({
-      amount: toDeduct,
-      paymentMode: "Wallet",
-      transactionId: `WAL-${Date.now()}`,
-      date: new Date(),
-      note: "Auto-applied wallet",
-    });
-
-    await wallet.save();
-  }
 
   await invoice.save();
 
-  // PDF build
+  // ---------------- ITEMIZED PDF ----------------
+  const itemizedPath = await generateItemizedAwbPDF(invoice);
+  const itemizedS3Url = await uploadToS3(
+    itemizedPath,
+    `invoices/${userId}/${invoice.invoiceNumber}-itemized.pdf`,
+  );
+  invoice.itemizedUrl = itemizedS3Url;
 
-  const pdfPath = await generateInvoicePDF(invoice, {
-    fullname: user?.fullname,
-    email: user?.email,
-    companyName: user?.company || "Your Company Name",
-  });
+  // ---------------- FETCH USER GST / BILLING ----------------
+  const gstin = await GSTIN.findOne({ user: userId });
+  const BillingInfo = await billing.findOne({ user: userId });
+  const PAN = await Pan.findOne({ user: userId });
+
+  const customerInfo = {
+    name: gstin?.nameOfBusiness || user?.fullname || "N/A",
+    address: gstin?.address || BillingInfo?.address || "N/A",
+    gstin: gstin?.gstin || "N/A",
+    state: gstin?.state || BillingInfo?.state || "N/A",
+    pincode: gstin?.pincode || BillingInfo?.postalCode || "N/A",
+    pan: PAN?.pan || "N/A",
+  };
+
+  // ---------------- FINAL INVOICE PDF ----------------
+  const pdfPath = await generateInvoicePDF(
+    invoice,
+    {
+      name: "Shipex India Pvt Ltd",
+      address: "Gurugram, Haryana - 122002",
+      phone: "+91-XXXXXXXXXX",
+      email: "support@shipexindia.com",
+      pan: "XXXAAABBB",
+      gstin: "XXXXECB7319L1ZK",
+      bank: {
+        accountName: "Shipex India",
+        accountNumber: "XXXXXXXX",
+        bankName: "XXXX Bank",
+        ifsc: "XXXX0000123",
+      },
+    },
+    customerInfo,
+  );
 
   const s3Key = `invoices/${userId}/${invoice.invoiceNumber}.pdf`;
-
   const s3Url = await uploadToS3(pdfPath, s3Key);
 
   invoice.s3Url = s3Url;
@@ -376,9 +738,11 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
 
   try {
     fs.unlinkSync(pdfPath);
-  } catch (e) {}
+  } catch (e) {
+    console.log("PDF cleanup error:", e);
+  }
 
-  return { saved: true, invoice, s3Url, applied: toDeduct || 0 };
+  return { saved: true, invoice, s3Url };
 }
 
 /* -------------------------
@@ -387,7 +751,7 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
 async function generateInvoicesForPeriod(periodStart, periodEnd) {
   // Fetch all users who have wallet or active users (change criteria as needed)
   // const users = await User.find({}, { _id: 1 });
-  const users = await User.find({ userId: 17333 });
+  const users = await User.find();
 
   const results = [];
   for (const u of users) {
@@ -395,7 +759,7 @@ async function generateInvoicesForPeriod(periodStart, periodEnd) {
       const r = await generateInvoiceForUserMonth(
         u._id,
         periodStart,
-        periodEnd
+        periodEnd,
       );
       results.push({ userId: u._id.toString(), result: r });
     } catch (err) {
@@ -416,10 +780,11 @@ async function scheduleMonthlyInvoiceCron() {
     const now = new Date();
     const tomorrow = new Date(now);
     tomorrow.setDate(now.getDate() + 1);
-    // if (tomorrow.getDate() !== 1) {
+    if (tomorrow.getDate() !== 1) {
+      console.log("Not the end of the month. Skipping invoice generation.");
 
-    //   return;
-    // }
+      return;
+    }
 
     // generate for current month (i.e. month that just finished)
     const year = now.getFullYear();
@@ -430,12 +795,13 @@ async function scheduleMonthlyInvoiceCron() {
     console.log(
       "Running monthly invoice generation for:",
       periodStart,
-      periodEnd
+      periodEnd,
     );
     const results = await generateInvoicesForPeriod(periodStart, periodEnd);
+    // console.log("result", results);
     console.log(
       "Monthly invoice results:",
-      results.filter((r) => r.result || r.error).slice(0, 10)
+      results.filter((r) => r.result || r.error).slice(0, 10),
     );
     // Consider logging results to DB or file for auditing
   } catch (err) {
@@ -443,9 +809,65 @@ async function scheduleMonthlyInvoiceCron() {
   }
   // });
 }
-
+if(process.env.NODE_ENV === 'production'){
+  scheduleMonthlyInvoiceCron();
+}
 // scheduleMonthlyInvoiceCron()
 // console.log("Monthly invoice cron scheduled.");
+
+const bulkDownloadInvoices = async (req, res) => {
+  try {
+    const { invoiceNumbers } = req.query;
+    console.log("Bulk download invoice ids:", invoiceNumbers);
+
+    if (!invoiceNumbers) {
+      return res.status(400).json({ message: "Invoice IDs required" });
+    }
+
+    // Convert comma-separated string to ObjectId[]
+    const invoiceIds = invoiceNumbers
+      .split(",")
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    const invoices = await Invoice.find({
+      _id: { $in: invoiceIds },
+      s3Url: { $exists: true },
+    }).sort({ createdAt: 1 });
+
+    if (!invoices.length) {
+      return res.status(404).json({ message: "No invoices found" });
+    }
+
+    const mergedPdf = await PDFLibDocument.create();
+
+    for (const inv of invoices) {
+      const pdfBytes = await axios.get(inv.s3Url, {
+        responseType: "arraybuffer",
+      });
+
+      const pdf = await PDFLibDocument.load(pdfBytes.data);
+
+      const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+
+      pages.forEach((page) => mergedPdf.addPage(page));
+    }
+
+    const finalPdfBytes = await mergedPdf.save();
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="Invoices_${Date.now()}.pdf"`,
+    );
+
+    return res.send(Buffer.from(finalPdfBytes));
+  } catch (err) {
+    console.error("Bulk invoice download error:", err);
+    return res
+      .status(500)
+      .json({ message: "Failed to generate bulk invoice PDF" });
+  }
+};
 
 /* -------------------------------------------------------
    Helper: Build Query From req.query
@@ -515,7 +937,7 @@ const adminGetInvoices = async (req, res) => {
 
     const users = await User.find(
       { _id: { $in: userIds } },
-      { fullname: 1, email: 1, phoneNumber: 1, userId: 1 }
+      { fullname: 1, email: 1, phoneNumber: 1, userId: 1 },
     ).lean();
 
     const userMap = {};
@@ -529,6 +951,7 @@ const adminGetInvoices = async (req, res) => {
     });
 
     const result = invoices.map((inv) => ({
+      _id: inv._id,
       invoiceNumber: inv.invoiceNumber,
       totalShipments: inv.includedAwbs?.length || 0,
       invoiceDate: inv.createdAt.toISOString().split("T")[0],
@@ -568,6 +991,7 @@ const userGetInvoices = async (req, res) => {
 
     // Build response similar to adminGetInvoices but without userDetails
     const result = invoices.map((inv) => ({
+      _id: inv._id,
       invoiceNumber: inv.invoiceNumber,
       totalShipments: inv.includedAwbs?.length || 0,
       invoiceDate: inv.createdAt.toISOString().split("T")[0],
@@ -599,4 +1023,5 @@ module.exports = {
   scheduleMonthlyInvoiceCron,
   adminGetInvoices,
   userGetInvoices,
+  bulkDownloadInvoices,
 };

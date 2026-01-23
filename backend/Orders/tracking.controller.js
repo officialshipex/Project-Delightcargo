@@ -1137,8 +1137,9 @@ const trackOrders = async () => {
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery"] },
       // ndrStatus: "Undelivered",
+      // status:"Out for Delivery",
       // provider: "Dtdc",
-      // awb_number: "365976538415",
+      // awb_number: "7D113289194",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
