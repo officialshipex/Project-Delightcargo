@@ -7,6 +7,7 @@ const User = require("../../../models/User.model");
 const { s3 } = require("../../../config/s3");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
+const { findByPincode } = require("../../../B2B/pincodeLoader");
 const {
   markWooOrderAsSihpped,
 } = require("../../../Channels/WooCommerce/woocommerce.controller");
@@ -31,7 +32,7 @@ const createOneClickShipment = async (req, res) => {
     const currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
-      { new: true, session }
+      { new: true, session },
     );
 
     if (!currentOrder) {
@@ -48,7 +49,7 @@ const createOneClickShipment = async (req, res) => {
       accessTokenPromise,
       getZone(
         currentOrder.pickupAddress.pinCode,
-        currentOrder.receiverAddress.pinCode
+        currentOrder.receiverAddress.pinCode,
       ),
       User.findById(currentOrder.userId).session(session),
     ]);
@@ -91,7 +92,7 @@ const createOneClickShipment = async (req, res) => {
       origin: currentOrder.pickupAddress,
       destination: currentOrder.receiverAddress,
       payment_type: currentOrder.paymentDetails?.method,
-      gstin:currentOrder?.otherDetails?.gstin,
+      gstin: currentOrder?.otherDetails?.gstin,
       order_amount: currentOrder.paymentDetails?.amount || 0,
       weight: weight || 0,
       length: currentOrder.packageDetails.volumetricWeight?.length || 0,
@@ -149,7 +150,7 @@ const createOneClickShipment = async (req, res) => {
           "Content-Type": "application/json",
         },
         timeout: 10000,
-      }
+      },
     );
 
     if (!response?.data?.payload) {
@@ -214,7 +215,7 @@ const createOneClickShipment = async (req, res) => {
             },
           },
         },
-        { session }
+        { session },
       ),
       s3.send(
         new PutObjectCommand({
@@ -222,7 +223,7 @@ const createOneClickShipment = async (req, res) => {
           Key: labelKey,
           Body: labelBuffer,
           ContentType: "application/pdf",
-        })
+        }),
       ),
     ]);
 
@@ -245,7 +246,7 @@ const createOneClickShipment = async (req, res) => {
     session.endSession();
     console.error(
       "❌ Error creating shipment:",
-      error.response?.data || error.message
+      error.response?.data || error.message,
     );
     return res.status(500).json({
       success: false,
@@ -288,7 +289,7 @@ const cancelShipment = async (shipmentId) => {
           "x-amzn-shipping-business-id": "AmazonShipping_IN",
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     // await Order.updateOne(
@@ -315,7 +316,7 @@ const cancelShipment = async (shipmentId) => {
   } catch (error) {
     console.error(
       "Error cancelling shipmentttt:",
-      error.response?.data || error.message
+      error.response?.data || error.message,
     );
     return {
       success: false,
@@ -344,7 +345,7 @@ const getShipmentTracking = async (trackingId) => {
           "x-amz-access-token": accessToken,
           "x-amzn-shipping-business-id": "AmazonShipping_IN",
         },
-      }
+      },
     );
     // console.log("response", response.data.payload.eventHistory);
     // console.log(
@@ -368,7 +369,7 @@ const getShipmentTracking = async (trackingId) => {
   } catch (error) {
     console.error(
       "Error fetching tracking information:",
-      error.response?.data || error.message
+      error.response?.data || error.message,
     );
   }
 };
@@ -429,7 +430,7 @@ const checkAmazonServiceability = async (provider, payload) => {
     };
     const totalQuantity = payload.productDetails.reduce(
       (sum, item) => sum + item.quantity,
-      0
+      0,
     );
     const weightPerUnit = Math.floor(payload.weight / totalQuantity); // in grams
     const requestBody = {
@@ -507,7 +508,7 @@ const checkAmazonServiceability = async (provider, payload) => {
           "x-amzn-shipping-business-id": "AmazonShipping_IN",
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     const rates = response.data.payload.rates || [];
@@ -555,9 +556,221 @@ const checkAmazonServiceability = async (provider, payload) => {
   }
 };
 
+const checkAmazonServiceabilityWithoutOrder = async (
+  pickUpPincode,
+  deliveryPincode,
+  applicableWeight,
+  declaredValue,
+  paymentType,
+  dimensions,
+) => {
+  try {
+    console.log(
+      "pickupPincode, deliveryPincode,applicableWeight,declaredValue,paymentType,dimensions",
+      pickUpPincode,
+      deliveryPincode,
+      applicableWeight,
+      declaredValue,
+      paymentType,
+      dimensions,
+    );
+    /* ================= ACCESS TOKEN ================= */
+    const accessToken = await getAmazonAccessToken();
+    // console.log("accessToken", accessToken);
+    if (!accessToken) {
+      return { success: false, reason: "Missing access token" };
+    }
+    // console.log("dimensions", dimensions);
+    /* ================= PINCODE LOOKUP ================= */
+    const pickupData = await findByPincode(pickUpPincode);
+    const deliveryData = await findByPincode(deliveryPincode);
+
+    if (!pickupData || !deliveryData) {
+      return {
+        success: false,
+        reason: "Invalid pickup or delivery pincode",
+      };
+    }
+
+    /* ================= SHIP FROM ================= */
+    const shipFrom = {
+      name: "Demo Shipper",
+      addressLine1: "Warehouse Address Line 1",
+      city: pickupData.city,
+      postalCode: pickUpPincode,
+      stateOrRegion: toTitleCase(pickupData.state), 
+      countryCode: "IN",
+      email: "shipper@test.com",
+      phoneNumber: "9999993998",
+    };
+
+    /* ================= SHIP TO ================= */
+    const shipTo = {
+      name: "Demo Customer",
+      addressLine1: "Customer Address Line 1",
+      city: deliveryData.city,
+      postalCode: deliveryPincode,
+      stateOrRegion: toTitleCase(deliveryData.state),
+      countryCode: "IN",
+      email: "customer@test.com",
+      phoneNumber: "8888583688",
+    };
+    const weightInKg = Number(applicableWeight);
+    const weightInGram = Math.round(weightInKg * 1000);
+    const normalizedDimensions = {
+      length: Number(dimensions?.length || 10),
+      width: Number(dimensions?.width || dimensions?.breadth || 10),
+      height: Number(dimensions?.height || 10),
+    };
+
+    /* ================= REQUEST BODY ================= */
+    const requestBody = {
+      shipFrom,
+      shipTo,
+      shipDate: getCorrectShipDate(),
+      packages: [
+        {
+          dimensions: {
+            length: normalizedDimensions.length,
+            width: normalizedDimensions.width,
+            height: normalizedDimensions.height,
+            unit: "CENTIMETER",
+          },
+          weight: {
+            value: weightInKg, // ✅ 1 KG
+            unit: "KILOGRAM",
+          },
+          insuredValue: {
+            value: Number(declaredValue),
+            unit: "INR",
+          },
+          packageClientReferenceId: `SRV-${Date.now()}`,
+          items: [
+            {
+              itemValue: {
+                value: Number(declaredValue),
+                unit: "INR",
+              },
+              quantity: 1,
+              weight: {
+                value: weightInGram, // ✅ 1000 GRAM (matches package)
+                unit: "GRAM",
+              },
+              isHazmat: false,
+              invoiceDetails: {
+                invoiceDate: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+              },
+            },
+          ],
+        },
+      ],
+
+      taxDetails: [
+        {
+          taxType: "GST",
+          taxRegistrationNumber: "06FKCPS6109D3Z7", // demo GST
+        },
+      ],
+
+      channelDetails: {
+        channelType: "EXTERNAL",
+      },
+
+      ...(paymentType === "COD" && {
+        valueAddedServices: {
+          collectOnDelivery: {
+            amount: {
+              value: declaredValue,
+              unit: "INR",
+            },
+          },
+        },
+      }),
+    };
+
+    /* ================= AMAZON API CALL ================= */
+    const response = await axios.post(
+      "https://sellingpartnerapi-eu.amazon.com/shipping/v2/shipments/rates",
+      requestBody,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "x-amz-access-token": accessToken,
+          "x-amzn-shipping-business-id": "AmazonShipping_IN",
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+    const {
+      rates = [],
+      ineligibleRates = [],
+      requestToken,
+    } = response.data?.payload || {};
+    // console.log("amazon serviceability response", response.data.payload);
+    /* ================= RESPONSE ================= */
+    if (rates.length > 0) {
+      const selectedRate = rates[0];
+
+      const valueAddedServiceIds =
+        selectedRate.availableValueAddedServiceGroups?.flatMap((group) => {
+          if (group.valueAddedServiceIds) return group.valueAddedServiceIds;
+          if (group.valueAddedServices)
+            return group.valueAddedServices.map((v) => v.id);
+          return [];
+        }) || [];
+
+      return {
+        success: true,
+        serviceable: true,
+        reason: "Pincodes are serviceable",
+        rateId: selectedRate.rateId,
+        requestToken,
+        valueAddedServiceIds,
+      };
+    }
+
+    if (ineligibleRates.length > 0) {
+      return {
+        success: false,
+        serviceable: false,
+        reason: "Pincodes are not serviceable",
+        ineligibleRates,
+      };
+    }
+    console.log(
+      "❌ Amazon does not service this pincode.",
+      rates,
+      ineligibleRates,
+    );
+    return {
+      success: false,
+      reason: "No rates returned by Amazon",
+    };
+  } catch (error) {
+    console.log(
+      "❌ Error checking serviceability:",
+      error.response?.data || error.message,
+    );
+    return {
+      success: false,
+      reason: "Error checking serviceability",
+      error: error.response?.data || error.message,
+    };
+  }
+};
+
+const toTitleCase = (str = "") =>
+  str
+    .toLowerCase()
+    .split(" ")
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+
 module.exports = {
   createOneClickShipment,
   cancelShipment,
   getShipmentTracking,
   checkAmazonServiceability,
+  checkAmazonServiceabilityWithoutOrder,
 };

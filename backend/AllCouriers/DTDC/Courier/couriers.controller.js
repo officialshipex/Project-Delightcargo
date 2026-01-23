@@ -215,7 +215,7 @@ const createOrder = async (req, res) => {
     }
 
     const result = response?.data?.data?.[0];
-    // console.log("reslt",result)
+    console.log("reslt",result)
     if (!result?.success) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();

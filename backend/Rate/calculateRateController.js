@@ -15,7 +15,7 @@ const {
   checkSmartshipHubServiceability,
 } = require("../AllCouriers/SmartShip/Couriers/couriers.controller.js");
 const {
-  checkAmazonServiceability,
+  checkAmazonServiceabilityWithoutOrder,
 } = require("../AllCouriers/Amazon/Courier/couriers.controller.js");
 const {
   checkServiceabilityShreeMaruti,
@@ -44,7 +44,7 @@ const calculateRate = async (req, res) => {
       applicableWeight,
       paymentType,
       declaredValue,
-      dimensions
+      dimensions,
     );
 
     // Step 1: Get user’s plan
@@ -85,7 +85,7 @@ const calculateRate = async (req, res) => {
         pickUpPincode,
         provider,
         deliveryPincode,
-        paymentType
+        paymentType,
       );
 
       // Step 4: Determine whether to call API fallback
@@ -93,14 +93,14 @@ const calculateRate = async (req, res) => {
         serviceable = { success: true };
       } else if (
         ["courier_not_found", "error", "pincode_not_found"].includes(
-          localServiceability.reason
+          localServiceability.reason,
         )
       ) {
         // Local data missing → use API
         if (provider === "EcomExpres") {
           serviceable = await checkServiceabilityEcomExpress(
             pickUpPincode,
-            deliveryPincode
+            deliveryPincode,
           );
         } else if (provider === "Shree Maruti") {
           const payload = {
@@ -114,13 +114,13 @@ const calculateRate = async (req, res) => {
           serviceable = await checkPincodeServiceabilityDelhivery(
             pickUpPincode,
             deliveryPincode,
-            orderType
+            orderType,
           );
         } else if (provider === "Dtdc") {
           serviceable = await checkServiceabilityDTDC(
             pickUpPincode,
             deliveryPincode,
-            paymentType
+            paymentType,
           );
         } else if (provider === "Smartship") {
           const payload = {
@@ -131,13 +131,15 @@ const calculateRate = async (req, res) => {
           };
           serviceable = await checkSmartshipHubServiceability(payload);
         } else if (provider === "Amazon Shipping") {
-          const payload = {
+          serviceable = await checkAmazonServiceabilityWithoutOrder(
             pickUpPincode,
             deliveryPincode,
             applicableWeight,
             declaredValue,
-          };
-          serviceable = await checkAmazonServiceability(payload);
+            paymentType,
+            dimensions,
+          );
+          // console.log("Amazon serviceability result:", serviceable.error.errors);
         } else if (provider === "ZipyPost") {
           const payload = {
             source_pincode: pickUpPincode,
@@ -161,12 +163,12 @@ const calculateRate = async (req, res) => {
       // Step 5: Rate calculation
       let basicCharge = parseFloat(rc.weightPriceBasic[0][currentZone]);
       let additionalCharge = parseFloat(
-        rc.weightPriceAdditional[0][currentZone]
+        rc.weightPriceAdditional[0][currentZone],
       );
 
       const count = Math.ceil(
         (chargedWeight - rc.weightPriceBasic[0].weight) /
-          rc.weightPriceAdditional[0].weight
+          rc.weightPriceAdditional[0].weight,
       );
 
       let finalCharge =
@@ -192,7 +194,7 @@ const calculateRate = async (req, res) => {
 
       ans.push({
         courierServiceName: rc.courierServiceName,
-        orderType:"B2C",
+        orderType: "B2C",
         provider,
         mode,
         cod,
@@ -248,10 +250,10 @@ async function calculateRateForService(payload) {
     // console.log("rate", RateCards);
     for (const rc of RateCards) {
       const basicChargeForward = parseFloat(
-        rc.weightPriceBasic[0][currentZone]
+        rc.weightPriceBasic[0][currentZone],
       );
       const additionalChargeForward = parseFloat(
-        rc.weightPriceAdditional[0][currentZone]
+        rc.weightPriceAdditional[0][currentZone],
       );
       // console.log("basicChargeForward", basicChargeForward);
       // console.log("additionalChargeForward", additionalChargeForward);
@@ -259,7 +261,7 @@ async function calculateRateForService(payload) {
       let totalForwardCharge;
       const count = Math.ceil(
         (chargedWeight - rc.weightPriceBasic[0].weight) /
-          rc.weightPriceAdditional[0].weight
+          rc.weightPriceAdditional[0].weight,
       );
       // console.log("count", count);
       // console.log("chargedWeight", chargedWeight);
@@ -280,7 +282,7 @@ async function calculateRateForService(payload) {
         ) {
           const calculatedCodCharge = Math.max(
             rc.codCharge,
-            orderValue * (rc.codPercent / 100)
+            orderValue * (rc.codPercent / 100),
           );
           codCharge += calculatedCodCharge;
         } else {
@@ -351,7 +353,7 @@ async function calculateRateForDispute(payload) {
     const RateCards = plan.rateCard || [];
 
     const services = RateCards.filter(
-      (rate) => rate.courierServiceName === filteredServices
+      (rate) => rate.courierServiceName === filteredServices,
     );
 
     if (services.length === 0) {
@@ -371,7 +373,7 @@ async function calculateRateForDispute(payload) {
         !additionalRate[currentZone]
       ) {
         console.warn(
-          `Skipping service ${rc.courierServiceName} due to missing rate info`
+          `Skipping service ${rc.courierServiceName} due to missing rate info`,
         );
         continue;
       }
@@ -392,7 +394,7 @@ async function calculateRateForDispute(payload) {
         ) {
           const calculatedCodCharge = Math.max(
             rc.codCharge,
-            orderValue * (rc.codPercent / 100)
+            orderValue * (rc.codPercent / 100),
           );
           codCharge = parseFloat(calculatedCodCharge.toFixed(2));
         } else {
@@ -401,10 +403,10 @@ async function calculateRateForDispute(payload) {
       }
 
       const gstAmountForward = parseFloat(
-        ((totalForwardCharge + codCharge) * (gstRate / 100)).toFixed(2)
+        ((totalForwardCharge + codCharge) * (gstRate / 100)).toFixed(2),
       );
       const totalChargesForward = parseFloat(
-        (totalForwardCharge + codCharge + gstAmountForward).toFixed(2)
+        (totalForwardCharge + codCharge + gstAmountForward).toFixed(2),
       );
 
       const allRates = {
@@ -457,7 +459,7 @@ async function calculateRateForServiceBulk(payload) {
     const rc = plan.rateCard.find(
       (r) =>
         r.courierServiceName?.trim().toLowerCase() ===
-        filteredServices.courierServiceName?.trim().toLowerCase()
+        filteredServices.courierServiceName?.trim().toLowerCase(),
     );
 
     if (!rc) throw new Error("Selected courier not found in plan rate card");
@@ -466,10 +468,10 @@ async function calculateRateForServiceBulk(payload) {
     const basicWeight = parseFloat(rc.weightPriceBasic?.[0]?.weight || 0);
     const addWeight = parseFloat(rc.weightPriceAdditional?.[0]?.weight || 0);
     const basicCharge = parseFloat(
-      rc.weightPriceBasic?.[0]?.[currentZone] || 0
+      rc.weightPriceBasic?.[0]?.[currentZone] || 0,
     );
     const addCharge = parseFloat(
-      rc.weightPriceAdditional?.[0]?.[currentZone] || 0
+      rc.weightPriceAdditional?.[0]?.[currentZone] || 0,
     );
 
     // 🧮 Calculate total forward charge
