@@ -5,7 +5,7 @@ const { validateForm, validateEmail } = require("../utils/afv");
 const User = require("../models/User.model");
 const Role = require("../models/roles.modal");
 const RateCard = require("../models/rateCards");
-const B2BRateCard=require("../B2B/models/ratecard.model")
+const B2BRateCard = require("../B2B/models/ratecard.model");
 const Plan = require("../models/Plan.model");
 const B2BPlan = require("../B2B/models/plan.model");
 const bcrypt = require("bcryptjs");
@@ -76,7 +76,6 @@ const register = async (req, res) => {
       if (!existingUser) isUnique = true;
     }
 
-
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // ✅ Generate unique 7-digit referral code for the new user
@@ -85,7 +84,7 @@ const register = async (req, res) => {
 
     while (!isCodeUnique) {
       uniqueReferralCode = Math.floor(
-        1000000 + Math.random() * 9000000
+        1000000 + Math.random() * 9000000,
       ).toString();
       const codeExists = await User.findOne({
         referralCode: uniqueReferralCode,
@@ -175,7 +174,19 @@ const register = async (req, res) => {
       data: token,
     });
   } catch (error) {
-    console.log("Registration error:", error);
+    // ✅ Duplicate key error (email / phoneNumber / company)
+    if (error.code === 11000) {
+      const duplicateField = Object.keys(error.keyValue)[0];
+
+      return res.status(409).json({
+        success: false,
+        message: `${duplicateField} already exists`,
+        field: duplicateField,
+      });
+    }
+
+    console.error("Registration error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Internal server error",
