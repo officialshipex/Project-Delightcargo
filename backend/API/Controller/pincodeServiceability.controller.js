@@ -2,6 +2,7 @@ const Joi = require("joi");
 const zoneManagementController = require("../../Rate/zoneManagementController");
 const getZone = zoneManagementController.getZone;
 const Plan = require("../../models/Plan.model");
+const Couriers = require("../../models/AllCourierSchema.js");
 
 const {
   checkServiceabilityEcomExpress,
@@ -112,17 +113,24 @@ const pincodeServiceability = async (req, res) => {
     }
     const rateCards = plan.rateCard;
 
+    // ✅ Get enabled couriers from DB
+    const activeCouriers = await Couriers.find({ status: "Enable" }).select(
+      "courierName",
+    );
+
+    const activeCourierNames = activeCouriers.map((c) => c.courierName);
+
     // ✅ Step 4: Courier serviceability checks
     const providers = [
       {
         name: "EcomExpress",
         check: async () =>
-          await checkServiceabilityEcomExpress(pickUpPincode, deliveryPincode),
+          checkServiceabilityEcomExpress(pickUpPincode, deliveryPincode),
       },
       {
         name: "Delhivery",
         check: async () =>
-          await checkPincodeServiceabilityDelhivery(
+          checkPincodeServiceabilityDelhivery(
             pickUpPincode,
             deliveryPincode,
             order_type,
@@ -131,16 +139,12 @@ const pincodeServiceability = async (req, res) => {
       {
         name: "Dtdc",
         check: async () =>
-          await checkServiceabilityDTDC(
-            pickUpPincode,
-            deliveryPincode,
-            paymentType,
-          ),
+          checkServiceabilityDTDC(pickUpPincode, deliveryPincode, paymentType),
       },
       {
         name: "Smartship",
         check: async () =>
-          await checkSmartshipHubServiceability({
+          checkSmartshipHubServiceability({
             source_pincode: pickUpPincode,
             destination_pincode: deliveryPincode,
             order_weight: applicableWeight,
@@ -149,38 +153,30 @@ const pincodeServiceability = async (req, res) => {
       },
       {
         name: "Amazon Shipping",
-        check: async () => {
-          const dimensions = {
-            length,
-            width,
-            height,
-          };
-          return await checkAmazonServiceabilityWithoutOrder(
+        check: async () =>
+          checkAmazonServiceabilityWithoutOrder(
             pickUpPincode,
             deliveryPincode,
             applicableWeight,
             declaredValue,
             paymentType,
-            dimensions,
-          );
-        },
+            { length, width, height },
+          ),
       },
       {
         name: "Shree Maruti",
-        check: async () => {
-          const payload = {
-            fromPincode: parseInt(pickUpPincode),
-            toPincode: parseInt(deliveryPincode),
+        check: async () =>
+          checkServiceabilityShreeMaruti({
+            fromPincode: Number(pickUpPincode),
+            toPincode: Number(deliveryPincode),
             isCodOrder: paymentType === "COD",
             deliveryMode: "SURFACE",
-          };
-          return await checkServiceabilityShreeMaruti(payload);
-        },
+          }),
       },
       {
         name: "ZipyPost",
         check: async () =>
-          await checkZipypostServiceability({
+          checkZipypostServiceability({
             source_pincode: pickUpPincode,
             destination_pincode: deliveryPincode,
             payment_type: paymentType,
@@ -191,12 +187,13 @@ const pincodeServiceability = async (req, res) => {
             order_value: declaredValue,
           }),
       },
-    ];
+    ].filter((p) => activeCourierNames.includes(p.name));
 
     let ans = [];
 
     // ✅ Step 5: Iterate through user’s rateCards
     for (let rc of rateCards) {
+      if(rc.status !== "Active") continue;
       const provider = rc.courierProviderName;
       const providerCheck = providers.find((p) => p.name === provider);
       // console.log("Checking serviceability for provider:", providerCheck);
