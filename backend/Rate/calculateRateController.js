@@ -2,6 +2,7 @@ const RateCard = require("../models/rateCards.js");
 const zoneManagementController = require("./zoneManagementController.js");
 const getZone = zoneManagementController.getZone;
 const Plan = require("../models/Plan.model.js");
+const Couriers = require("../models/AllCourierSchema.js");
 const {
   checkServiceabilityEcomExpress,
 } = require("../AllCouriers/EcomExpress/Couriers/couriers.controllers.js");
@@ -26,6 +27,7 @@ const {
 const {
   checkZipypostServiceability,
 } = require("../AllCouriers/Zipypost/Couriers/couriers.controller.js");
+
 const calculateRate = async (req, res) => {
   try {
     const id = req.user._id;
@@ -50,6 +52,12 @@ const calculateRate = async (req, res) => {
     // Step 1: Get user’s plan
     const plan = await Plan.findOne({ userId: id });
     if (!plan) return res.status(404).json({ message: "Plan not found" });
+    // ✅ Get active couriers from DB
+    const activeCouriers = await Couriers.find({ status: "Enable" }).select(
+      "courierName",
+    );
+
+    const activeCourierNames = activeCouriers.map((c) => c.courierName);
 
     const rateCards = plan.rateCard;
     const orderType = paymentType === "COD" ? "cod" : "prepaid";
@@ -64,6 +72,12 @@ const calculateRate = async (req, res) => {
       const provider = rc.courierProviderName;
       const mode = rc.mode;
       let serviceable = { success: false };
+
+      // ✅ Skip if courier is disabled in DB
+      if (!activeCourierNames.includes(provider)) {
+        continue;
+      }
+      if (rc.status !== "Active") continue;
 
       // Only process supported providers
       if (

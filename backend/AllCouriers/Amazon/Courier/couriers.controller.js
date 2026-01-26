@@ -565,15 +565,15 @@ const checkAmazonServiceabilityWithoutOrder = async (
   dimensions,
 ) => {
   try {
-    console.log(
-      "pickupPincode, deliveryPincode,applicableWeight,declaredValue,paymentType,dimensions",
-      pickUpPincode,
-      deliveryPincode,
-      applicableWeight,
-      declaredValue,
-      paymentType,
-      dimensions,
-    );
+    // console.log(
+    //   "pickupPincode, deliveryPincode,applicableWeight,declaredValue,paymentType,dimensions",
+    //   pickUpPincode,
+    //   deliveryPincode,
+    //   applicableWeight,
+    //   declaredValue,
+    //   paymentType,
+    //   dimensions,
+    // );
     /* ================= ACCESS TOKEN ================= */
     const accessToken = await getAmazonAccessToken();
     // console.log("accessToken", accessToken);
