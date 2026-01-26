@@ -17,6 +17,7 @@ const FRONTEND_URL =
     ? "http://localhost:5173"
     : process.env.FRONTEND_URL;
 //for User Registration
+
 const register = async (req, res) => {
   try {
     const {
@@ -75,23 +76,6 @@ const register = async (req, res) => {
       if (!existingUser) isUnique = true;
     }
 
-    // Check duplicates
-    const userEmail = await User.findOne({ email });
-    const userPhoneNumber = await User.findOne({ phoneNumber });
-    const userCompany = await User.findOne({ company });
-
-    if (userPhoneNumber)
-      return res
-        .status(400)
-        .json({ success: false, message: "Phone number already exists" });
-    if (userEmail)
-      return res
-        .status(400)
-        .json({ success: false, message: "Email already exists" });
-    if (userCompany)
-      return res
-        .status(400)
-        .json({ success: false, message: "Company already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -158,7 +142,7 @@ const register = async (req, res) => {
     await newPlan.save();
 
     //Assign "LITE" B2B rate card
-    const liteRateCard = await b2bRateCard.find({ plan: "LITE" });
+    const liteRateCard = await B2BRateCard.find({ planName: "LITE" });
     if (!liteRateCard) {
       return res.status(500).json({
         success: false,

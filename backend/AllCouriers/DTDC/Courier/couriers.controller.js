@@ -443,7 +443,7 @@ const checkServiceabilityDTDC = async (
     );
 
     const data = response.data;
-    // console.log("data", data);
+    // console.log("data", response);
     const zipCodeResponse = data.ZIPCODE_RESP || [];
     const serviceList = data.SERV_LIST?.[0] || {};
 

@@ -15,12 +15,19 @@ const usersSchema = new mongoose.Schema(
       type: String,
       unique: true,
       required: true,
+      index: true,
     },
     phoneNumber: {
       type: String,
+      required: true,
+      unique: true,
+      index: true,
     },
     company: {
       type: String,
+      required: true,
+      unique: true,
+      index: true,
     },
     monthlyOrders: {
       type: String,
