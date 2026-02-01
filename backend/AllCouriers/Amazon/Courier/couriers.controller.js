@@ -410,9 +410,10 @@ const checkAmazonServiceability = async (provider, payload) => {
     if (!accessToken) return { success: false, reason: "Missing access token" };
 
     const shipFrom = {
-      name: payload.origin.contactName,
-      addressLine1: payload.origin.address.slice(0, 60),
-      city: payload.origin.city,
+      name: removeTrailingComma(payload.origin.contactName, 40),
+      addressLine1: removeTrailingComma(payload.origin.address, 60),
+      city: removeTrailingComma(payload.origin.city, 30),
+      stateOrRegion: removeTrailingComma(payload.origin.state, 30),
       postalCode: payload.origin.pinCode,
       countryCode: "IN",
       email: payload.origin.email,
@@ -420,14 +421,16 @@ const checkAmazonServiceability = async (provider, payload) => {
     };
 
     const shipTo = {
-      name: payload.destination.contactName,
-      addressLine1: payload.destination.address.slice(0, 60),
-      city: payload.destination.city,
+      name: removeTrailingComma(payload.destination.contactName, 40),
+      addressLine1: removeTrailingComma(payload.destination.address, 60),
+      city: removeTrailingComma(payload.destination.city, 30),
+      stateOrRegion: removeTrailingComma(payload.destination.state, 30),
       postalCode: payload.destination.pinCode,
       countryCode: "IN",
       email: payload.destination.email,
       phoneNumber: payload.destination.phoneNumber,
     };
+
     const totalQuantity = payload.productDetails.reduce(
       (sum, item) => sum + item.quantity,
       0,
@@ -494,6 +497,7 @@ const checkAmazonServiceability = async (provider, payload) => {
 
     // console.log(
     //   "body",
+    //   requestBody,
     //   requestBody.packages[0].items,
     //   requestBody.packages[0].weight
     // );
@@ -510,7 +514,7 @@ const checkAmazonServiceability = async (provider, payload) => {
         },
       },
     );
-
+    // console.log("response", response.data);
     const rates = response.data.payload.rates || [];
     const ineligibleRates = response.data.payload.ineligibleRates || [];
     // console.log("reat", response.data.payload);
@@ -548,10 +552,10 @@ const checkAmazonServiceability = async (provider, payload) => {
       return { success: false, reason: "No rates returned by Amazon" };
     }
   } catch (error) {
-    // console.error(
-    //   "Error checking serviceabilityyy:",
-    //   error.response?.data || error.message
-    // );
+    console.error(
+      "Error checking serviceabilityyy:",
+      error.response?.data || error.message,
+    );
     return { success: false, reason: "Error checking serviceability" };
   }
 };
@@ -598,7 +602,7 @@ const checkAmazonServiceabilityWithoutOrder = async (
       addressLine1: "Warehouse Address Line 1",
       city: pickupData.city,
       postalCode: pickUpPincode,
-      stateOrRegion: toTitleCase(pickupData.state), 
+      stateOrRegion: toTitleCase(pickupData.state),
       countryCode: "IN",
       email: "shipper@test.com",
       phoneNumber: "9999993998",
@@ -764,8 +768,18 @@ const toTitleCase = (str = "") =>
   str
     .toLowerCase()
     .split(" ")
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+
+const removeTrailingComma = (value, maxLength = 60) => {
+  if (!value) return "";
+
+  return value
+    .toString()
+    .replace(/,+$/, "") // ✅ removes ONLY comma(s) at the END
+    .trimEnd() // ✅ removes trailing spaces
+    .slice(0, maxLength);
+};
 
 module.exports = {
   createOneClickShipment,

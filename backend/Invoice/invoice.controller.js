@@ -752,7 +752,7 @@ async function generateInvoicesForPeriod(periodStart, periodEnd) {
   // Fetch all users who have wallet or active users (change criteria as needed)
   // const users = await User.find({}, { _id: 1 });
   const users = await User.find();
-
+console.log(`Generating invoices for ${users.length} users for period:`, periodStart, periodEnd);
   const results = [];
   for (const u of users) {
     try {
@@ -810,10 +810,77 @@ async function scheduleMonthlyInvoiceCron() {
   // });
 }
 if(process.env.NODE_ENV === 'production'){
-  scheduleMonthlyInvoiceCron();
+  cron.schedule(
+  "5 0 1 * *", // 12:05 AM on 1st day of every month
+  async () => {
+    await scheduleMonthlyInvoiceCron();
+  },
+  {
+    timezone: "Asia/Kolkata",
+  }
+);
 }
 // scheduleMonthlyInvoiceCron()
 // console.log("Monthly invoice cron scheduled.");
+
+async function scheduleMonthlyInvoiceCronn({ forcePeriod } = {}) {
+  console.log("Running monthly invoice cron check...");
+
+  try {
+    const now = new Date();
+
+    let periodStart;
+    let periodEnd;
+
+    if (forcePeriod) {
+      // 🔁 ONE-TIME manual backfill
+      periodStart = forcePeriod.start;
+      periodEnd = forcePeriod.end;
+
+      console.log("⚠️ Running MANUAL backfill for:", periodStart, periodEnd);
+    } else {
+      // ✅ Normal month-end logic
+      const tomorrow = new Date(now);
+      tomorrow.setDate(now.getDate() + 1);
+
+      if (tomorrow.getDate() !== 1) {
+        console.log("Not the end of the month. Skipping invoice generation.");
+        return;
+      }
+
+      const year = now.getFullYear();
+      const month = now.getMonth();
+
+      periodStart = new Date(year, month, 1, 0, 0, 0, 0);
+      periodEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    }
+
+    console.log("Generating invoice for period:", periodStart, periodEnd);
+
+    const results = await generateInvoicesForPeriod(periodStart, periodEnd);
+
+    console.log(
+      "Monthly invoice results:",
+      results.filter((r) => r.result || r.error).slice(0, 10)
+    );
+  } catch (err) {
+    console.error("Monthly invoice cron error:", err);
+  }
+}
+
+// (async () => {
+//   await scheduleMonthlyInvoiceCronn({
+//     forcePeriod: {
+//       start: new Date(2026, 0, 1, 0, 0, 0, 0),   // Jan 1
+//       end: new Date(2026, 1, 0, 23, 59, 59, 999) // Jan 31
+//     }
+//   });
+
+//   console.log("✅ January invoice backfill completed");
+// })();
+
+
+
 
 const bulkDownloadInvoices = async (req, res) => {
   try {
@@ -924,20 +991,51 @@ const adminGetInvoices = async (req, res) => {
     if (!req.user?.isAdmin) {
       return res.status(403).json({ success: false, message: "Unauthorized" });
     }
-    // console.log("req.query", req.query);
+
+    const {
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const parsedLimit =
+      typeof limit === "string" && limit.toLowerCase() === "all"
+        ? null
+        : Number(limit);
+
+    const finalLimit =
+      parsedLimit === null || isNaN(parsedLimit) ? null : parsedLimit;
+
+    const skip = finalLimit ? (Number(page) - 1) * finalLimit : 0;
+
     const filters = buildInvoiceFilters(req.query);
 
-    const invoices = await Invoice.find(filters).sort({ createdAt: -1 });
+    // 🔥 Fetch paginated data + count in parallel
+    const [invoices, totalCount] = await Promise.all([
+      finalLimit === null
+        ? Invoice.find(filters).sort({ createdAt: -1 })
+        : Invoice.find(filters)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(finalLimit),
+      Invoice.countDocuments(filters),
+    ]);
 
     if (!invoices.length) {
-      return res.json({ success: true, total: 0, invoices: [] });
+      return res.json({
+        success: true,
+        totalCount: 0,
+        page: 0,
+        currentPage: Number(page),
+        limit: finalLimit ?? "All",
+        invoices: [],
+      });
     }
 
     const userIds = [...new Set(invoices.map((i) => i.userId))];
 
     const users = await User.find(
       { _id: { $in: userIds } },
-      { fullname: 1, email: 1, phoneNumber: 1, userId: 1 },
+      { fullname: 1, email: 1, phoneNumber: 1, userId: 1 }
     ).lean();
 
     const userMap = {};
@@ -955,8 +1053,8 @@ const adminGetInvoices = async (req, res) => {
       invoiceNumber: inv.invoiceNumber,
       totalShipments: inv.includedAwbs?.length || 0,
       invoiceDate: inv.createdAt.toISOString().split("T")[0],
-      periodStart: inv.periodStart.toISOString().split("T")[0],
-      periodEnd: inv.periodEnd.toISOString().split("T")[0],
+      periodStart: inv.periodStart?.toISOString().split("T")[0] || null,
+      periodEnd: inv.periodEnd?.toISOString().split("T")[0] || null,
       invoiceUrl: inv.s3Url || null,
       amount: inv.totalAmount,
       status: inv.status,
@@ -964,12 +1062,27 @@ const adminGetInvoices = async (req, res) => {
       userDetails: userMap[inv.userId] || {},
     }));
 
-    return res.json({ success: true, total: result.length, invoices: result });
+    const totalPages = finalLimit
+      ? Math.ceil(totalCount / finalLimit)
+      : 1;
+
+    return res.json({
+      success: true,
+      totalCount,
+      page: totalPages,       // total pages
+      currentPage: Number(page),
+      limit: finalLimit ?? "All",
+      invoices: result,
+    });
   } catch (err) {
     console.error("adminGetInvoices error:", err);
-    return res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
+
 
 /* -------------------------------------------------------
    User Controller — Get Only Logged-in User's Invoices
@@ -978,18 +1091,47 @@ const userGetInvoices = async (req, res) => {
   try {
     const userId = req.user._id;
 
+    const {
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const parsedLimit =
+      typeof limit === "string" && limit.toLowerCase() === "all"
+        ? null
+        : Number(limit);
+
+    const finalLimit =
+      parsedLimit === null || isNaN(parsedLimit) ? null : parsedLimit;
+
+    const skip = finalLimit ? (Number(page) - 1) * finalLimit : 0;
+
     // Apply filters + force user restriction
     const filters = buildInvoiceFilters(req.query);
     filters.userId = userId;
 
-    // Fetch invoices
-    const invoices = await Invoice.find(filters).sort({ createdAt: -1 });
+    // 🔥 Run data + count in parallel
+    const [invoices, totalCount] = await Promise.all([
+      finalLimit === null
+        ? Invoice.find(filters).sort({ createdAt: -1 })
+        : Invoice.find(filters)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(finalLimit),
+      Invoice.countDocuments(filters),
+    ]);
 
     if (!invoices.length) {
-      return res.json({ success: true, total: 0, invoices: [] });
+      return res.json({
+        success: true,
+        totalCount: 0,
+        page: 0,
+        currentPage: Number(page),
+        limit: finalLimit ?? "All",
+        invoices: [],
+      });
     }
 
-    // Build response similar to adminGetInvoices but without userDetails
     const result = invoices.map((inv) => ({
       _id: inv._id,
       invoiceNumber: inv.invoiceNumber,
@@ -1002,16 +1144,27 @@ const userGetInvoices = async (req, res) => {
       status: inv.status,
     }));
 
+    const totalPages = finalLimit
+      ? Math.ceil(totalCount / finalLimit)
+      : 1;
+
     return res.json({
       success: true,
-      total: result.length,
+      totalCount,
+      page: totalPages,
+      currentPage: Number(page),
+      limit: finalLimit ?? "All",
       invoices: result,
     });
   } catch (err) {
     console.error("userGetInvoices error:", err);
-    return res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
+
 
 /* -------------------------
    Exports (controllers)
