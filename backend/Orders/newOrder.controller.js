@@ -82,7 +82,12 @@ const newOrder = async (req, res) => {
     ) {
       return res.status(400).json({ error: "Alll fields are required" });
     }
-
+    const User = await user.findById(req.user._id);
+    if (User.kycDone !== true) {
+      return res
+        .status(400)
+        .json({ error: "Please complete KYC to create an order" });
+    }
     if (!["COD", "Prepaid"].includes(paymentDetails.method)) {
       return res.status(400).json({ error: "Invalid payment method" });
     }
@@ -156,7 +161,7 @@ const updatePackageDetails = async (req, res) => {
     }
 
     const validOrderIds = selectedOrders.filter((id) =>
-      mongoose.Types.ObjectId.isValid(id)
+      mongoose.Types.ObjectId.isValid(id),
     );
 
     if (validOrderIds.length === 0) {
@@ -186,7 +191,7 @@ const updatePackageDetails = async (req, res) => {
             },
           },
         },
-      }
+      },
     );
 
     return res
@@ -320,7 +325,7 @@ const getOrders = async (req, res) => {
       userId = req.user?._id || req.employee?._id;
     }
 
-    // console.log("userId",userId)
+    console.log("userId", req.query);
 
     const page = parseInt(req.query.page) || 1;
     const limitQuery = req.query.limit;
@@ -369,9 +374,10 @@ const getOrders = async (req, res) => {
         andConditions.push({ orderId: orderIdNum });
       }
     }
-    if (awbNumber) {
-      andConditions.push({ awb_number: { $regex: awbNumber, $options: "i" } });
+    if (awbNumber?.trim()) {
+      andConditions.push({ awb_number: awbNumber.trim() });
     }
+
     if (trackingId) {
       andConditions.push({ trackingId: { $regex: trackingId, $options: "i" } });
     }
@@ -868,8 +874,13 @@ const updateOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
     // console.log("orderId", orderId);
-    const { pickupAddress, receiverAddress, paymentDetails, packageDetails,otherDetails } =
-      req.body;
+    const {
+      pickupAddress,
+      receiverAddress,
+      paymentDetails,
+      packageDetails,
+      otherDetails,
+    } = req.body;
 
     console.log(req.body);
     if (!mongoose.Types.ObjectId.isValid(orderId)) {
@@ -962,7 +973,7 @@ const updateOrder = async (req, res) => {
     const updatedOrder = await Order.findByIdAndUpdate(
       orderId,
       { $set: updateFields },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     if (!updatedOrder) {
@@ -1058,7 +1069,7 @@ const bulkCloneOrders = async (req, res) => {
     // Update only orders that are currently "Cancelled"
     const result = await Order.updateMany(
       { _id: { $in: validIds }, status: "Cancelled" },
-      { $set: { status: "new" } }
+      { $set: { status: "new" } },
     );
 
     // If no orders were updated
@@ -1165,7 +1176,7 @@ const ShipeNowOrder = async (req, res) => {
           (card) =>
             normalize(card.courierServiceName) === normalize(srvc.name) &&
             normalize(card.courierProviderName) === normalize(srvc.provider) &&
-            card.status === "Active"
+            card.status === "Active",
         );
         // console.log("planRateCard",planRateCard)
         if (planRateCard) {
@@ -1179,12 +1190,12 @@ const ShipeNowOrder = async (req, res) => {
         let result = await checkServiceabilityAll(
           item,
           order._id,
-          order.pickupAddress.pinCode
+          order.pickupAddress.pinCode,
         );
         if (result && result.success) {
           return { item };
         }
-      })
+      }),
     );
     // console.log("available", availableServices);
 
@@ -1193,7 +1204,7 @@ const ShipeNowOrder = async (req, res) => {
     // ✅ calculate zone
     const zone = await getZone(
       order.pickupAddress.pinCode,
-      order.receiverAddress.pinCode
+      order.receiverAddress.pinCode,
     );
 
     const payload = {
@@ -1219,13 +1230,13 @@ const ShipeNowOrder = async (req, res) => {
       .map((service) => {
         const matchedRate = rates.find(
           (rate) =>
-            normalize(rate.courierServiceName) === normalize(service.item.name)
+            normalize(rate.courierServiceName) === normalize(service.item.name),
         );
 
         if (!matchedRate) return null;
 
         const matchedEDD = EDDRates.find(
-          (edd) => normalize(edd.serviceName) === normalize(service.item.name)
+          (edd) => normalize(edd.serviceName) === normalize(service.item.name),
         );
 
         let estimatedDeliveryDate = null;
@@ -1261,21 +1272,21 @@ const ShipeNowOrder = async (req, res) => {
       // Sort by lowest finalCharges
       sortedRates.sort((a, b) => {
         const chargeA = parseFloat(
-          a.forward?.finalCharges || a.forward?.charges || 0
+          a.forward?.finalCharges || a.forward?.charges || 0,
         );
         const chargeB = parseFloat(
-          b.forward?.finalCharges || b.forward?.charges || 0
+          b.forward?.finalCharges || b.forward?.charges || 0,
         );
         return chargeA - chargeB;
       });
     } else if (priorityType === "fastest") {
       sortedRates.sort(
         (a, b) =>
-          new Date(a.estimatedDeliveryDate) - new Date(b.estimatedDeliveryDate)
+          new Date(a.estimatedDeliveryDate) - new Date(b.estimatedDeliveryDate),
       );
     } else if (priorityType === "custom" && Array.isArray(plan.rateCard)) {
       const customOrder = plan.rateCard.map((r) =>
-        r?.courierServiceName?.toLowerCase()
+        r?.courierServiceName?.toLowerCase(),
       );
       sortedRates.sort((a, b) => {
         const indexA = customOrder.indexOf(a.courierServiceName?.toLowerCase());
@@ -1318,13 +1329,12 @@ fs.createReadStream(path.join(__dirname, "../data/pincodes.csv"))
     console.error("❌ Error reading CSV file:", err);
   });
 
-  
 // ✅ API Controller
 const getPinCodeDetails = async (req, res) => {
   try {
     const { pincode } = req.params;
     const foundEntry = pincodeData.find(
-      (entry) => entry.pincode === pincode.trim()
+      (entry) => entry.pincode === pincode.trim(),
     );
 
     if (foundEntry) {
@@ -1480,7 +1490,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       const updatedWallet = await Wallet.findOneAndUpdate(
         { _id: currentWallet._id },
         { $inc: { balance: balanceTobeAdded } },
-        { new: true, session }
+        { new: true, session },
       );
 
       await Wallet.updateOne(
@@ -1498,7 +1508,7 @@ const cancelOrdersAtBooked = async (req, res) => {
             },
           },
         },
-        { session }
+        { session },
       );
       await currentOrder.save({ session });
       await session.commitTransaction();
@@ -1543,7 +1553,9 @@ const passbook = async (req, res) => {
       return res.status(400).json({ message: "User ID is required" });
     }
 
-    const currentUser = await user.findById(userId);
+    // 🔹 Fetch only required fields (small speed gain)
+    const currentUser = await user.findById(userId).select("_id Wallet");
+
     if (!currentUser || !currentUser.Wallet) {
       return res.status(404).json({ message: "Wallet not found" });
     }
@@ -1566,11 +1578,9 @@ const passbook = async (req, res) => {
     if (description) {
       transactionMatchStage["wallet.transactions.description"] = description;
     }
-
     if (awbNumber) {
       transactionMatchStage["wallet.transactions.awb_number"] = awbNumber;
     }
-
     if (orderId) {
       transactionMatchStage["wallet.transactions.channelOrderId"] = orderId;
     }
@@ -1585,7 +1595,8 @@ const passbook = async (req, res) => {
 
     const skip = finalLimit ? (Number(page) - 1) * finalLimit : 0;
 
-    const basePipeline = [
+    /* ---------------- MAIN PIPELINE ---------------- */
+    const dataPipeline = [
       { $match: { _id: currentUser._id } },
       {
         $lookup: {
@@ -1599,7 +1610,13 @@ const passbook = async (req, res) => {
       { $unwind: "$wallet.transactions" },
       { $match: transactionMatchStage },
 
-      // Lookup courierServiceName from orders using awb_number
+      // 🔥 Sort BEFORE lookup
+      { $sort: { "wallet.transactions.date": -1 } },
+
+      // 🔥 Pagination BEFORE lookup (HUGE SPEED GAIN)
+      ...(finalLimit ? [{ $skip: skip }, { $limit: finalLimit }] : []),
+
+      // 🔥 Lookup only for paginated rows
       {
         $lookup: {
           from: "neworders",
@@ -1613,10 +1630,11 @@ const passbook = async (req, res) => {
           courierServiceName: {
             $arrayElemAt: ["$orderInfo.courierServiceName", 0],
           },
-          provider: { $arrayElemAt: ["$orderInfo.provider", 0] },
+          provider: {
+            $arrayElemAt: ["$orderInfo.provider", 0],
+          },
         },
       },
-
       {
         $project: {
           _id: 0,
@@ -1632,18 +1650,28 @@ const passbook = async (req, res) => {
           provider: 1,
         },
       },
-      { $sort: { date: -1 } },
+    ];
+
+    /* ---------------- COUNT PIPELINE (UNCHANGED LOGIC) ---------------- */
+    const countPipeline = [
+      { $match: { _id: currentUser._id } },
+      {
+        $lookup: {
+          from: "wallets",
+          localField: "Wallet",
+          foreignField: "_id",
+          as: "wallet",
+        },
+      },
+      { $unwind: "$wallet" },
+      { $unwind: "$wallet.transactions" },
+      { $match: transactionMatchStage },
+      { $count: "total" },
     ];
 
     const [transactions, totalCountResult] = await Promise.all([
-      finalLimit === null
-        ? user.aggregate(basePipeline)
-        : user.aggregate([
-            ...basePipeline,
-            { $skip: skip },
-            { $limit: finalLimit },
-          ]),
-      user.aggregate([...basePipeline, { $count: "total" }]),
+      user.aggregate(dataPipeline).allowDiskUse(true),
+      user.aggregate(countPipeline),
     ]);
 
     const totalCount = totalCountResult[0]?.total || 0;
@@ -1782,7 +1810,7 @@ const bulkCancelOrder = async (req, res) => {
       try {
         if (
           !["Booked", "Not Picked", "Ready To Ship"].includes(
-            currentOrder.status
+            currentOrder.status,
           )
         ) {
           failedCount++;
@@ -1851,7 +1879,7 @@ const bulkCancelOrder = async (req, res) => {
         switch (provider) {
           case "Delhivery":
             cancelResponse = await cancelOrderDelhivery(
-              currentOrder.awb_number
+              currentOrder.awb_number,
             );
             break;
           case "Amazon Shipping":
@@ -1904,7 +1932,7 @@ const bulkCancelOrder = async (req, res) => {
           const updatedWallet = await Wallet.findOneAndUpdate(
             { _id: walletId },
             { $inc: { balance: balanceToAdd } },
-            { new: true, session: orderSession }
+            { new: true, session: orderSession },
           );
 
           await Wallet.updateOne(
@@ -1922,7 +1950,7 @@ const bulkCancelOrder = async (req, res) => {
                 },
               },
             },
-            { session: orderSession }
+            { session: orderSession },
           );
         }
 
@@ -1992,7 +2020,7 @@ const checkBulkPickup = async (req, res) => {
 
     // Fetch orders with their pickupAddress
     const orders = await Order.find({ _id: { $in: orderIds } }).select(
-      "pickupAddress"
+      "pickupAddress",
     );
 
     if (orders.length === 0) {
@@ -2012,7 +2040,7 @@ const checkBulkPickup = async (req, res) => {
 
     // Check if all pickup addresses are the same
     const pickupAddresses = orders.map((o) =>
-      JSON.stringify(o.pickupAddress || {})
+      JSON.stringify(o.pickupAddress || {}),
     );
     const allSame =
       pickupAddresses.every((addr) => addr === pickupAddresses[0]) &&
@@ -2045,7 +2073,7 @@ const checkBulkUser = async (req, res) => {
 
     // ✅ Fetch all orders by IDs
     const orders = await Order.find({ _id: { $in: orderIds } }).select(
-      "userId"
+      "userId",
     );
 
     if (!orders || orders.length === 0) {
