@@ -1483,7 +1483,7 @@ const cancelOrdersAtBooked = async (req, res) => {
     currentOrder.tracking.push({
       status: "Cancelled",
       StatusLocation: "",
-      StatusDateTime: new Date(),
+      StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
       Instructions: "Order cancelled successfully",
     });
 
@@ -1971,7 +1971,7 @@ const bulkCancelOrder = async (req, res) => {
         currentOrder.tracking.push({
           status: "Cancelled",
           StatusLocation: "",
-          StatusDateTime: new Date(),
+          StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
           Instructions: "Order cancelled successfully",
         });
 

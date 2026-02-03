@@ -564,25 +564,26 @@ const cancelShipmentEkart = async (tracking_id) => {
   }
 };
 
-const checkEkartServiceability = async (pickupPincode, receiverPincode) => {
+const checkEkartServiceability = async (payload) => {
   try {
     const token = await getAccessToken();
     if (!token) {
       return { success: false, message: "Failed to fetch access token" };
     }
-
     const headers = {
       Authorization: `Bearer ${token}`,
     };
+    const pickup=Number(payload.pickUpPincode);
+    const receiver=Number(payload.deliveryPincode)
 
     // Make both requests in parallel
     const [pickupResponse, receiverResponse] = await Promise.all([
       axios.get(
-        `https://app.elite.ekartlogistics.in/api/v2/serviceability/${pickupPincode}`,
+        `https://app.elite.ekartlogistics.in/api/v2/serviceability/${pickup}`,
         { headers },
       ),
       axios.get(
-        `https://app.elite.ekartlogistics.in/api/v2/serviceability/${receiverPincode}`,
+        `https://app.elite.ekartlogistics.in/api/v2/serviceability/${receiver}`,
         { headers },
       ),
     ]);

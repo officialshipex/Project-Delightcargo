@@ -56,19 +56,19 @@ const checkServiceabilityAll = async (service, id, pincode) => {
           pickupPincode,
           service.provider,
           deliveryPincode,
-          paymentMethod
+          paymentMethod,
         );
         // console.log(`Local serviceability for ${service.provider}:`, result);
         return result;
       } catch (err) {
         console.error(
           `Local pincode check failed for ${service.provider}:`,
-          err.message
+          err.message,
         );
         return false;
       }
     };
-// console.log("Checking serviceability for", service.provider);
+    // console.log("Checking serviceability for", service.provider);
     // ----------------------- NimbusPost -----------------------
     if (service.provider === "NimbusPostt") {
       const local = await checkLocalServiceability();
@@ -126,7 +126,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
       if (local.reason === "courier_not_found" || local.reason === "error") {
         const result = await checkAmazonServiceability(
           service.provider,
-          payload
+          payload,
         );
         // console.log("result", result);
         return result;
@@ -138,12 +138,12 @@ const checkServiceabilityAll = async (service, id, pincode) => {
       // const local = await checkLocalServiceability();
       // if (local.success) return local;
       // if (local.reason === "courier_not_found" || local.reason === "error") {
-        const result = await checkPincodeServiceabilityDelhivery(
-          pickupPincode,
-          deliveryPincode,
-          paymentMethod === "COD" ? "cod" : "prepaid"
-        );
-        return result;
+      const result = await checkPincodeServiceabilityDelhivery(
+        pickupPincode,
+        deliveryPincode,
+        paymentMethod === "COD" ? "cod" : "prepaid",
+      );
+      return result;
       // }
     }
 
@@ -172,7 +172,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
       if (local.reason === "courier_not_found" || local.reason === "error") {
         const result = await checkServiceabilityEcomExpress(
           pickupPincode,
-          deliveryPincode
+          deliveryPincode,
         );
         return result;
       }
@@ -187,7 +187,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         const result = await checkServiceabilityDTDC(
           pickupPincode,
           deliveryPincode,
-          paymentMethod
+          paymentMethod,
         );
         // console.log("result",result)
         return result;
@@ -216,10 +216,11 @@ const checkServiceabilityAll = async (service, id, pincode) => {
       const local = await checkLocalServiceability();
       if (local.success) return local;
       if (local.reason === "courier_not_found" || local.reason === "error") {
-        const result = await checkEkartServiceability(
-          pickupPincode,
-          deliveryPincode
-        );
+        const payload = {
+          pickUpPincode: pickupPincode,
+          deliveryPincode: deliveryPincode,
+        };
+        const result = await checkEkartServiceability(payload);
         return result;
       }
     }
@@ -246,7 +247,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
       const payload = {
         source_pincode: pickupPincode,
         destination_pincode: deliveryPincode,
-        payment_type:currentOrder.paymentDetails?.method,
+        payment_type: currentOrder.paymentDetails?.method,
         order_weight: weight,
         length: currentOrder.packageDetails.volumetricWeight?.length || 0,
         breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,

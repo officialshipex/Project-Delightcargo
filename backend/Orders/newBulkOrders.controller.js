@@ -34,6 +34,7 @@ const {
 const {
   createOrderZipypost,
 } = require("../AllCouriers/Zipypost/Couriers/bulkShipment.controller");
+const { createOrderEkart } = require("../AllCouriers/Ekart/Couriers/bulkShipment.controller");
 
 const updatePickup = async (req, res) => {
   try {
@@ -151,6 +152,15 @@ const callProviderWithRetry = async (
           break;
         case "ZipyPost":
           result = await createOrderZipypost(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges
+          );
+          break;
+          case "Ekart":
+          result = await createOrderEkart(
             serviceDetails,
             order._id,
             wh,

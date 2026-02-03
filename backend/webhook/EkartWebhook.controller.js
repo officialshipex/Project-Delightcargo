@@ -2,6 +2,14 @@ const Order = require("../models/newOrder.model");
 
 const EKART_WEBHOOK_TOKEN = process.env.EKART_WEBHOOK_TOKEN;
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+const ekartEpochToISTDate = (epoch) => {
+  if (!epoch) return new Date();
+  return new Date(epoch + IST_OFFSET_MS);
+};
+
+
 const EkartWebhook = async (req, res) => {
   try {
     console.log("Ekart Webhook Received:", req.body);
@@ -48,7 +56,7 @@ const EkartWebhook = async (req, res) => {
       Status: status,
       Instructions: desc,
       StrRemarks: desc,
-      StatusDateTime: ctime ? new Date(ctime) : new Date(),
+      StatusDateTime: ekartEpochToISTDate(ctime),
     };
 
     const currentStatus = normalizedData.Status;
