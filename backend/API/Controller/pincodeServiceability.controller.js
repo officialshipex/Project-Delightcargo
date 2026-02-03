@@ -25,6 +25,9 @@ const {
 const {
   checkZipypostServiceability,
 } = require("../../AllCouriers/Zipypost/Couriers/couriers.controller.js");
+const {
+  checkEkartServiceability,
+} = require("../../AllCouriers/Ekart/Couriers/couriers.controller.js");
 
 // ✅ Input Validation Schema
 const serviceabilitySchema = Joi.object({
@@ -52,6 +55,7 @@ const courierIds = {
   "Amazon Shipping": "05",
   "Shree Maruti": "06",
   ZipyPost: "07",
+  Ekart: "08",
 };
 
 const pincodeServiceability = async (req, res) => {
@@ -187,13 +191,21 @@ const pincodeServiceability = async (req, res) => {
             order_value: declaredValue,
           }),
       },
+      {
+        name: "Ekart",
+        check: async () =>
+          checkEkartServiceability({
+            pickUpPincode,
+            deliveryPincode,
+          }),
+      },
     ].filter((p) => activeCourierNames.includes(p.name));
 
     let ans = [];
 
     // ✅ Step 5: Iterate through user’s rateCards
     for (let rc of rateCards) {
-      if(rc.status !== "Active") continue;
+      if (rc.status !== "Active") continue;
       const provider = rc.courierProviderName;
       const providerCheck = providers.find((p) => p.name === provider);
       // console.log("Checking serviceability for provider:", providerCheck);

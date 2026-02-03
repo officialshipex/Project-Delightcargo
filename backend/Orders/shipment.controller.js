@@ -68,7 +68,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         return false;
       }
     };
-
+// console.log("Checking serviceability for", service.provider);
     // ----------------------- NimbusPost -----------------------
     if (service.provider === "NimbusPostt") {
       const local = await checkLocalServiceability();

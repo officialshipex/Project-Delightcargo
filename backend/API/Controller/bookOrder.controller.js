@@ -13,6 +13,7 @@ const User = require("../../models/User.model");
 const mongoose = require("mongoose");
 const createShreeMarutiShipment = require("../Courier/shreeMarutiShipmentCreation.controller");
 const createZipypostShipment = require("../Courier/zipyPostShipmentCreation.controller");
+const createEkartShipment = require("../Courier/ekartShipmentCreation.controller");
 
 // Provider mapping
 const providerMap = {
@@ -23,6 +24,7 @@ const providerMap = {
   "05": "Amazon Shipping",
   "06": "Shree Maruti",
   "07": "ZipyPost",
+  "08": "Ekart",
 };
 
 // Validation schema
@@ -121,7 +123,7 @@ const bookOrder = async (req, res) => {
     const matchedChargeObj = finalChargesArray.find(
       (item) =>
         item.courierServiceName.toLowerCase() ===
-        courierServiceName.toLowerCase()
+        courierServiceName.toLowerCase(),
     );
 
     if (!matchedChargeObj) {
@@ -220,6 +222,14 @@ const bookOrder = async (req, res) => {
         break;
       case "ZipyPost":
         shipmentResult = await createZipypostShipment({
+          id: order._id,
+          provider,
+          finalCharges,
+          courierServiceName,
+        });
+        break;
+      case "Ekart":
+        shipmentResult = await createEkartShipment({
           id: order._id,
           provider,
           finalCharges,

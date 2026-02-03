@@ -55,6 +55,9 @@ const {
 const {
   cancelOrderZipypost,
 } = require("../AllCouriers/Zipypost/Couriers/couriers.controller");
+const {
+  cancelShipmentEkart,
+} = require("../AllCouriers/Ekart/Couriers/couriers.controller");
 // Create a shipment
 const newOrder = async (req, res) => {
   try {
@@ -1462,6 +1465,11 @@ const cancelOrdersAtBooked = async (req, res) => {
       if (result.error) {
         return res.status(400).send({ error: result.error });
       }
+    } else if (currentOrder.provider === "Ekart") {
+      const result = await cancelShipmentEkart(currentOrder.awb_number);
+      if (result.error) {
+        return res.status(400).send({ error: result.error });
+      }
     } else {
       return {
         error: "Unsupported courier provider",
@@ -1893,6 +1901,9 @@ const bulkCancelOrder = async (req, res) => {
             break;
           case "Dtdc":
             cancelResponse = await cancelOrderDTDC(currentOrder.awb_number);
+            break;
+          case "Ekart":
+            cancelResponse = await cancelShipmentEkart(currentOrder.awb_number);
             break;
           default:
             failedCount++;
