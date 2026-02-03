@@ -180,9 +180,12 @@ const availableCourierService = async (req, res) => {
         };
         serviceable = await checkZipypostServiceability(payload);
       } else if (provider === "Ekart") {
-        serviceable = await checkEkartServiceability(
+        const payload={
           pickUpPincode,
-          deliveryPincode,
+          deliveryPincode
+        }
+        serviceable = await checkEkartServiceability(
+          payload
         );
       }
 
