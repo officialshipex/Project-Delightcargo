@@ -121,7 +121,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       const balanceToBeAdded =
         currentOrder.totalFreightCharges === "N/A"
           ? 0
-          : parseInt(currentOrder.totalFreightCharges);
+          : parseFloat(currentOrder.totalFreightCharges);
 
       if (balanceToBeAdded > 0) {
         const alreadyRefunded = currentWallet.transactions.some(
