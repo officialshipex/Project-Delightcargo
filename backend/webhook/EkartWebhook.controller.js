@@ -4,6 +4,7 @@ const EKART_WEBHOOK_TOKEN = process.env.EKART_WEBHOOK_TOKEN;
 
 const EkartWebhook = async (req, res) => {
   try {
+    console.log("Ekart Webhook Received:", req.body);
     const token = req.headers.authorization;
 
     if (token !== `Bearer ${EKART_WEBHOOK_TOKEN}`) {
@@ -11,7 +12,7 @@ const EkartWebhook = async (req, res) => {
     }
 
     const body = req.body;
-    console.log("Ekart Webhook Received:", body);
+    
 
     const {
       status,
