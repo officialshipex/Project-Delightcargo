@@ -160,7 +160,9 @@ const createOrderEkart = async (
       total_amount: currentOrder.paymentDetails.amount,
       tax_value: totalTaxValue,
       taxable_amount: currentOrder.paymentDetails.amount,
-
+      commodity_value: String(
+        currentOrder.paymentDetails.amount - totalTaxValue,
+      ),
       quantity: totalQty,
       weight: currentOrder.packageDetails.applicableWeight,
       length: currentOrder.packageDetails.volumetricWeight.length,
