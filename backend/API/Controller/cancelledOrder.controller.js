@@ -22,6 +22,7 @@ const mongoose = require("mongoose");
 const {
   cancelOrderShreeMaruti,
 } = require("../../AllCouriers/ShreeMaruti/Couriers/couriers.controller");
+const {cancelShipmentEkart} = require("../../AllCouriers/Ekart/Couriers/couriers.controller");
 
 const cancelOrdersAtBooked = async (req, res) => {
   const MAX_RETRIES = 1;
@@ -91,6 +92,9 @@ const cancelOrdersAtBooked = async (req, res) => {
         case "ZipyPost":
           result = await cancelOrderZipypost(currentOrder.awb_number);
           break;
+          case "Ekart":
+            result=await cancelShipmentEkart(currentOrder.awb_number);
+            break;
         default:
           throw new Error("Unsupported courier provider");
       }

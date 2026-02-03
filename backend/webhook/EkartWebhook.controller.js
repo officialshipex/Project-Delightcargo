@@ -1,0 +1,195 @@
+const Order = require("../models/newOrder.model");
+
+const EKART_WEBHOOK_TOKEN = process.env.EKART_WEBHOOK_TOKEN;
+
+const EkartWebhook = async (req, res) => {
+  try {
+    const token = req.headers.authorization;
+
+    if (token !== `Bearer ${EKART_WEBHOOK_TOKEN}`) {
+      return res.status(401).send("Unauthorized");
+    }
+
+    const body = req.body;
+    console.log("Ekart Webhook Received:", body);
+
+    const {
+      status,
+      location,
+      desc,
+      attempts,
+      wbn, // AWB number
+      edd,
+      ctime,
+    } = body;
+
+    if (!wbn) {
+      return res.status(400).json({
+        success: false,
+        message: "AWB Number missing from Ekart webhook payload",
+      });
+    }
+
+    // Fetch order
+    const order = await Order.findOne({ awb_number: wbn });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (["new", "Cancelled"].includes(order.status)) {
+      console.log(
+        `Skipping Ekart Webhook for AWB ${wbn} because order status is "${order.status}"`
+      );
+      return res.status(200).send("Ignored (Order Not Yet Shipped)");
+    }
+
+    // Normalize Ekart data (same structure as Shree Maruti)
+    const normalizedData = {
+      Status: status,
+      Instructions: desc,
+      StrRemarks: desc,
+      StatusDateTime: ctime ? new Date(ctime) : new Date(),
+    };
+
+    const currentStatus = normalizedData.Status;
+
+    /* ========================================================
+       ==============   FORWARD FLOW HANDLING   ===============
+       ======================================================== */
+
+    if (currentStatus === "Picked Up") {
+      order.status = "In-transit";
+      order.ndrStatus = "In-transit";
+      order.reattempt = false;
+    }
+
+    if (
+      currentStatus === "In Transit" ||
+      currentStatus === "Reached Hub"
+    ) {
+      order.status = "In-transit";
+      order.ndrStatus = "In-transit";
+      order.reattempt = false;
+    }
+
+    if (currentStatus === "Out For Delivery") {
+      order.status = "Out for Delivery";
+      order.ndrStatus = "Out for Delivery";
+      order.reattempt = false;
+    }
+
+    /* ========================================================
+         DELIVERED LOGIC
+    ======================================================== */
+    if (currentStatus === "Delivered") {
+      order.status = "Delivered";
+
+      if (order.ndrHistory.length > 0) {
+        order.ndrStatus = "Delivered";
+        order.reattempt = true;
+      } else {
+        order.ndrStatus = "";
+        order.reattempt = false;
+      }
+    }
+
+    /* ========================================================
+         UNDELIVERED → NDR LOGIC
+    ======================================================== */
+    if (currentStatus === "Undelivered") {
+      order.status = "Undelivered";
+      order.ndrStatus = "Undelivered";
+
+      const currentDate = normalizedData.StatusDateTime.getTime();
+
+      // last NDR date
+      let lastNdrDate = null;
+      if (order.ndrHistory.length > 0) {
+        const lastHistory = order.ndrHistory[order.ndrHistory.length - 1];
+        const lastAction =
+          lastHistory.actions[lastHistory.actions.length - 1];
+        lastNdrDate = new Date(lastAction.date).getTime();
+      }
+
+      const attemptCount = order.ndrHistory.length + 1;
+
+      // store NDR reason
+      order.ndrReason = {
+        date: normalizedData.StatusDateTime,
+        reason: normalizedData.StrRemarks,
+      };
+
+      /* ───────────────────────────────────────────────
+         BLOCK DUPLICATE / OLDER NDR
+      ─────────────────────────────────────────────── */
+      if (
+        order.ndrStatus === "Action_Requested" &&
+        lastNdrDate &&
+        currentDate <= lastNdrDate
+      ) {
+        console.log("NDR IGNORE: Duplicate or older Ekart UNDELIVERED");
+
+        order.tracking.push({
+          Instructions: normalizedData.Instructions,
+          Status: normalizedData.Status,
+          StatusDateTime: normalizedData.StatusDateTime,
+          StatusLocation: location || "Unknown",
+        });
+
+        await order.save();
+        return res.status(200).json({
+          success: true,
+          message: "Webhook processed (ignored duplicate NDR)",
+        });
+      }
+
+      /* ───────────────────────────────────────────────
+         VALID NDR CASE
+      ─────────────────────────────────────────────── */
+      if (attemptCount <= 3 && (!lastNdrDate || currentDate > lastNdrDate)) {
+        order.reattempt = true;
+
+        order.ndrHistory.push({
+          actions: [
+            {
+              action: `NDR ${attemptCount} Raised`,
+              actionBy: order.provider,
+              remark: normalizedData.StrRemarks,
+              source: order.provider,
+              date: normalizedData.StatusDateTime,
+            },
+          ],
+        });
+      }
+    }
+
+    /* ========================================================
+       ===============   SAVE TRACKING ENTRY   ================
+       ======================================================== */
+    order.tracking.push({
+      Instructions: normalizedData.Instructions,
+      Status: normalizedData.Status,
+      StatusDateTime: normalizedData.StatusDateTime,
+      StatusLocation: location || "Unknown",
+    });
+
+    await order.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Ekart webhook processed successfully",
+    });
+  } catch (error) {
+    console.error("Ekart Webhook Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+module.exports = { EkartWebhook };

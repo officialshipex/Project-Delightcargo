@@ -14,7 +14,7 @@ function calculateGSTForItems(
   orderItems,
   sellerState,
   buyerState,
-  sellerGSTIN
+  sellerGSTIN,
 ) {
   const defaultGST = 18; // default GST if seller has no GSTIN
   const isInterState = sellerState !== buyerState;
@@ -58,10 +58,11 @@ const orderCreationEkart = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    const { id, finalCharges, courierServiceName, provider } = req.body;
-    console.log("Received orderCreationEkart request:", req.body);
+    const { id, finalCharges, courierServiceName, provider,estimatedDeliveryDate } = req.body;
+    // console.log("Received orderCreationEkart request:", req.body);
 
     const accessToken = await getAccessToken();
+    // console.log("Fetched Ekart access token:", accessToken);
     if (!accessToken) {
       return res.status(500).json({
         success: false,
@@ -75,7 +76,7 @@ const orderCreationEkart = async (req, res) => {
     const currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
-      { new: true, session }
+      { new: true, session },
     );
     if (!currentOrder) {
       await session.abortTransaction();
@@ -89,7 +90,7 @@ const orderCreationEkart = async (req, res) => {
     // 2. Zone Check
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode
+      currentOrder.receiverAddress.pinCode,
     );
     if (!zone) {
       await Order.findByIdAndUpdate(id, { status: "new" });
@@ -103,8 +104,8 @@ const orderCreationEkart = async (req, res) => {
     // 3. Fetch Wallet
     const user = await User.findById(currentOrder.userId).session(session);
     const currentWallet = await Wallet.findById(user.Wallet).session(session);
-    const holdAmount=currentWallet.holdAmount || 0;
-    const effectiveBalance=currentWallet.balance-holdAmount;
+    const holdAmount = currentWallet.holdAmount || 0;
+    const effectiveBalance = currentWallet.balance - holdAmount;
 
     const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < finalCharges) {
@@ -124,7 +125,7 @@ const orderCreationEkart = async (req, res) => {
         "pickupAddress.pinCode": currentOrder.pickupAddress.pinCode,
       })
       .session(session);
-
+// console.log("Fetched pickup address:", pickup);
     if (!pickup) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
@@ -138,7 +139,7 @@ const orderCreationEkart = async (req, res) => {
 
     // 5. Register pickup address with Ekart (if alias missing)
     if (!ekartAlias) {
-      console.log("Registering pickup address with Ekart...");
+      // console.log("Registering pickup address with Ekart...");
 
       const addressPayload = {
         alias: `WAREHOUSE_${Date.now()}`,
@@ -153,6 +154,7 @@ const orderCreationEkart = async (req, res) => {
       };
 
       const addResult = await addEkartAddress(addressPayload, accessToken);
+      // console.log("Ekart Add Address Result:", addResult);
 
       if (!addResult.success) {
         await Order.findByIdAndUpdate(id, { status: "new" });
@@ -174,10 +176,10 @@ const orderCreationEkart = async (req, res) => {
           "pickupAddress.pinCode": pickup.pickupAddress.pinCode,
         },
         { ekartAlias },
-        { session }
+        { session },
       );
 
-      console.log("Ekart alias saved:", ekartAlias);
+      // console.log("Ekart alias saved:", ekartAlias);
     }
 
     // =====================================================
@@ -192,7 +194,7 @@ const orderCreationEkart = async (req, res) => {
       currentOrder.productDetails,
       sellerState,
       buyerState,
-      sellerGSTIN
+      sellerGSTIN,
     );
 
     // =====================================================
@@ -208,9 +210,9 @@ const orderCreationEkart = async (req, res) => {
 
     const totalQuantity = cleanItems.reduce(
       (sum, p) => sum + (p._doc.quantity || 0),
-      0
+      0,
     );
-    console.log("Clean Items for Ekart Payload:", cleanItems);
+    // console.log("Clean Items for Ekart Payload:", cleanItems);
     const firstProduct = cleanItems[0] || {};
 
     const items = cleanItems.map((p) => ({
@@ -249,7 +251,9 @@ const orderCreationEkart = async (req, res) => {
       _taxable_amount: currentOrder.paymentDetails.amount,
       tax_value: totalTaxValue,
       taxable_amount: currentOrder.paymentDetails.amount,
-      commodity_value: String(currentOrder.paymentDetails.amount - totalTaxValue),
+      commodity_value: String(
+        currentOrder.paymentDetails.amount - totalTaxValue,
+      ),
       cod_amount: isCOD ? currentOrder.paymentDetails.amount : 0,
 
       quantity: totalQuantity,
@@ -288,29 +292,45 @@ const orderCreationEkart = async (req, res) => {
     // =====================================================
     // ⭐ 8. EKART API CALL
     // =====================================================
-console.log("Ekart Shipment Payload:", payload);
+    // console.log("Ekart Shipment Payload:", payload);
     let response;
 
     try {
       response = await axios.put(
         "https://app.elite.ekartlogistics.in/api/v1/package/create",
         payload,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 15000, // ✅ REQUIRED
+        },
       );
 
       console.log("Ekart Shipment Response:", response.data);
     } catch (err) {
       console.log("Ekart Shipment Error:", err.response?.data || err.message);
 
-      await Order.findByIdAndUpdate(id, { status: "new" });
-      await session.abortTransaction();
-      session.endSession();
-
-      return res.status(500).json({
+      // ✅ SEND RESPONSE IMMEDIATELY
+      res.status(500).json({
         success: false,
-        message: err.response?.data?.message || "Ekart Shipment Failed",
+        message:
+          err.code === "ECONNABORTED"
+            ? "Ekart timeout"
+            : err.response?.data?.description || "Ekart Shipment Failed",
         error: err.response?.data || err.message,
       });
+
+      // ✅ CLEANUP ASYNC (do NOT block response)
+      process.nextTick(async () => {
+        try {
+          await Order.findByIdAndUpdate(id, { status: "new" });
+          await session.abortTransaction();
+          session.endSession();
+        } catch (e) {
+          console.error("Cleanup error:", e);
+        }
+      });
+
+      return;
     }
 
     if (!response?.data?.status) {
@@ -340,9 +360,18 @@ console.log("Ekart Shipment Payload:", payload);
           totalFreightCharges: balanceToBeDeducted,
           shipmentCreatedAt: new Date(),
           zone: zone.zone,
+          estimatedDeliveryDate: estimatedDeliveryDate || null,
+        },
+        $push: {
+          tracking: {
+            status: "Booked",
+            StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+            Instructions: "Order booked successfully",
+          },
         },
       },
-      { session }
+      { session },
     );
 
     await session.commitTransaction();
@@ -375,7 +404,7 @@ console.log("Ekart Shipment Payload:", payload);
                 description: "Freight Charges Applied",
               },
             },
-          }
+          },
         );
       } catch (err) {
         console.error("Wallet update error:", err);
@@ -437,7 +466,7 @@ async function addEkartAddress(address, accessToken) {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     console.log("Ekart Address Response:", response.data);
@@ -450,7 +479,7 @@ async function addEkartAddress(address, accessToken) {
   } catch (err) {
     console.error(
       "Ekart Add Address Error:",
-      err.response?.data || err.message
+      err.response?.data || err.message,
     );
 
     return {
@@ -466,7 +495,7 @@ const cancelShipmentEkart = async (tracking_id) => {
     if (!tracking_id) {
       return {
         success: false,
-        message: "tracking_id query parameter is required",
+        error: "tracking_id query parameter is required",
       };
     }
 
@@ -477,7 +506,7 @@ const cancelShipmentEkart = async (tracking_id) => {
     if (isCancelled) {
       console.log("Order is already cancelled");
       return {
-        error: "Order is allreday cancelled",
+        error: "Order is already cancelled",
         code: 400,
       };
     }
@@ -485,12 +514,12 @@ const cancelShipmentEkart = async (tracking_id) => {
     // Fetch valid access token
     const accessToken = await getAccessToken();
     if (!accessToken) {
-      return { success: false, message: "Failed to get access token" };
+      return { success: false, error: "Failed to get access token" };
     }
 
     // Call Ekart cancel shipment API
     const ekartCancelUrl = `https://app.elite.ekartlogistics.in/api/v1/package/cancel?tracking_id=${encodeURIComponent(
-      tracking_id
+      tracking_id,
     )}`;
 
     const response = await axios.delete(ekartCancelUrl, {
@@ -515,6 +544,7 @@ const cancelShipmentEkart = async (tracking_id) => {
       };
     } else {
       // If API response says cancellation failed
+
       return {
         error: "Error in shipment cancellation",
         details: response.data,
@@ -524,7 +554,7 @@ const cancelShipmentEkart = async (tracking_id) => {
   } catch (error) {
     console.error(
       "Error cancelling shipment with Ekart:",
-      error.response?.data || error.message || error
+      error.response?.data || error.message || error,
     );
     return {
       success: false,
@@ -549,11 +579,11 @@ const checkEkartServiceability = async (pickupPincode, receiverPincode) => {
     const [pickupResponse, receiverResponse] = await Promise.all([
       axios.get(
         `https://app.elite.ekartlogistics.in/api/v2/serviceability/${pickupPincode}`,
-        { headers }
+        { headers },
       ),
       axios.get(
         `https://app.elite.ekartlogistics.in/api/v2/serviceability/${receiverPincode}`,
-        { headers }
+        { headers },
       ),
     ]);
 
@@ -579,7 +609,7 @@ const checkEkartServiceability = async (pickupPincode, receiverPincode) => {
   } catch (error) {
     console.error(
       "Ekart Serviceability Error:",
-      error.response?.data || error.message
+      error.response?.data || error.message,
     );
     return {
       success: false,
@@ -592,4 +622,6 @@ module.exports = {
   checkEkartServiceability,
   orderCreationEkart,
   cancelShipmentEkart,
+  calculateGSTForItems,
+  addEkartAddress
 };

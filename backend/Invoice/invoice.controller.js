@@ -15,7 +15,7 @@ const Invoice = require("./invoice.model"); // adjust path
 const User = require("../models/User.model"); // adjust path
 const GSTIN = require("../models/Gstin.model");
 const billing = require("../models/billingInfo.model");
-
+const {generateInvoiceNumber}=require("./invoiceNumber.controller");
 const GST_RATE = 0.18;
 
 // Prefer transaction.awb_number, fallback to regex on description
@@ -51,15 +51,6 @@ function allowedDescription(desc = "") {
   return allowed.includes(normalized);
 }
 
-// Generate invoice number
-function generateInvoiceNumber(prefix = "SHI") {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const random = Math.floor(1000 + Math.random() * 9000);
-  return `${prefix}-${y}${m}${d}-${random}`;
-}
 
 // PDF generation with clean layout and AWB table
 async function generateInvoicePDF(invoice, company = {}, customer = {}) {
@@ -134,10 +125,10 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
         doc.font("Helvetica").text(` ${company.gstin}`);
       }
 
-      if (company.pan) {
-        doc.font("Helvetica-Bold").text("PAN:", { continued: true });
-        doc.font("Helvetica").text(` ${company.pan}`);
-      }
+      // if (company.pan) {
+      //   doc.font("Helvetica-Bold").text("PAN:", { continued: true });
+      //   doc.font("Helvetica").text(` ${company.pan}`);
+      // }
 
       doc.lineGap(0);
 
@@ -649,8 +640,8 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     return { skipped: true, reason: "No chargeable transactions" };
   }
 
-  const invoiceNumber = generateInvoiceNumber();
-
+  const invoiceNumber = await generateInvoiceNumber();
+console.log(`Generating invoice ${invoiceNumber} for user ${userId} for period:`, periodStart, periodEnd);
   const user = await User.findById(userId).select(
     "fullname email company Wallet",
   );
@@ -713,17 +704,17 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
   const pdfPath = await generateInvoicePDF(
     invoice,
     {
-      name: "Shipex India Pvt Ltd",
-      address: "Gurugram, Haryana - 122002",
-      phone: "+91-XXXXXXXXXX",
+      name: "Shipex India",
+      address: "01, Basement, Biju Tower, Baba Nagar, Bhiwani, Haryana - 127021",
+      phone: "+91- 9813981344",
       email: "support@shipexindia.com",
       pan: "XXXAAABBB",
-      gstin: "XXXXECB7319L1ZK",
+      gstin: "06FKCPS6109D3Z7",
       bank: {
         accountName: "Shipex India",
-        accountNumber: "XXXXXXXX",
-        bankName: "XXXX Bank",
-        ifsc: "XXXX0000123",
+        accountNumber: "2258120020000251",
+        bankName: "Ujjivan Small Finance Bank",
+        ifsc: "UJVN0002258",
       },
     },
     customerInfo,

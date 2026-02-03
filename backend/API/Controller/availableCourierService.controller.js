@@ -21,7 +21,12 @@ const {
 const {
   checkServiceabilityShreeMaruti,
 } = require("../../AllCouriers/ShreeMaruti/Couriers/couriers.controller.js");
-const { checkZipypostServiceability } = require("../../AllCouriers/Zipypost/Couriers/couriers.controller.js");
+const {
+  checkZipypostServiceability,
+} = require("../../AllCouriers/Zipypost/Couriers/couriers.controller.js");
+const {
+  checkEkartServiceability,
+} = require("../../AllCouriers/Ekart/Couriers/couriers.controller.js");
 
 // Define courier IDs for each provider
 const courierIds = {
@@ -32,6 +37,7 @@ const courierIds = {
   "Amazon Shipping": "05",
   "Shree Maruti": "06",
   ZipyPost: "07",
+  Ekart: "08",
 };
 
 // Input Validation Schema
@@ -131,19 +137,19 @@ const availableCourierService = async (req, res) => {
       } else if (provider === "EcomExpress") {
         serviceable = await checkServiceabilityEcomExpress(
           pickUpPincode,
-          deliveryPincode
+          deliveryPincode,
         );
       } else if (provider === "Delhivery") {
         serviceable = await checkPincodeServiceabilityDelhivery(
           pickUpPincode,
           deliveryPincode,
-          order_type
+          order_type,
         );
       } else if (provider === "Dtdc") {
         serviceable = await checkServiceabilityDTDC(
           pickUpPincode,
           deliveryPincode,
-          paymentType
+          paymentType,
         );
       } else if (provider === "Smartship") {
         const payload = {
@@ -172,7 +178,12 @@ const availableCourierService = async (req, res) => {
           height: order.packageDetails.volumetricWeight?.height || 0,
           order_value: order.paymentDetails?.amount || 0,
         };
-        serviceable=await checkZipypostServiceability(payload);
+        serviceable = await checkZipypostServiceability(payload);
+      } else if (provider === "Ekart") {
+        serviceable = await checkEkartServiceability(
+          pickUpPincode,
+          deliveryPincode,
+        );
       }
 
       if (!serviceable || serviceable.success === false) continue;
@@ -180,11 +191,11 @@ const availableCourierService = async (req, res) => {
       // ✅ Charges calculation
       let basicCharge = parseFloat(rc.weightPriceBasic[0][currentZone]);
       let additionalCharge = parseFloat(
-        rc.weightPriceAdditional[0][currentZone]
+        rc.weightPriceAdditional[0][currentZone],
       );
       const count = Math.ceil(
         (chargedWeight - rc.weightPriceBasic[0].weight) /
-          rc.weightPriceAdditional[0].weight
+          rc.weightPriceAdditional[0].weight,
       );
       let finalCharge =
         rc.weightPriceBasic[0].weight >= chargedWeight

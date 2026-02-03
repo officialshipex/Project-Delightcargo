@@ -4,11 +4,13 @@ const {ShreeMarutiWebhook}=require("./ShreeMarutiWebhook.controller")
 const {AmazonShippingWebhook}=require("./AmasonShippingWebhook.controller")
 const {DTDCWebhook}=require("./DtdcWebhook.controller")
 const {DelhiveryWebhook}=require("./DelhiveryWebhook.controller")
+const {EkartWebhook}=require("./EkartWebhook.controller")
 const {AmazonShippingNDRWebhook}=require("./NDR/AmazonShippingWebhook.controller")
 
 const {delhiveryManifestCallback}=require("../B2B/controller/Couriers/AllCouriers/Delhivery/Courier/couriers.controller")
 
 webhookRouter.post('/delhivery', DelhiveryWebhook);
+webhookRouter.post('/ekart', EkartWebhook);
 webhookRouter.post("/shree-maruti",ShreeMarutiWebhook);
 webhookRouter.post("/dtdc",DTDCWebhook);
 webhookRouter.post("/amazon-shipping",AmazonShippingWebhook);
