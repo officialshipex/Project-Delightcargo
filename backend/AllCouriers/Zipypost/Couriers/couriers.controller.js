@@ -273,7 +273,7 @@ const createZipypostOrder = async (req, res) => {
       purchase_date: currentOrder.createdAt.toISOString().split("T")[0],
       billing_details_same_as_shipping: true,
       shipping_details: {
-        full_name: currentOrder.receiverAddress.contactName,
+        full_name: currentOrder.receiverAddress.contactName?.trim().slice(0, 30),
         contact_number: currentOrder.receiverAddress.phoneNumber
           ? currentOrder.receiverAddress.phoneNumber.replace(/^0+/, "")
           : "",
