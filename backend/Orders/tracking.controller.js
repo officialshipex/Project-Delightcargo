@@ -52,9 +52,8 @@ const trackSingleOrder = async (order) => {
     if (!provider || !awb_number) return;
 
     const currentWallet = await Wallet.findById(
-      (
-        await User.findById((await Order.findOne({ awb_number })).userId)
-      ).Wallet
+      (await User.findById((await Order.findOne({ awb_number })).userId))
+        .Wallet,
     );
 
     const trackingFunctions = {
@@ -83,7 +82,7 @@ const trackSingleOrder = async (order) => {
       result = await trackingFunctions[provider](awb_number, shipment_id);
     } else {
       console.warn(
-        `Unknown provider/partner: provider=${provider}, partner=${partner} for Order ID: ${order._id}`
+        `Unknown provider/partner: provider=${provider}, partner=${partner} for Order ID: ${order._id}`,
       );
       return;
     }
@@ -95,7 +94,7 @@ const trackSingleOrder = async (order) => {
     // Normalize only the latest one
     const normalizedData = mapTrackingResponse(
       [latestTrackingEvent],
-      partner === "ZipyPost" ? partner : provider
+      partner === "ZipyPost" ? partner : provider,
     );
     // console.log("normalized", normalizedData);
 
@@ -162,10 +161,10 @@ const trackSingleOrder = async (order) => {
         //   order.ndrHistory = [];
         // }
         const lastEntryDate = new Date(
-          order.ndrHistory[order.ndrHistory.length - 1]?.date
+          order.ndrHistory[order.ndrHistory.length - 1]?.date,
         ).toDateString();
         const currentStatusDate = new Date(
-          normalizedData.StatusDateTime
+          normalizedData.StatusDateTime,
         ).toDateString();
 
         if (
@@ -197,20 +196,23 @@ const trackSingleOrder = async (order) => {
     if (provider === "Dtdc" || provider === "DTDC") {
       const statusDoc = await statusMap.findOne(
         { partnerName: provider.toUpperCase() },
-        { data: 1 }
+        { data: 1 },
       );
 
       if (statusDoc) {
         // match by code (case-insensitive)
         // console.log("nor",normalizedData.Status)
         const dbMapping = statusDoc.data.find(
-          (d) => d.code?.toLowerCase() === normalizedData.Status?.toLowerCase()
+          (d) => d.code?.toLowerCase() === normalizedData.Status?.toLowerCase(),
         );
         // console.log("db mapping dtdc", dbMapping);
         if (dbMapping) {
           console.log("maped dtdc status", dbMapping.sy_status);
           order.status = dbMapping.sy_status;
           order.ndrStatus = dbMapping.sy_status;
+          if (dbMapping.sy_status === "In-transit" && !order.invoiceDate) {
+            order.invoiceDate = normalizedData.StatusDateTime;
+          }
           if (
             dbMapping.sy_status === "Cancelled" &&
             order.tracking.length > 3
@@ -315,7 +317,7 @@ const trackSingleOrder = async (order) => {
               ? new Date(lastAction.date).getTime()
               : null;
             const currentStatusDate = new Date(
-              normalizedData.StatusDateTime
+              normalizedData.StatusDateTime,
             ).getTime();
 
             if (
@@ -369,6 +371,9 @@ const trackSingleOrder = async (order) => {
         ) {
           order.status = "In-transit";
           order.ndrStatus = "In-transit";
+          if (!order.invoiceDate) {
+            order.invoiceDate = normalizedData.StatusDateTime;
+          }
           order.reattempt = false;
         }
 
@@ -484,6 +489,13 @@ const trackSingleOrder = async (order) => {
       const Status = normalizedData.Status?.toLowerCase();
       order.status = SmartShipStatusMapping[Status];
 
+      if (
+        SmartShipStatusMapping[Status] === "In-transit" &&
+        !order.invoiceDate
+      ) {
+        order.invoiceDate = normalizedData.StatusDateTime;
+      }
+
       if (order.status === "RTO") {
         order.ndrStatus = "RTO";
       }
@@ -534,7 +546,7 @@ const trackSingleOrder = async (order) => {
           : null;
 
         const currentStatusDate = new Date(
-          normalizedData.StatusDateTime
+          normalizedData.StatusDateTime,
         ).toDateString();
 
         if (
@@ -618,10 +630,10 @@ const trackSingleOrder = async (order) => {
         //   order.ndrHistory = [];
         // }
         const lastEntryDate = new Date(
-          order.ndrHistory[order.ndrHistory.length - 1]?.date
+          order.ndrHistory[order.ndrHistory.length - 1]?.date,
         ).toDateString();
         const currentStatusDate = new Date(
-          normalizedData.StatusDateTime
+          normalizedData.StatusDateTime,
         ).toDateString();
 
         if (
@@ -672,6 +684,9 @@ const trackSingleOrder = async (order) => {
         }
 
         if (normalizedData.Status === "IN_TRANSIT") {
+          if (!order.invoiceDate) {
+            order.invoiceDate = normalizedData.StatusDateTime;
+          }
           order.status = "In-transit";
         }
 
@@ -727,7 +742,7 @@ const trackSingleOrder = async (order) => {
             : null;
 
           const currentStatusDate = new Date(
-            normalizedData.StatusDateTime
+            normalizedData.StatusDateTime,
           ).toDateString();
 
           if (
@@ -787,7 +802,7 @@ const trackSingleOrder = async (order) => {
     if (provider === "Delhivery") {
       const statusDoc = await statusMap.findOne(
         { partnerName: provider.toUpperCase() }, // partnerName stored as uppercase
-        { data: 1 }
+        { data: 1 },
       );
       // console.log("stat", normalizedData.StatusType, normalizedData.Status);
       if (statusDoc) {
@@ -802,7 +817,7 @@ const trackSingleOrder = async (order) => {
             normalizeString(d?.scan) ===
               normalizeString(normalizedData?.Status) &&
             normalizeString(d?.instructions) ===
-              normalizeString(normalizedData?.Instructions)
+              normalizeString(normalizedData?.Instructions),
         );
 
         // console.log(dbMapping?.sy_status);
@@ -811,6 +826,9 @@ const trackSingleOrder = async (order) => {
           // console.log("maped delhivery status", dbMapping.sy_status);
           order.status = dbMapping.sy_status; // fallback if not mapped
           order.ndrStatus = dbMapping.sy_status;
+          if (dbMapping.sy_status === "In-transit" && !order.invoiceDate) {
+            order.invoiceDate = normalizedData.StatusDateTime;
+          }
           // Only set ndrStatus for actual NDR-related states
           if (
             [
@@ -869,7 +887,7 @@ const trackSingleOrder = async (order) => {
         : null;
 
       const currentStatusDate = new Date(
-        normalizedData.StatusDateTime
+        normalizedData.StatusDateTime,
       ).toDateString();
 
       if (
@@ -914,6 +932,12 @@ const trackSingleOrder = async (order) => {
       // console.log("ZipyPost scanCode", scanCode, instruction, statusText);
       // Map status using ZipyPostScanCodeMapping
       order.status = ZipyPostScanCodeMapping[scanCode];
+      if (
+        ZipyPostScanCodeMapping[scanCode] === "In-transit" &&
+        !order.invoiceDate
+      ) {
+        order.invoiceDate = normalizedData.StatusDateTime;
+      }
       // if (order.ndrStatus !== "Action_Requested") {
       //   order.ndrStatus = ZipyPostScanCodeMapping[scanCode];
       // }
@@ -966,7 +990,7 @@ const trackSingleOrder = async (order) => {
             : null;
 
           const currentStatusDate = new Date(
-            normalizedData.StatusDateTime
+            normalizedData.StatusDateTime,
           ).getTime();
           // console.log("ZipyPost NDR lastEntryDate:", lastEntryDate, "currentStatusDate:", currentStatusDate);
           // Avoid duplicate same-day entries & limit history entries
@@ -1016,7 +1040,7 @@ const trackSingleOrder = async (order) => {
                 description: "Freight Charges Received",
               },
             },
-          }
+          },
         );
         order.ndrStatus = "Cancelled";
         order.status = "Cancelled";
@@ -1080,7 +1104,7 @@ const trackSingleOrder = async (order) => {
 
         if (existingCount >= 2) {
           console.log(
-            `Skipping wallet update for AWB: ${order.awb_number}, already logged twice.`
+            `Skipping wallet update for AWB: ${order.awb_number}, already logged twice.`,
           );
           return; // Exit if already present twice
         }
@@ -1088,7 +1112,7 @@ const trackSingleOrder = async (order) => {
         // Step 1: Update balance
         await Wallet.updateOne(
           { _id: currentWallet._id },
-          { $inc: { balance: balanceTobeAdded } }
+          { $inc: { balance: balanceTobeAdded } },
         );
 
         // Step 2: Get updated wallet balance
@@ -1109,20 +1133,20 @@ const trackSingleOrder = async (order) => {
                 description: "Freight Charges Received",
               },
             },
-          }
+          },
         );
 
         console.log(
           "Wallet updated for AWB:",
           order.awb_number,
           "Amount:",
-          balanceTobeAdded
+          balanceTobeAdded,
         );
       }
     }
   } catch (error) {
     console.error(
-      `Error tracking order ID: ${order._id}, AWB: ${order.awb_number} ${error}`
+      `Error tracking order ID: ${order._id}, AWB: ${order.awb_number} ${error}`,
     );
   }
 };
@@ -1147,7 +1171,7 @@ const trackOrders = async () => {
     const limitedTrack = limiter.wrap(trackSingleOrder); // apply rate limiter
 
     const trackingPromises = allOrders.map(
-      (order) => limit(() => limitedTrack(order)) // limit concurrency
+      (order) => limit(() => limitedTrack(order)), // limit concurrency
     );
 
     await Promise.all(trackingPromises);
@@ -1162,14 +1186,14 @@ const startTrackingLoop = async () => {
   try {
     // Get current time in IST
     const istDate = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
     );
     const currentHour = istDate.getHours();
 
     if (currentHour >= 6 && currentHour <= 22) {
       console.log(
         "🕒 Starting Order Tracking at",
-        istDate.toLocaleTimeString("en-IN")
+        istDate.toLocaleTimeString("en-IN"),
       );
       await trackOrders();
       console.log("✅ Tracking completed. Next run after 2 hour...");
@@ -1177,7 +1201,7 @@ const startTrackingLoop = async () => {
     } else {
       console.log(
         "🌙 Outside tracking window, will retry in 1 hour:",
-        istDate.toLocaleTimeString("en-IN")
+        istDate.toLocaleTimeString("en-IN"),
       );
       setTimeout(startTrackingLoop, 60 * 60 * 1000);
     }
@@ -1366,7 +1390,7 @@ const formatSmartShipDateTime = (dateTimeStr) => {
 
     // Create a Date in UTC directly using Date.UTC
     const utcDate = new Date(
-      Date.UTC(year, month - 1, day, hours, minutes, seconds)
+      Date.UTC(year, month - 1, day, hours, minutes, seconds),
     );
 
     // Return ISO string without shifting (i.e., time stays 23:01:06)
@@ -1441,14 +1465,14 @@ const updateNdrHistoryByAwb = async (awb_number) => {
         break;
       default:
         console.log(
-          `⚠️ No status mapping found for provider: ${order.provider}`
+          `⚠️ No status mapping found for provider: ${order.provider}`,
         );
         return;
     }
 
     const initialLength = order.ndrHistory.reduce(
       (sum, group) => sum + (group.actions?.length || 0),
-      0
+      0,
     );
 
     const statusKeys = Object.keys(statusMapping).map((s) => s.toLowerCase());
@@ -1457,7 +1481,7 @@ const updateNdrHistoryByAwb = async (awb_number) => {
     const filteredNdrHistory = order.ndrHistory
       .map((group) => {
         const filteredActions = (group.actions || []).filter(
-          (action) => !statusKeys.includes(action.remark?.toLowerCase())
+          (action) => !statusKeys.includes(action.remark?.toLowerCase()),
         );
         return { ...group, actions: filteredActions };
       })
@@ -1465,24 +1489,24 @@ const updateNdrHistoryByAwb = async (awb_number) => {
 
     const finalLength = filteredNdrHistory.reduce(
       (sum, group) => sum + (group.actions?.length || 0),
-      0
+      0,
     );
 
     if (finalLength < initialLength) {
       await Order.findOneAndUpdate(
         { awb_number },
         { $set: { ndrHistory: filteredNdrHistory } },
-        { new: true }
+        { new: true },
       );
 
       console.log(
         `✅ Updated order ${awb_number} — Removed ${
           initialLength - finalLength
-        } NDR entries`
+        } NDR entries`,
       );
     } else {
       console.log(
-        `ℹ️ No matching NDR remarks to remove for order ${awb_number}`
+        `ℹ️ No matching NDR remarks to remove for order ${awb_number}`,
       );
     }
   } catch (error) {

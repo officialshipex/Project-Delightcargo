@@ -184,7 +184,6 @@ const bookOrder = async (req, res) => {
           courierServiceName,
         });
         break;
-
       case "Delhivery":
         shipmentResult = await createDelhiveryShipment({
           id: order._id,
@@ -193,7 +192,6 @@ const bookOrder = async (req, res) => {
           courierServiceName,
         });
         break;
-
       case "Dtdc":
         shipmentResult = await createDTDCShipment({
           id: order._id,
@@ -203,7 +201,6 @@ const bookOrder = async (req, res) => {
           courier: courierService?.courier,
         });
         break;
-
       case "Smartship":
         shipmentResult = await createSmartshipShipment({
           id: order._id,

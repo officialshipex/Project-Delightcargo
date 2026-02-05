@@ -9,13 +9,11 @@ const ekartEpochToISTDate = (epoch) => {
   return new Date(epoch + IST_OFFSET_MS);
 };
 
-
 const EkartWebhook = async (req, res) => {
   try {
     console.log("Ekart Webhook Received:", req.body);
-    
+
     const body = req.body;
-    
 
     const {
       status,
@@ -46,7 +44,7 @@ const EkartWebhook = async (req, res) => {
 
     if (["new", "Cancelled"].includes(order.status)) {
       console.log(
-        `Skipping Ekart Webhook for AWB ${wbn} because order status is "${order.status}"`
+        `Skipping Ekart Webhook for AWB ${wbn} because order status is "${order.status}"`,
       );
       return res.status(200).send("Ignored (Order Not Yet Shipped)");
     }
@@ -68,13 +66,13 @@ const EkartWebhook = async (req, res) => {
     if (currentStatus === "Picked Up") {
       order.status = "In-transit";
       order.ndrStatus = "In-transit";
+      if (!order.invoiceDate) {
+        order.invoiceDate = normalizedData.StatusDateTime;
+      }
       order.reattempt = false;
     }
 
-    if (
-      currentStatus === "In Transit" ||
-      currentStatus === "Reached Hub"
-    ) {
+    if (currentStatus === "In Transit" || currentStatus === "Reached Hub") {
       order.status = "In-transit";
       order.ndrStatus = "In-transit";
       order.reattempt = false;
@@ -114,8 +112,7 @@ const EkartWebhook = async (req, res) => {
       let lastNdrDate = null;
       if (order.ndrHistory.length > 0) {
         const lastHistory = order.ndrHistory[order.ndrHistory.length - 1];
-        const lastAction =
-          lastHistory.actions[lastHistory.actions.length - 1];
+        const lastAction = lastHistory.actions[lastHistory.actions.length - 1];
         lastNdrDate = new Date(lastAction.date).getTime();
       }
 

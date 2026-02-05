@@ -96,6 +96,9 @@ const ShreeMarutiWebhook = async (req, res) => {
       if (status === "PICKED_UP" || status==="PICKEDUP") {
         order.status = "In-transit";
         order.ndrStatus = "In-transit";
+        if(!order.invoiceDate){
+          order.invoiceDate=normalizedData.StatusDateTime
+        }
         order.reattempt = false;
       }
 
