@@ -42,7 +42,7 @@ const DelhiveryWebhook = async (req, res) => {
 
     if (["new", "Cancelled"].includes(order.status)) {
       console.log(
-        `Skipping Delhivery Webhook for AWB ${awb} because order status is "${order.status}"`
+        `Skipping Delhivery Webhook for AWB ${awb} because order status is "${order.status}"`,
       );
       return res.status(200).send("Ignored (Order Not Yet Shipped)");
     }
@@ -53,7 +53,7 @@ const DelhiveryWebhook = async (req, res) => {
     // -------------------------------
     const statusDoc = await statusMap.findOne(
       { partnerName: provider.toUpperCase() },
-      { data: 1 }
+      { data: 1 },
     );
 
     if (statusDoc) {
@@ -71,12 +71,16 @@ const DelhiveryWebhook = async (req, res) => {
             normalizeString(normalizedData.StatusType) &&
           normalizeString(d.scan) === normalizeString(normalizedData.Status) &&
           normalizeString(d.instructions) ===
-            normalizeString(normalizedData.Instructions)
+            normalizeString(normalizedData.Instructions),
       );
 
       if (dbMapping) {
         order.status = dbMapping.sy_status;
         order.ndrStatus = dbMapping.sy_status;
+
+        if (dbMapping.sy_status === "In-transit" && !order.invoiceDate) {
+          order.invoiceDate = normalizedData.StatusDateTime;
+        }
 
         if (order.status === "RTO Delivered") order.ndrStatus = "RTO Delivered";
 

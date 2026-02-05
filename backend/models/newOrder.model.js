@@ -9,7 +9,7 @@ const ndrActionSchema = new mongoose.Schema(
     source: { type: String },
     date: { type: Date, default: Date.now },
   },
-  { _id: false }
+  { _id: false },
 );
 
 // Each entry in ndrHistory = array of max 2 actions
@@ -25,7 +25,7 @@ const ndrEntrySchema = new mongoose.Schema(
       },
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const orderSchema = new mongoose.Schema(
@@ -166,6 +166,7 @@ const orderSchema = new mongoose.Schema(
     walletDeducted: { type: Boolean, default: false },
     walletRefunded: { type: Boolean, default: false },
     manifestJobId: { type: String },
+    invoiceDate: { type: Date },
 
     tracking: [
       {
@@ -176,7 +177,7 @@ const orderSchema = new mongoose.Schema(
       },
     ],
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Compound index

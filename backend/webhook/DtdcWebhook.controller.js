@@ -31,7 +31,7 @@ const DTDCWebhook = async (req, res) => {
 
     if (["new", "Cancelled"].includes(order.status)) {
       console.log(
-        `Skipping Dtdc Webhook for AWB ${awb} because order status is "${order.status}"`
+        `Skipping Dtdc Webhook for AWB ${awb} because order status is "${order.status}"`,
       );
       return res.status(200).send("Ignored (Order Not Yet Shipped)");
     }
@@ -46,7 +46,7 @@ const DTDCWebhook = async (req, res) => {
 
     const statusDoc = await statusMap.findOne(
       { partnerName: "DTDC" },
-      { data: 1 }
+      { data: 1 },
     );
 
     let shouldUpdateWallet = false;
@@ -59,7 +59,7 @@ const DTDCWebhook = async (req, res) => {
       if (!statusDoc) continue;
 
       const dbMapping = statusDoc.data.find(
-        (d) => d.code?.toLowerCase() === ev?.strAction?.toLowerCase()
+        (d) => d.code?.toLowerCase() === ev?.strAction?.toLowerCase(),
       );
 
       if (!dbMapping) continue;
@@ -79,6 +79,9 @@ const DTDCWebhook = async (req, res) => {
         StatusLocation: normalizedData.StatusLocation,
         Instructions: normalizedData.Instructions,
       });
+      if (dbMapping.sy_status === "In-transit" && !order.invoiceDate) {
+        order.invoiceDate = normalizedData.StatusDateTime;
+      }
 
       // Update main mapped status
       order.status = dbMapping.sy_status;

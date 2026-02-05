@@ -15,7 +15,7 @@ const Invoice = require("./invoice.model"); // adjust path
 const User = require("../models/User.model"); // adjust path
 const GSTIN = require("../models/Gstin.model");
 const billing = require("../models/billingInfo.model");
-const {generateInvoiceNumber}=require("./invoiceNumber.controller");
+const { generateInvoiceNumber } = require("./invoiceNumber.controller");
 const GST_RATE = 0.18;
 
 // Prefer transaction.awb_number, fallback to regex on description
@@ -50,7 +50,6 @@ function allowedDescription(desc = "") {
   ];
   return allowed.includes(normalized);
 }
-
 
 // PDF generation with clean layout and AWB table
 async function generateInvoicePDF(invoice, company = {}, customer = {}) {
@@ -139,13 +138,8 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
         .font("Helvetica-Bold")
         .text("TAX INVOICE", 400, contentStartY, { align: "right" });
 
-      const status = invoice.status || "UNPAID";
-      const statusColor =
-        status === "PAID"
-          ? "green"
-          : status === "PARTIALLY_PAID"
-            ? "orange"
-            : "red";
+      const status = invoice.status || "PENDING";
+      const statusColor = status === "PAID" ? "green" : "red";
 
       doc
         .fontSize(10)
@@ -154,7 +148,7 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
 
       doc.fillColor("black");
 
-      const invoiceDate = new Date(invoice.createdAt);
+      const invoiceDate = new Date(invoice.periodEnd);
       const invoicePeriod = invoiceDate.toLocaleString("en-IN", {
         month: "long",
         year: "numeric",
@@ -605,6 +599,7 @@ async function buildChargesFromWalletTransactions(
       description: t.description,
       amount: Number(t.amount || 0), // already includes GST
       date: t.date,
+      balanceAfterTransaction: Number(t.balanceAfterTransaction ?? 0),
       channelOrderId: t.channelOrderId || null,
     });
   }
@@ -619,6 +614,66 @@ async function buildChargesFromWalletTransactions(
 
   return { taxableValue, tax, total, txns: validTxns };
 }
+
+// async function buildChargesFromWalletTransactions(
+//   userId,
+//   periodStart,
+//   periodEnd,
+//   previousAwbs = [],
+// ) {
+//   const user = await User.findById(userId);
+//   const wallet = await Wallet.findOne({ _id: user.Wallet });
+//   if (!wallet) return { taxableValue: 0, tax: 0, total: 0, txns: [] };
+
+//   // 1️⃣ Fetch eligible orders based on invoiceDate
+//   const orders = await Order.find({
+//     invoiceDate: { $gte: periodStart, $lte: periodEnd },
+//     status: { $nin: ["new", "cancelled"] },
+//   }).select("awb_number invoiceDate");
+
+//   const awbSet = new Set(
+//     orders
+//       .map((o) => o.awb_number)
+//       .filter(Boolean)
+//       .filter((awb) => !previousAwbs.includes(awb)),
+//   );
+
+//   if (awbSet.size === 0) {
+//     return { taxableValue: 0, tax: 0, total: 0, txns: [] };
+//   }
+
+//   // 2️⃣ Filter wallet debit transactions by AWB
+//   const validTxns = (wallet.transactions || [])
+//     .filter((t) => {
+//       if (!t) return false;
+
+//       if ((t.category || "").toLowerCase() !== "debit") return false;
+//       if (!allowedDescription(t.description)) return false;
+
+//       const awb = extractAwbFromTransaction(t);
+//       if (!awb || !awbSet.has(awb)) return false;
+
+//       return true;
+//     })
+//     .map((t) => ({
+//       awb: extractAwbFromTransaction(t),
+//       description: t.description,
+//       amount: Number(t.amount || 0), // already includes GST
+//       date: t.date,
+//       balanceAfterTransaction: Number(t.balanceAfterTransaction ?? 0),
+//       channelOrderId: t.channelOrderId || null,
+//     }));
+
+//   // 3️⃣ Calculate totals
+//   const total = Number(
+//     validTxns.reduce((s, x) => s + Number(x.amount || 0), 0).toFixed(2),
+//   );
+
+//   const taxableValue = Number((total / (1 + GST_RATE)).toFixed(2));
+//   const tax = Number((total - taxableValue).toFixed(2));
+
+//   return { taxableValue, tax, total, txns: validTxns };
+// }
 
 /* -------------------------
    Controller: Generate monthly invoice for single user
@@ -641,22 +696,26 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
   }
 
   const invoiceNumber = await generateInvoiceNumber();
-console.log(`Generating invoice ${invoiceNumber} for user ${userId} for period:`, periodStart, periodEnd);
+  console.log(
+    `Generating invoice ${invoiceNumber} for user ${userId} for period:`,
+    periodStart,
+    periodEnd,
+  );
   const user = await User.findById(userId).select(
     "fullname email company Wallet",
   );
-  const wallet = await Wallet.findOne({ _id: user.Wallet });
-
-  const walletBalance = Number(wallet?.balance || 0);
+  const lastTxnOfPeriod = txns
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .at(-1);
 
   let status = "PAID";
   let dueAmount = 0;
 
-  if (walletBalance < 0) {
-    status = "UNPAID";
-    dueAmount = Math.abs(walletBalance);
+  if (lastTxnOfPeriod && lastTxnOfPeriod.balanceAfterTransaction < 0) {
+    status = "PENDING";
+    dueAmount = Math.abs(lastTxnOfPeriod.balanceAfterTransaction);
   }
-
+  console.log("period start", periodStart);
   const invoice = new Invoice({
     userId,
     periodStart,
@@ -705,7 +764,8 @@ console.log(`Generating invoice ${invoiceNumber} for user ${userId} for period:`
     invoice,
     {
       name: "Shipex India",
-      address: "01, Basement, Biju Tower, Baba Nagar, Bhiwani, Haryana - 127021",
+      address:
+        "01, Basement, Biju Tower, Baba Nagar, Bhiwani, Haryana - 127021",
       phone: "+91- 9813981344",
       email: "support@shipexindia.com",
       pan: "XXXAAABBB",
@@ -740,23 +800,36 @@ console.log(`Generating invoice ${invoiceNumber} for user ${userId} for period:`
    Bulk: Generate invoices for all users for a given period
    -------------------------*/
 async function generateInvoicesForPeriod(periodStart, periodEnd) {
-  // Fetch all users who have wallet or active users (change criteria as needed)
-  // const users = await User.find({}, { _id: 1 });
-  const users = await User.find();
-console.log(`Generating invoices for ${users.length} users for period:`, periodStart, periodEnd);
+  // 1. Fetch only GST-verified users
+  const gstUsers = await GSTIN.find(
+    { gstInStatus: "Active" }, // condition for verified GST
+    { user: 1 }, // only need userId
+  );
+
+  const gstUserIds = gstUsers.map((g) => g.user.toString());
+
+  console.log(
+    `Generating invoices for ${gstUserIds.length} GST-verified users for period:`,
+    periodStart,
+    periodEnd,
+  );
+
   const results = [];
-  for (const u of users) {
+
+  for (const userId of gstUserIds) {
     try {
       const r = await generateInvoiceForUserMonth(
-        u._id,
+        userId,
         periodStart,
         periodEnd,
       );
-      results.push({ userId: u._id.toString(), result: r });
+
+      results.push({ userId, result: r });
     } catch (err) {
-      results.push({ userId: u._id.toString(), error: err.message });
+      results.push({ userId, error: err.message });
     }
   }
+
   return results;
 }
 
@@ -800,16 +873,16 @@ async function scheduleMonthlyInvoiceCron() {
   }
   // });
 }
-if(process.env.NODE_ENV === 'production'){
+if (process.env.NODE_ENV === "production") {
   cron.schedule(
-  "5 0 1 * *", // 12:05 AM on 1st day of every month
-  async () => {
-    await scheduleMonthlyInvoiceCron();
-  },
-  {
-    timezone: "Asia/Kolkata",
-  }
-);
+    "5 0 1 * *", // 12:05 AM on 1st day of every month
+    async () => {
+      await scheduleMonthlyInvoiceCron();
+    },
+    {
+      timezone: "Asia/Kolkata",
+    },
+  );
 }
 // scheduleMonthlyInvoiceCron()
 // console.log("Monthly invoice cron scheduled.");
@@ -842,8 +915,14 @@ async function scheduleMonthlyInvoiceCronn({ forcePeriod } = {}) {
       const year = now.getFullYear();
       const month = now.getMonth();
 
-      periodStart = new Date(year, month, 1, 0, 0, 0, 0);
-      periodEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+      const start = new Date(2026, 0, 1);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(2026, 1, 0);
+      end.setHours(23, 59, 59, 999);
+
+      periodStart = start;
+      periodEnd = end;
     }
 
     console.log("Generating invoice for period:", periodStart, periodEnd);
@@ -852,7 +931,7 @@ async function scheduleMonthlyInvoiceCronn({ forcePeriod } = {}) {
 
     console.log(
       "Monthly invoice results:",
-      results.filter((r) => r.result || r.error).slice(0, 10)
+      results.filter((r) => r.result || r.error).slice(0, 10),
     );
   } catch (err) {
     console.error("Monthly invoice cron error:", err);
@@ -862,16 +941,13 @@ async function scheduleMonthlyInvoiceCronn({ forcePeriod } = {}) {
 // (async () => {
 //   await scheduleMonthlyInvoiceCronn({
 //     forcePeriod: {
-//       start: new Date(2026, 0, 1, 0, 0, 0, 0),   // Jan 1
-//       end: new Date(2026, 1, 0, 23, 59, 59, 999) // Jan 31
-//     }
+//       start: new Date(2026, 0, 1, 0, 0, 0, 0),     // Jan 1, 12:00 AM IST
+//       end: new Date(2026, 1, 0, 23, 59, 59, 999), // Jan 31, 11:59:59 PM IST
+//     },
 //   });
 
 //   console.log("✅ January invoice backfill completed");
 // })();
-
-
-
 
 const bulkDownloadInvoices = async (req, res) => {
   try {
@@ -983,10 +1059,7 @@ const adminGetInvoices = async (req, res) => {
       return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
-    const {
-      page = 1,
-      limit = 20,
-    } = req.query;
+    const { page = 1, limit = 20 } = req.query;
 
     const parsedLimit =
       typeof limit === "string" && limit.toLowerCase() === "all"
@@ -1026,7 +1099,7 @@ const adminGetInvoices = async (req, res) => {
 
     const users = await User.find(
       { _id: { $in: userIds } },
-      { fullname: 1, email: 1, phoneNumber: 1, userId: 1 }
+      { fullname: 1, email: 1, phoneNumber: 1, userId: 1 },
     ).lean();
 
     const userMap = {};
@@ -1053,14 +1126,12 @@ const adminGetInvoices = async (req, res) => {
       userDetails: userMap[inv.userId] || {},
     }));
 
-    const totalPages = finalLimit
-      ? Math.ceil(totalCount / finalLimit)
-      : 1;
+    const totalPages = finalLimit ? Math.ceil(totalCount / finalLimit) : 1;
 
     return res.json({
       success: true,
       totalCount,
-      page: totalPages,       // total pages
+      page: totalPages, // total pages
       currentPage: Number(page),
       limit: finalLimit ?? "All",
       invoices: result,
@@ -1074,7 +1145,6 @@ const adminGetInvoices = async (req, res) => {
   }
 };
 
-
 /* -------------------------------------------------------
    User Controller — Get Only Logged-in User's Invoices
 ----------------------------------------------------------*/
@@ -1082,10 +1152,7 @@ const userGetInvoices = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    const {
-      page = 1,
-      limit = 20,
-    } = req.query;
+    const { page = 1, limit = 20 } = req.query;
 
     const parsedLimit =
       typeof limit === "string" && limit.toLowerCase() === "all"
@@ -1135,9 +1202,7 @@ const userGetInvoices = async (req, res) => {
       status: inv.status,
     }));
 
-    const totalPages = finalLimit
-      ? Math.ceil(totalCount / finalLimit)
-      : 1;
+    const totalPages = finalLimit ? Math.ceil(totalCount / finalLimit) : 1;
 
     return res.json({
       success: true,
@@ -1155,7 +1220,6 @@ const userGetInvoices = async (req, res) => {
     });
   }
 };
-
 
 /* -------------------------
    Exports (controllers)
