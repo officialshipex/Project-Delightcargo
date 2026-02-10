@@ -179,6 +179,7 @@ const availableCourierService = async (req, res) => {
           order_value: order.paymentDetails?.amount || 0,
         };
         serviceable = await checkZipypostServiceability(payload);
+        // console.log("serviceable",serviceable)
       } else if (provider === "Ekart") {
         const payload={
           pickUpPincode,

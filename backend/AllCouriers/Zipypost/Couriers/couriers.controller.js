@@ -147,13 +147,13 @@ const createZipypostOrder = async (req, res) => {
     const hold = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - hold;
     const balance = effectiveBalance + currentWallet.creditLimit;
-    if (balance < finalCharges){
+    if (balance < finalCharges) {
       return res.status(400).json({
         success: false,
         message: "Insufficient Wallet Balance",
       });
     }
-      
+
 
     // ✅ Cached zone lookup (saves ~200–400ms)
     const zone = await getCachedZone(
@@ -252,13 +252,13 @@ const createZipypostOrder = async (req, res) => {
         sellerId
       );
 
-      if (!whResult.success){
+      if (!whResult.success) {
         return res.status(400).json({
           success: false,
           message: "pickup address not registered first register pickup address",
         });
       }
-        
+
 
       warehouseCache.set(whKey, whResult.warehouseId);
       warehouseId = whResult.warehouseId;

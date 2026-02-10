@@ -58,7 +58,13 @@ const orderCreationEkart = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    const { id, finalCharges, courierServiceName, provider,estimatedDeliveryDate } = req.body;
+    const {
+      id,
+      finalCharges,
+      courierServiceName,
+      provider,
+      estimatedDeliveryDate,
+    } = req.body;
     // console.log("Received orderCreationEkart request:", req.body);
 
     const accessToken = await getAccessToken();
@@ -125,7 +131,7 @@ const orderCreationEkart = async (req, res) => {
         "pickupAddress.pinCode": currentOrder.pickupAddress.pinCode,
       })
       .session(session);
-// console.log("Fetched pickup address:", pickup);
+    // console.log("Fetched pickup address:", pickup);
     if (!pickup) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
@@ -573,8 +579,8 @@ const checkEkartServiceability = async (payload) => {
     const headers = {
       Authorization: `Bearer ${token}`,
     };
-    const pickup=Number(payload.pickUpPincode);
-    const receiver=Number(payload.deliveryPincode)
+    const pickup = Number(payload.pickUpPincode);
+    const receiver = Number(payload.deliveryPincode);
 
     // Make both requests in parallel
     const [pickupResponse, receiverResponse] = await Promise.all([
@@ -619,10 +625,37 @@ const checkEkartServiceability = async (payload) => {
   }
 };
 
+const trackEkartShipment = async (id) => {
+  if (!id) {
+    throw new Error("Tracking ID is required");
+  }
+
+  const url = `https://app.elite.ekartlogistics.in/api/v1/track/${id}`;
+
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        "Content-Type": "application/json",
+        // Authorization: `Bearer ${process.env.EKART_ELITE_TOKEN}`, // if needed
+      },
+    });
+    console.log("trakcing", response.data.track);
+    return response.data;
+  } catch (error) {
+    console.error("Ekart tracking error:", error.message);
+
+    throw new Error(
+      error.response?.data?.message || "Failed to fetch Ekart tracking details",
+    );
+  }
+};
+
+// trackEkartShipment("LUAP0000713399")
+
 module.exports = {
   checkEkartServiceability,
   orderCreationEkart,
   cancelShipmentEkart,
   calculateGSTForItems,
-  addEkartAddress
+  addEkartAddress,
 };
