@@ -206,12 +206,14 @@ const pincodeServiceability = async (req, res) => {
     // ✅ Step 5: Iterate through user’s rateCards
     for (let rc of rateCards) {
       if (rc.status !== "Active") continue;
+      // console.log("rate card",rc)
       const provider = rc.courierProviderName;
-      const providerCheck = providers.find((p) => p.name === provider);
+      const providerCheck = providers.find((p) => p.name.toLowerCase() === provider.toLowerCase());
       // console.log("Checking serviceability for provider:", providerCheck);
       if (!providerCheck) continue;
 
       const serviceable = await providerCheck.check();
+      // console.log("serviceable",serviceable)
       // console.log(`Serviceability for ${provider}:`, serviceable);
       if (!serviceable || serviceable.success === false) continue;
 
@@ -223,7 +225,7 @@ const pincodeServiceability = async (req, res) => {
 
       const count = Math.ceil(
         (chargedWeight - rc.weightPriceBasic[0].weight) /
-          rc.weightPriceAdditional[0].weight,
+        rc.weightPriceAdditional[0].weight,
       );
       const finalCharge =
         rc.weightPriceBasic[0].weight >= chargedWeight
@@ -263,7 +265,7 @@ const pincodeServiceability = async (req, res) => {
         serviceable: true,
       });
     }
-
+    // console.log("ans", ans)
     // ✅ Step 6: Response
     if (ans.length === 0) {
       return res.status(200).json({

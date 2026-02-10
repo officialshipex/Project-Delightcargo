@@ -118,12 +118,12 @@ const bookOrder = async (req, res) => {
 
     // ✅ Calculate rates
     const finalChargesArray = await calculateRateForService(payload);
-
+    console.log("final", finalChargesArray);
     // ✅ Validate courier service
     const matchedChargeObj = finalChargesArray.find(
       (item) =>
-        item.courierServiceName.toLowerCase() ===
-        courierServiceName.toLowerCase(),
+        item.courierServiceName.toLowerCase().trim() ===
+        courierServiceName.toLowerCase().trim(),
     );
 
     if (!matchedChargeObj) {
@@ -132,6 +132,9 @@ const bookOrder = async (req, res) => {
         message: `Courier service '${courierServiceName}' is invalid or not supported.`,
       });
     }
+    // else{
+    //   return res.status(200).json({status:"success",message:"courier service fetched"})
+    // }
 
     const finalCharges = matchedChargeObj.forward?.finalCharges || null;
     if (!finalCharges) {

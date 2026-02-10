@@ -78,7 +78,7 @@ const EkartWebhook = async (req, res) => {
       order.reattempt = false;
     }
 
-    if (currentStatus === "Out For Delivery") {
+    if (currentStatus === "Out for Delivery") {
       order.status = "Out for Delivery";
       order.ndrStatus = "Out for Delivery";
       order.reattempt = false;
