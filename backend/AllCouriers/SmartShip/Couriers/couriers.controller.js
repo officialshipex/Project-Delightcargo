@@ -268,7 +268,8 @@ const orderRegistrationOneStep = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
-      data: result,
+      orderId:currentOrder.orderId,
+      awb_number:result.awb_number
     });
 
     // ✅ Continue in background safely

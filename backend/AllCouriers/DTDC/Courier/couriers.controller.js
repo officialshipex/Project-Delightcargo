@@ -263,7 +263,8 @@ const createOrder = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
-      awb: result.reference_number,
+      awb_number: result.reference_number,
+      orderId:currentOrder.orderId
     });
 
     // --- Wallet update (background, safe) ---

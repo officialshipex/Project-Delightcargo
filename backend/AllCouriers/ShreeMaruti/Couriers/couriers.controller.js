@@ -105,7 +105,7 @@ const createOrder = async (req, res) => {
     let currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
-      { new: true, session }
+      { new: true, session },
     );
 
     if (!currentOrder) {
@@ -146,11 +146,11 @@ const createOrder = async (req, res) => {
       .findById({ _id: currentOrder.userId })
       .session(session);
     const currentWallet = await Wallet.findById({ _id: users.Wallet }).session(
-      session
+      session,
     );
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode
+      currentOrder.receiverAddress.pinCode,
     );
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
@@ -178,12 +178,12 @@ const createOrder = async (req, res) => {
           weight: currentOrder.packageDetails?.applicableWeight
             ? Math.max(
                 Number(currentOrder.packageDetails.applicableWeight) * 1000,
-                1
+                1,
               )
             : 1,
           sku: item.sku || null,
         };
-      }
+      },
     );
 
     let payment_type =
@@ -281,7 +281,7 @@ const createOrder = async (req, res) => {
       session.endSession();
       console.error(
         "Shipment API failed:",
-        shipmentErr.response?.data || shipmentErr.message
+        shipmentErr.response?.data || shipmentErr.message,
       );
       return res.status(500).json({
         error: "Shipment creation failed",
@@ -329,7 +329,7 @@ const createOrder = async (req, res) => {
             },
           },
         },
-        { session }
+        { session },
       );
 
       await session.commitTransaction();
@@ -347,19 +347,24 @@ const createOrder = async (req, res) => {
               "Content-Type": "application/json",
               Authorization: `Bearer ${token}`,
             },
-          }
+          },
         );
         console.log("Manifest Created:", manifestResponse.data);
       } catch (manifestErr) {
         console.error(
           "Error creating manifest:",
-          manifestErr.response?.data || manifestErr.message
+          manifestErr.response?.data || manifestErr.message,
         );
       }
 
       return res
         .status(201)
-        .json({ message: "Shipment & Manifest Created Successfully" });
+        .json({
+          success:true,
+          message: "Shipment & Manifest Created Successfully",
+          awb_number: result.awbNumber,
+          orderId: currentOrder.orderId,
+        });
     } else {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
@@ -397,7 +402,7 @@ const cancelOrderShreeMaruti = async (order_Id) => {
           "Content-Type": "application/json", // Fixed header
           Authorization: `Bearer ${token}`, // Token added
         },
-      }
+      },
     );
 
     console.log("Response:", response);
@@ -447,13 +452,13 @@ const downloadLabelInvoice = async (req, res) => {
       {
         params: { awbNumber, cAwbNumber }, // Passing query parameters
         headers: { Authorization: `Bearer ${token}` },
-      }
+      },
     );
     res.status(200).json(response.data);
   } catch (error) {
     console.error(
       "Error downloading label/invoice:",
-      error.response?.data || error.message
+      error.response?.data || error.message,
     );
     res.status(500).json({
       error: "Download failed",
@@ -486,7 +491,7 @@ const createManifest = async (req, res) => {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-      }
+      },
     );
     console.log("jkkkkkkkkkkkkk", response.data);
 
@@ -494,7 +499,7 @@ const createManifest = async (req, res) => {
   } catch (error) {
     console.error(
       "Error creating manifest:",
-      error.response?.data || error.message
+      error.response?.data || error.message,
     );
     res.status(500).json({
       error: "Manifest creation failed",
@@ -530,7 +535,7 @@ const trackOrderShreeMaruti = async (awbNumber) => {
   } catch (error) {
     console.error(
       "Error tracking order:",
-      error.response?.data || error.message
+      error.response?.data || error.message,
     );
     // console.log(error);
 
@@ -562,7 +567,7 @@ const checkServiceabilityShreeMaruti = async (payload) => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-      }
+      },
     );
 
     // console.log("shreemaruti",response.data)

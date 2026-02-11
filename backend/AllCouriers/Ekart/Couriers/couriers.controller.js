@@ -386,7 +386,8 @@ const orderCreationEkart = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
-      awb: response.data.tracking_id,
+      awb_number: response.data.tracking_id,
+      orderId:currentOrder.orderId
     });
 
     // =====================================================

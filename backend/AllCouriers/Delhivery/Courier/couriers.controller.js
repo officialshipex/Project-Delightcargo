@@ -51,7 +51,7 @@ const createClientWarehouse = async (payload) => {
           "Content-Type": "application/json",
           Authorization: `Token ${API_TOKEN}`,
         },
-      }
+      },
     );
 
     if (response.data.success) {
@@ -72,10 +72,11 @@ const createClientWarehouse = async (payload) => {
       } else {
         console.error(
           "Unknown error during warehouse creation:",
-          response.data.error?.[0]
+          response.data.error?.[0],
         );
         throw new Error(
-          response.data.error?.[0] || "Unknown error during warehouse creation."
+          response.data.error?.[0] ||
+            "Unknown error during warehouse creation.",
         );
       }
     }
@@ -91,7 +92,7 @@ const createClientWarehouse = async (payload) => {
     } else {
       console.error(
         "Error creating warehouse:",
-        error.response?.data || error.message
+        error.response?.data || error.message,
       );
       throw new Error(errorMessage || "Failed to create warehouse.");
     }
@@ -116,7 +117,7 @@ const createOrder = async (req, res) => {
     const currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
-      { new: true, session }
+      { new: true, session },
     );
 
     if (!currentOrder) {
@@ -150,7 +151,7 @@ const createOrder = async (req, res) => {
       fetchBulkWaybills(1),
       getZone(
         currentOrder.pickupAddress.pinCode,
-        currentOrder.receiverAddress.pinCode
+        currentOrder.receiverAddress.pinCode,
       ),
     ]);
 
@@ -245,7 +246,7 @@ const createOrder = async (req, res) => {
     // console.log("payloadData", payloadData.shipments);
 
     const payload = `format=json&data=${encodeURIComponent(
-      JSON.stringify(payloadData)
+      JSON.stringify(payloadData),
     )}`;
 
     // Step 6️⃣ Wallet check
@@ -310,7 +311,7 @@ const createOrder = async (req, res) => {
             },
           },
         },
-        { session }
+        { session },
       ),
       currentWallet.updateOne(
         {
@@ -328,7 +329,7 @@ const createOrder = async (req, res) => {
             },
           },
         },
-        { session }
+        { session },
       ),
     ]);
 
@@ -339,11 +340,9 @@ const createOrder = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Shipment Created Successfully",
-      data: {
-        orderId: currentOrder.orderId,
-        provider,
-        waybill: result.waybill,
-      },
+      orderId: currentOrder.orderId,
+      provider,
+      awb_number: result.waybill,
     });
   } catch (error) {
     await Order.findByIdAndUpdate(req.body.id, { status: "new" });
@@ -361,7 +360,7 @@ const createOrder = async (req, res) => {
 const checkPincodeServiceabilityDelhivery = async (
   pickUpPincode,
   deliveryPincode,
-  order_type
+  order_type,
 ) => {
   if (!pickUpPincode || !deliveryPincode) {
     return {
@@ -434,7 +433,7 @@ const trackShipmentDelhivery = async (waybill) => {
         headers: {
           authorization: `Token ${API_TOKEN}`,
         },
-      }
+      },
     );
 
     const shipmentData = response?.data?.ShipmentData?.[0]?.Shipment;
@@ -484,7 +483,7 @@ const generateShippingLabel = async (req, res) => {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="shipping-label-${waybill}.pdf"`
+      `attachment; filename="shipping-label-${waybill}.pdf"`,
     );
 
     return res.status(200).send(response.data);
@@ -596,7 +595,7 @@ const updateClientWarehouse = async (req, res) => {
           "Content-Type": "application/json",
           Authorization: "Bearer YOUR_ACCESS_TOKEN",
         },
-      }
+      },
     );
 
     return res.status(200).json({

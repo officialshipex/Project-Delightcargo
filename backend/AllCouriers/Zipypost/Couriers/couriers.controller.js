@@ -387,7 +387,8 @@ const createZipypostOrder = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
-      data: result,
+    awb_number:result.awb,
+    orderId:currentOrder.orderId
     });
   } catch (error) {
     await session.abortTransaction();
