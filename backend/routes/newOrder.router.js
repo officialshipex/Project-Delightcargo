@@ -31,7 +31,8 @@ const {
   checkCourier
   // calculateRTOCharges
   
-} = require("../Orders/newOrder.controller"); // Adjust path to your controller
+} = require("../Orders/newOrder.controller");
+const {schedulePickup}=require("../Orders/scheduledPickup.controller")
 const router = express.Router();
 
 // Route to create a shipment
@@ -51,7 +52,6 @@ router.get("/ship/:id", ShipeNowOrder);
 router.get("/pincode/:pincode", getPinCodeDetails);
 router.post("/cancelOrdersAtNotShipped",cancelOrdersAtNotShipped)
 router.post("/cancelOrdersAtBooked",cancelOrdersAtBooked)
-
 router.post("/updatePackageDetails",updatePackageDetails)
 router.get("/passbook",passbook)
 router.get("/getUser",getUser)
@@ -65,6 +65,8 @@ router.post("/bulkCancelOrder",bulkCancelOrder);
 router.get("/checkBulkPickup",checkBulkPickup)
 router.get("/checkBulkUser",checkBulkUser)
 router.get("/checkCourier/:id",checkCourier)
+
+router.post("/schedulePickup",schedulePickup)
 
 // router.post("/calculateRTOCharges",calculateRTOCharges)
 module.exports = router;

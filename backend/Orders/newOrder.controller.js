@@ -1561,36 +1561,10 @@ const passbook = async (req, res) => {
       return res.status(400).json({ message: "User ID is required" });
     }
 
-    // 🔹 Fetch only required fields (small speed gain)
     const currentUser = await user.findById(userId).select("_id Wallet");
 
     if (!currentUser || !currentUser.Wallet) {
       return res.status(404).json({ message: "Wallet not found" });
-    }
-
-    const transactionMatchStage = {};
-
-    // Date filter
-    if (fromDate && toDate) {
-      const start = new Date(new Date(fromDate).setHours(0, 0, 0, 0));
-      const end = new Date(new Date(toDate).setHours(23, 59, 59, 999));
-      transactionMatchStage["wallet.transactions.date"] = {
-        $gte: start,
-        $lte: end,
-      };
-    }
-
-    if (category) {
-      transactionMatchStage["wallet.transactions.category"] = category;
-    }
-    if (description) {
-      transactionMatchStage["wallet.transactions.description"] = description;
-    }
-    if (awbNumber) {
-      transactionMatchStage["wallet.transactions.awb_number"] = awbNumber;
-    }
-    if (orderId) {
-      transactionMatchStage["wallet.transactions.channelOrderId"] = orderId;
     }
 
     const parsedLimit =
@@ -1603,7 +1577,38 @@ const passbook = async (req, res) => {
 
     const skip = finalLimit ? (Number(page) - 1) * finalLimit : 0;
 
+    /* ---------------- BUILD FILTER CONDITIONS FOR $filter ---------------- */
+
+    const filterConditions = [];
+
+    if (fromDate && toDate) {
+      const start = new Date(new Date(fromDate).setHours(0, 0, 0, 0));
+      const end = new Date(new Date(toDate).setHours(23, 59, 59, 999));
+
+      filterConditions.push({ $gte: ["$$txn.date", start] });
+      filterConditions.push({ $lte: ["$$txn.date", end] });
+    }
+
+    if (category) {
+      filterConditions.push({ $eq: ["$$txn.category", category] });
+    }
+
+    if (description) {
+      filterConditions.push({ $eq: ["$$txn.description", description] });
+    }
+
+    if (awbNumber) {
+      filterConditions.push({ $eq: ["$$txn.awb_number", awbNumber] });
+    }
+
+    if (orderId) {
+      filterConditions.push({
+        $eq: ["$$txn.channelOrderId", orderId],
+      });
+    }
+
     /* ---------------- MAIN PIPELINE ---------------- */
+
     const dataPipeline = [
       { $match: { _id: currentUser._id } },
       {
@@ -1615,34 +1620,55 @@ const passbook = async (req, res) => {
         },
       },
       { $unwind: "$wallet" },
+
+      // 🔥 Filter transactions inside array
+      {
+        $set: {
+          "wallet.transactions": {
+            $filter: {
+              input: "$wallet.transactions",
+              as: "txn",
+              cond:
+                filterConditions.length > 0
+                  ? { $and: filterConditions }
+                  : { $ne: ["$$txn", null] },
+            },
+          },
+        },
+      },
+
+      // 🔥 Sort inside array (NOT documents)
+      {
+        $set: {
+          "wallet.transactions": {
+            $sortArray: {
+              input: "$wallet.transactions",
+              sortBy: { date: -1 },
+            },
+          },
+        },
+      },
+
+      // 🔥 Slice only required page BEFORE unwind
+      ...(finalLimit
+        ? [
+            {
+              $set: {
+                "wallet.transactions": {
+                  $slice: [
+                    "$wallet.transactions",
+                    skip,
+                    finalLimit,
+                  ],
+                },
+              },
+            },
+          ]
+        : []),
+
+      // 🔥 Now unwind only sliced results
       { $unwind: "$wallet.transactions" },
-      { $match: transactionMatchStage },
 
-      // 🔥 Sort BEFORE lookup
-      { $sort: { "wallet.transactions.date": -1 } },
-
-      // 🔥 Pagination BEFORE lookup (HUGE SPEED GAIN)
-      ...(finalLimit ? [{ $skip: skip }, { $limit: finalLimit }] : []),
-
-      // 🔥 Lookup only for paginated rows
-      {
-        $lookup: {
-          from: "neworders",
-          localField: "wallet.transactions.awb_number",
-          foreignField: "awb_number",
-          as: "orderInfo",
-        },
-      },
-      {
-        $addFields: {
-          courierServiceName: {
-            $arrayElemAt: ["$orderInfo.courierServiceName", 0],
-          },
-          provider: {
-            $arrayElemAt: ["$orderInfo.provider", 0],
-          },
-        },
-      },
       {
         $project: {
           _id: 0,
@@ -1654,13 +1680,12 @@ const passbook = async (req, res) => {
           awb_number: "$wallet.transactions.awb_number",
           orderId: "$wallet.transactions.channelOrderId",
           description: "$wallet.transactions.description",
-          courierServiceName: 1,
-          provider: 1,
         },
       },
     ];
 
-    /* ---------------- COUNT PIPELINE (UNCHANGED LOGIC) ---------------- */
+    /* ---------------- COUNT PIPELINE ---------------- */
+
     const countPipeline = [
       { $match: { _id: currentUser._id } },
       {
@@ -1673,17 +1698,39 @@ const passbook = async (req, res) => {
       },
       { $unwind: "$wallet" },
       { $unwind: "$wallet.transactions" },
-      { $match: transactionMatchStage },
-      { $count: "total" },
     ];
 
+    if (filterConditions.length > 0) {
+      const matchStage = {};
+      if (fromDate && toDate) {
+        const start = new Date(new Date(fromDate).setHours(0, 0, 0, 0));
+        const end = new Date(new Date(toDate).setHours(23, 59, 59, 999));
+        matchStage["wallet.transactions.date"] = { $gte: start, $lte: end };
+      }
+      if (category)
+        matchStage["wallet.transactions.category"] = category;
+      if (description)
+        matchStage["wallet.transactions.description"] = description;
+      if (awbNumber)
+        matchStage["wallet.transactions.awb_number"] = awbNumber;
+      if (orderId)
+        matchStage["wallet.transactions.channelOrderId"] = orderId;
+
+      countPipeline.push({ $match: matchStage });
+    }
+
+    countPipeline.push({ $count: "total" });
+
     const [transactions, totalCountResult] = await Promise.all([
-      user.aggregate(dataPipeline).allowDiskUse(true),
+      user.aggregate(dataPipeline),
       user.aggregate(countPipeline),
     ]);
 
     const totalCount = totalCountResult[0]?.total || 0;
-    const totalPages = finalLimit ? Math.ceil(totalCount / finalLimit) : 1;
+
+    const totalPages = finalLimit
+      ? Math.ceil(totalCount / finalLimit)
+      : 1;
 
     return res.status(200).json({
       message: "Passbook fetched successfully",
@@ -1701,6 +1748,7 @@ const passbook = async (req, res) => {
     });
   }
 };
+
 
 const getUser = async (req, res) => {
   try {

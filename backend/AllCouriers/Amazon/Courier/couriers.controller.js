@@ -234,11 +234,9 @@ const createOneClickShipment = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
-      data: {
         orderId: currentOrder.orderId,
-        waybill: trackingId,
+        awb_number: trackingId,
         labelUrl,
-      },
     });
   } catch (error) {
     await Order.findByIdAndUpdate(req.body.id, { status: "new" });
