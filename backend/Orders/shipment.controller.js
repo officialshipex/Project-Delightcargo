@@ -219,8 +219,10 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         const payload = {
           pickUpPincode: pickupPincode,
           deliveryPincode: deliveryPincode,
+          paymentMethod:paymentMethod
         };
         const result = await checkEkartServiceability(payload);
+        // console.log("result",result)
         return result;
       }
     }

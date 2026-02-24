@@ -76,7 +76,7 @@ const availableCourierService = async (req, res) => {
     const pickUpPincode = order.pickupAddress.pinCode;
     const deliveryPincode = order.receiverAddress.pinCode;
     const applicableWeight = order.packageDetails.applicableWeight;
-    const paymentType = order.paymentDetails.paymentType; // "COD" or "Prepaid"
+    const paymentType = order.paymentDetails.method; // "COD" or "Prepaid"
     const declaredValue = order.paymentDetails.amount;
 
     // 3. Get Zone
@@ -183,7 +183,9 @@ const availableCourierService = async (req, res) => {
       } else if (provider === "Ekart") {
         const payload={
           pickUpPincode,
-          deliveryPincode
+          deliveryPincode,
+          paymentMethod:paymentType,
+          codAmount:declaredValue,
         }
         serviceable = await checkEkartServiceability(
           payload

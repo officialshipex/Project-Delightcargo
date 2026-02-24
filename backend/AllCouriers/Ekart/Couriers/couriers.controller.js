@@ -387,7 +387,7 @@ const orderCreationEkart = async (req, res) => {
       success: true,
       message: "Shipment Created Successfully",
       awb_number: response.data.tracking_id,
-      orderId:currentOrder.orderId
+      orderId: currentOrder.orderId
     });
 
     // =====================================================
@@ -577,21 +577,24 @@ const checkEkartServiceability = async (payload) => {
     if (!token) {
       return { success: false, message: "Failed to fetch access token" };
     }
+
     const headers = {
       Authorization: `Bearer ${token}`,
     };
+
     const pickup = Number(payload.pickUpPincode);
     const receiver = Number(payload.deliveryPincode);
+    const paymentMethod = payload.paymentMethod; // COD or Prepaid
+    const codAmount = Number(payload.codAmount || 0);
 
-    // Make both requests in parallel
     const [pickupResponse, receiverResponse] = await Promise.all([
       axios.get(
         `https://app.elite.ekartlogistics.in/api/v2/serviceability/${pickup}`,
-        { headers },
+        { headers }
       ),
       axios.get(
         `https://app.elite.ekartlogistics.in/api/v2/serviceability/${receiver}`,
-        { headers },
+        { headers }
       ),
     ]);
 
@@ -601,14 +604,38 @@ const checkEkartServiceability = async (payload) => {
     // console.log("Ekart Serviceability Pickup Data:", pickupData);
     // console.log("Ekart Serviceability Receiver Data:", receiverData);
 
-    // Check serviceability from 'status' field instead of data.is_serviceable
     const pickupServiceable = pickupData?.status === true;
     const receiverServiceable = receiverData?.status === true;
 
-    const serviceable = pickupServiceable && receiverServiceable;
+    if (!pickupServiceable || !receiverServiceable) {
+      return {
+        success: false,
+        message: "Pickup or Delivery pincode is not serviceable",
+      };
+    }
+
+    // ✅ COD Validation
+    if (paymentMethod === "COD") {
+      const receiverCOD = receiverData?.details?.cod === true;
+      const maxCOD = receiverData?.details?.max_cod_amount || 0;
+
+      if (!receiverCOD) {
+        return {
+          success: false,
+          message: "COD is not available at delivery location",
+        };
+      }
+
+      if (codAmount > maxCOD) {
+        return {
+          success: false,
+          message: `COD amount exceeds limit. Max allowed: ${maxCOD}`,
+        };
+      }
+    }
 
     return {
-      success: serviceable,
+      success: true,
       data: {
         pickup: pickupData?.details || {},
         receiver: receiverData?.details || {},
@@ -617,8 +644,9 @@ const checkEkartServiceability = async (payload) => {
   } catch (error) {
     console.error(
       "Ekart Serviceability Error:",
-      error.response?.data || error.message,
+      error.response?.data || error.message
     );
+
     return {
       success: false,
       error: error.response?.data || error.message,

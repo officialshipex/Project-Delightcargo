@@ -27,6 +27,7 @@ const {
 const {
   checkZipypostServiceability,
 } = require("../AllCouriers/Zipypost/Couriers/couriers.controller.js");
+const { checkEkartServiceability } = require("../AllCouriers/Ekart/Couriers/couriers.controller.js");
 
 const calculateRate = async (req, res) => {
   try {
@@ -89,6 +90,7 @@ const calculateRate = async (req, res) => {
           "Amazon Shipping",
           "EcomExpres",
           "ZipyPost",
+          "Ekart"
         ].includes(provider)
       ) {
         continue;
@@ -166,6 +168,14 @@ const calculateRate = async (req, res) => {
             order_weight: applicableWeight,
           };
           serviceable = await checkZipypostServiceability(payload);
+        } else if (provider === "Ekart") {
+          const payload = {
+            pickUpPincode,
+            deliveryPincode,
+            paymentMethod:paymentType, 
+            codAmount:declaredValue,
+          };
+          serviceable = await checkEkartServiceability(payload);
         }
       } else {
         // Local says not serviceable → skip API
