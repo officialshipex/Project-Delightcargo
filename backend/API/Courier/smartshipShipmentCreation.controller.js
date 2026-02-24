@@ -26,6 +26,7 @@ const createSmartshipShipment = async ({
   finalCharges,
   courierServiceName,
   provider,
+  priceBreakup
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -220,6 +221,7 @@ const createSmartshipShipment = async ({
           shipmentCreatedAt: new Date(),
           zone: zone.zone,
           estimatedDeliveryDate: estimateDate, // ✅ from DB
+          priceBreakup
         },
         $push: {
           tracking: {

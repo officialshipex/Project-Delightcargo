@@ -15,6 +15,7 @@ const createEkartShipment = async ({
   provider,
   finalCharges,
   courierServiceName,
+  priceBreakup
 }) => {
   const session = await mongoose.startSession();
 
@@ -294,6 +295,7 @@ const createEkartShipment = async ({
           shipmentCreatedAt: new Date(),
           zone: zone.zone,
           estimatedDeliveryDate: estimateDate || "",
+          priceBreakup
         },
         $push: {
           tracking: {

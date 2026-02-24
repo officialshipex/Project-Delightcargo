@@ -211,8 +211,8 @@ const newPickupAddress = async (req, res) => {
     // console.log(req.body); // To log the incoming request body
     const userId =
       req.query.userId &&
-      req.query.userId !== "undefined" &&
-      req.query.userId.trim() !== ""
+        req.query.userId !== "undefined" &&
+        req.query.userId.trim() !== ""
         ? req.query.userId.trim()
         : req.user?._id?.toString();
 
@@ -320,15 +320,26 @@ const getOrders = async (req, res) => {
       paymentType,
       startDate,
       endDate,
+      pickupContactName,
+      courierServiceName
     } = req.query;
-    let userId;
-    if (id) {
+    let userId = null;
+    console.log("req", req.query)
+    if (id && id !== "undefined" && id !== "null") {
       userId = id;
-    } else {
-      userId = req.user?._id || req.employee?._id;
+    } else if (req.user?._id) {
+      userId = req.user._id;
+    } else if (req.employee?._id) {
+      userId = req.employee._id;
     }
 
-    console.log("userId", req.query);
+    if (!userId) {
+      return res.status(400).json({ error: "User ID required" });
+    }
+
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
+
 
     const page = parseInt(req.query.page) || 1;
     const limitQuery = req.query.limit;
@@ -336,7 +347,8 @@ const getOrders = async (req, res) => {
       limitQuery === "All" || !limitQuery ? null : parseInt(limitQuery);
     const skip = limit ? (page - 1) * limit : 0;
 
-    const andConditions = [{ userId }];
+    const andConditions = [{ userId: userObjectId }];
+
 
     // Include B2C + orders without orderType
     andConditions.push({
@@ -385,7 +397,8 @@ const getOrders = async (req, res) => {
       andConditions.push({ trackingId: { $regex: trackingId, $options: "i" } });
     }
     if (req.query.courierServiceName) {
-      andConditions.push({ courierServiceName: req.query.courierServiceName });
+      const couriers = req.query.courierServiceName.split(",").map((c) => c.trim());
+      andConditions.push({ courierServiceName: { $in: couriers } });
     }
 
     if (paymentType) {
@@ -398,14 +411,18 @@ const getOrders = async (req, res) => {
       end.setHours(23, 59, 59, 999);
       andConditions.push({ createdAt: { $gte: start, $lte: end } });
     }
+    const filter = { $and: andConditions };
+    if (pickupContactName && pickupContactName.length > 0) {
+      const names = Array.isArray(pickupContactName)
+        ? pickupContactName
+        : pickupContactName.split(",");
 
-    if (req.query.pickupContactName) {
-      andConditions.push({
-        "pickupAddress.contactName": req.query.pickupContactName,
-      });
+      filter["pickupAddress.contactName"] = {
+        $in: names.map((n) => n.trim()),
+      };
     }
 
-    const filter = { $and: andConditions };
+
 
     const totalCount = await Order.countDocuments(filter);
     let sortOption = { updatedAt: -1 };
@@ -426,7 +443,9 @@ const getOrders = async (req, res) => {
     const totalPages = limit ? Math.ceil(totalCount / limit) : 1;
 
     const allCourierServices = await Order.aggregate([
-      { $match: { userId } },
+      {
+        $match: { userId: userObjectId }
+      },
       {
         $group: {
           _id: "$courierServiceName",
@@ -441,42 +460,25 @@ const getOrders = async (req, res) => {
     ]);
 
     // Fetch all unique pickup locations for the user (not filtered)
-    const allPickupLocations = await Order.aggregate([
-      { $match: { userId } },
-      {
-        $group: {
-          _id: {
-            contactName: "$pickupAddress.contactName",
-            // Optionally, you can add _id: "$pickupAddress._id" if needed
-          },
-          address: { $first: "$pickupAddress.address" },
-          phoneNumber: { $first: "$pickupAddress.phoneNumber" },
-          email: { $first: "$pickupAddress.email" },
-          pinCode: { $first: "$pickupAddress.pinCode" },
-          city: { $first: "$pickupAddress.city" },
-          state: { $first: "$pickupAddress.state" },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          contactName: "$_id.contactName",
-          address: 1,
-          phoneNumber: 1,
-          email: 1,
-          pinCode: 1,
-          city: 1,
-          state: 1,
-        },
-      },
-    ]);
+    const allPickupLocations = await pickAddress.find({
+      userId: userObjectId,
+    })
+      // .select("pickupAddress isPrimary")
+      .lean();
 
+    const formattedPickupLocations = allPickupLocations.map(p => ({
+      ...p.pickupAddress,
+      // isPrimary: p.isPrimary
+    }));
+
+
+    // console.log("all pickup", allPickupLocations)
     res.json({
       orders,
       totalPages,
       totalCount,
       currentPage: page,
-      pickupLocations: allPickupLocations,
+      pickupLocations: formattedPickupLocations,
       courierServices: allCourierServices.map((c) => c.courierServiceName),
     });
   } catch (error) {
@@ -566,7 +568,8 @@ const getShippingOrders = async (req, res) => {
     }
 
     if (req.query.courierServiceName) {
-      andConditions.push({ courierServiceName: req.query.courierServiceName });
+      const couriers = req.query.courierServiceName.split(",").map((c) => c.trim());
+      andConditions.push({ courierServiceName: { $in: couriers } });
     }
 
     if (paymentType) {
@@ -581,8 +584,9 @@ const getShippingOrders = async (req, res) => {
     }
 
     if (req.query.pickupContactName) {
+      const names = req.query.pickupContactName.split(",").map((n) => n.trim());
       andConditions.push({
-        "pickupAddress.contactName": req.query.pickupContactName,
+        "pickupAddress.contactName": { $in: names },
       });
     }
 
@@ -656,6 +660,7 @@ const getShippingOrders = async (req, res) => {
 
 const getOrdersByNdrStatus = async (req, res) => {
   try {
+    const { pickupContactName } = req.query;
     const { id } = req.query;
     let userId;
     if (id) {
@@ -663,7 +668,7 @@ const getOrdersByNdrStatus = async (req, res) => {
     } else {
       userId = req.user._id;
     }
-
+    console.log("req", req.query)
     const page = parseInt(req.query.page) || 1;
     const limitQuery = req.query.limit;
     const limit =
@@ -727,8 +732,17 @@ const getOrdersByNdrStatus = async (req, res) => {
       });
     }
     if (req.query.courierServiceName) {
-      andConditions.push({ courierServiceName: req.query.courierServiceName });
+      const couriers = Array.isArray(req.query.courierServiceName)
+        ? req.query.courierServiceName
+        : req.query.courierServiceName.split(",");
+
+      andConditions.push({
+        courierServiceName: {
+          $in: couriers.map((c) => c.trim()),
+        },
+      });
     }
+
     if (req.query.paymentType) {
       andConditions.push({ "paymentDetails.method": req.query.paymentType });
     }
@@ -738,13 +752,22 @@ const getOrdersByNdrStatus = async (req, res) => {
       end.setHours(23, 59, 59, 999);
       andConditions.push({ createdAt: { $gte: start, $lte: end } });
     }
-    if (req.query.pickupContactName) {
+
+
+    const filter = { $and: andConditions };
+
+    if (pickupContactName) {
+      const names = Array.isArray(pickupContactName)
+        ? pickupContactName
+        : pickupContactName.split(",");
+
       andConditions.push({
-        "pickupAddress.contactName": req.query.pickupContactName,
+        "pickupAddress.contactName": {
+          $in: names.map((n) => n.trim()),
+        },
       });
     }
 
-    const filter = { $and: andConditions };
 
     const totalCount = await Order.countDocuments(filter);
 
@@ -764,39 +787,24 @@ const getOrdersByNdrStatus = async (req, res) => {
       { $group: { _id: "$courierServiceName" } },
       { $project: { _id: 0, courierServiceName: "$_id" } },
     ]);
-    const allPickupLocations = await Order.aggregate([
-      { $match: { userId } },
-      {
-        $group: {
-          _id: { contactName: "$pickupAddress.contactName" },
-          address: { $first: "$pickupAddress.address" },
-          phoneNumber: { $first: "$pickupAddress.phoneNumber" },
-          email: { $first: "$pickupAddress.email" },
-          pinCode: { $first: "$pickupAddress.pinCode" },
-          city: { $first: "$pickupAddress.city" },
-          state: { $first: "$pickupAddress.state" },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          contactName: "$_id.contactName",
-          address: 1,
-          phoneNumber: 1,
-          email: 1,
-          pinCode: 1,
-          city: 1,
-          state: 1,
-        },
-      },
-    ]);
+    // Fetch all unique pickup locations for the user (not filtered)
+    const allPickupLocations = await pickAddress.find({
+      userId,
+    })
+      // .select("pickupAddress isPrimary")
+      .lean();
+
+    const formattedPickupLocations = allPickupLocations.map(p => ({
+      ...p.pickupAddress,
+      // isPrimary: p.isPrimary
+    }));
 
     res.json({
       orders,
       totalPages,
       totalCount,
       currentPage: page,
-      pickupLocations: allPickupLocations,
+      pickupLocations: formattedPickupLocations,
       courierServices: allCourierServices.map((c) => c.courierServiceName),
     });
   } catch (error) {
@@ -904,42 +912,42 @@ const updateOrder = async (req, res) => {
     // Update pickupAddress if provided
     if (pickupAddress) {
       updateFields.pickupAddress = {
-        contactName:
-          pickupAddress.contactName || existingOrder.pickupAddress.contactName,
-        phoneNumber:
-          pickupAddress.phoneNumber || existingOrder.pickupAddress.phoneNumber,
-        email: pickupAddress.email || existingOrder.pickupAddress.email,
-        address: pickupAddress.address || existingOrder.pickupAddress.address,
-        city: pickupAddress.city || existingOrder.pickupAddress.city,
-        state: pickupAddress.state || existingOrder.pickupAddress.state,
-        pinCode: pickupAddress.pinCode || existingOrder.pickupAddress.pinCode,
+        contactName: pickupAddress.contactName,
+        phoneNumber: pickupAddress.phoneNumber,
+        email: pickupAddress.email,
+        address: pickupAddress.address,
+        city: pickupAddress.city,
+        state: pickupAddress.state,
+        pinCode: pickupAddress.pinCode,
       };
+      // Remove undefined fields to avoid overwriting with null
+      Object.keys(updateFields.pickupAddress).forEach(key =>
+        updateFields.pickupAddress[key] === undefined && delete updateFields.pickupAddress[key]
+      );
     }
 
     // Update receiverAddress if provided
     if (receiverAddress) {
       updateFields.receiverAddress = {
-        contactName:
-          receiverAddress.contactName ||
-          existingOrder.receiverAddress.contactName,
-        phoneNumber:
-          receiverAddress.phoneNumber ||
-          existingOrder.receiverAddress.phoneNumber,
-        email: receiverAddress.email || existingOrder.receiverAddress.email,
-        address:
-          receiverAddress.address || existingOrder.receiverAddress.address,
-        city: receiverAddress.city || existingOrder.receiverAddress.city,
-        state: receiverAddress.state || existingOrder.receiverAddress.state,
-        pinCode:
-          receiverAddress.pinCode || existingOrder.receiverAddress.pinCode,
+        contactName: receiverAddress.contactName,
+        phoneNumber: receiverAddress.phoneNumber,
+        email: receiverAddress.email,
+        address: receiverAddress.address,
+        city: receiverAddress.city,
+        state: receiverAddress.state,
+        pinCode: receiverAddress.pinCode,
       };
+      // Remove undefined fields to avoid overwriting with null
+      Object.keys(updateFields.receiverAddress).forEach(key =>
+        updateFields.receiverAddress[key] === undefined && delete updateFields.receiverAddress[key]
+      );
     }
 
     // Ensure paymentDetails exist before updating
     if (paymentDetails) {
       updateFields.paymentDetails = {
-        method: paymentDetails.method || existingOrder.paymentDetails.method,
-        amount: paymentDetails.amount || existingOrder.paymentDetails.amount,
+        method: paymentDetails.method || existingOrder.paymentDetails?.method,
+        amount: paymentDetails.amount || existingOrder.paymentDetails?.amount,
       };
     }
 
@@ -947,20 +955,20 @@ const updateOrder = async (req, res) => {
     if (packageDetails) {
       updateFields.packageDetails = {
         deadWeight:
-          packageDetails.deadWeight || existingOrder.packageDetails.deadWeight,
+          packageDetails.deadWeight || existingOrder.packageDetails?.deadWeight,
         applicableWeight:
           packageDetails.applicableWeight ||
-          existingOrder.packageDetails.applicableWeight,
+          existingOrder.packageDetails?.applicableWeight,
         volumetricWeight: {
           length:
             packageDetails.volumetricWeight?.length ||
-            existingOrder.packageDetails.volumetricWeight.length,
+            existingOrder.packageDetails?.volumetricWeight?.length,
           width:
             packageDetails.volumetricWeight?.width ||
-            existingOrder.packageDetails.volumetricWeight.width,
+            existingOrder.packageDetails?.volumetricWeight?.width,
           height:
             packageDetails.volumetricWeight?.height ||
-            existingOrder.packageDetails.volumetricWeight.height,
+            existingOrder.packageDetails?.volumetricWeight?.height,
         },
       };
     }
@@ -968,9 +976,11 @@ const updateOrder = async (req, res) => {
     // Ensure otherDetails exist before updating
     if (otherDetails) {
       updateFields.otherDetails = {
-        gstin: otherDetails.gstin || existingOrder.otherDetails.gstin,
+        gstin: otherDetails.gstin || existingOrder.otherDetails?.gstin,
       };
     }
+
+    console.log("updateFields to be applied:", updateFields);
 
     // Update order in the database
     const updatedOrder = await Order.findByIdAndUpdate(
@@ -992,25 +1002,69 @@ const updateOrder = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
+const updateProductDetails = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { productDetails } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({ message: "Invalid orderId format." });
+    }
+
+    if (!productDetails || !Array.isArray(productDetails)) {
+      return res
+        .status(400)
+        .json({ message: "productDetails must be an array." });
+    }
+
+    const updatedOrder = await Order.findByIdAndUpdate(
+      orderId,
+      { $set: { productDetails: productDetails } },
+      { new: true, runValidators: true },
+    );
+
+    if (!updatedOrder) {
+      return res.status(404).json({ message: "Order not found." });
+    }
+
+    res.status(200).json({
+      message: "Product details updated successfully.",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    console.error("Error updating product details:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
 const getOrdersById = async (req, res) => {
   const { id } = req.params;
-  // console.log("Received ID:", id);
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ error: "Invalid order ID format" });
-  }
 
   try {
-    const order = await Order.findById(id);
+    let order;
+
+    // ✅ Case 1: If valid Mongo ObjectId → search by _id
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      order = await Order.findById(id);
+    }
+
+    // ✅ Case 2: If not found OR not ObjectId → search by orderId
+    if (!order) {
+      order = await Order.findOne({ orderId: id });
+    }
+
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
-    res.status(200).json(order);
+
+    return res.status(200).json(order);
+
   } catch (err) {
     console.error("Error fetching order:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
+
 
 const updatedStatusOrders = async (req, res) => {
   try {
@@ -1101,8 +1155,9 @@ const getpickupAddress = async (req, res) => {
     // ✅ Proper fallback handling (covers undefined, null, empty, and string "undefined")
     const userId =
       req.query.userId &&
-      req.query.userId !== "undefined" &&
-      req.query.userId.trim() !== ""
+        req.query.userId !== "undefined" &&
+        req.query.userId !== "null" &&
+        req.query.userId.trim() !== ""
         ? req.query.userId.trim()
         : req.user?._id?.toString();
 
@@ -1146,6 +1201,92 @@ const getreceiverAddress = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+const searchReceiver = async (req, res) => {
+  try {
+    const { query, userId: id } = req.query;
+
+    let userId =
+      id && id !== "undefined" && id.trim() !== ""
+        ? id
+        : req.user?._id || req.employee?._id;
+
+    // console.log("Search Receiver Request:", { query, id, userId });
+
+    if (!query || query.length < 2) {
+      return res.status(200).json({ success: true, receivers: [] });
+    }
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: "User ID required" });
+    }
+
+    // Validate ObjectId
+    let userObjectId;
+    try {
+      userObjectId = new mongoose.Types.ObjectId(userId);
+    } catch (e) {
+      return res.status(400).json({ success: false, message: "Invalid User ID format" });
+    }
+
+    // ✅ Fetch User to check admin status
+    const userData = await user.findById(userObjectId).select("isAdmin adminTab");
+
+    if (!userData) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const isAdmin =
+      userData?.isAdmin === true && userData?.adminTab === true;
+
+    // ✅ Build Match Condition Dynamically
+    const matchStage = isAdmin
+      ? {} // Admin → no user filter
+      : { userId: userObjectId }; // Normal user → filter by userId
+
+    const receivers = await Order.aggregate([
+      { $match: matchStage },
+
+      {
+        $match: {
+          $or: [
+            { "receiverAddress.contactName": { $regex: query, $options: "i" } },
+            { "receiverAddress.email": { $regex: query, $options: "i" } },
+            { "receiverAddress.phoneNumber": { $regex: query, $options: "i" } },
+          ],
+        },
+      },
+
+      {
+        $group: {
+          _id: {
+            contactName: "$receiverAddress.contactName",
+            email: "$receiverAddress.email",
+            phoneNumber: "$receiverAddress.phoneNumber",
+          },
+        },
+      },
+
+      {
+        $project: {
+          _id: 0,
+          contactName: "$_id.contactName",
+          email: "$_id.email",
+          phoneNumber: "$_id.phoneNumber",
+        },
+      },
+
+      { $limit: 10 },
+    ]);
+
+    res.status(200).json({ success: true, receivers });
+
+  } catch (error) {
+    console.error("Error searching receiver:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
 
 const ShipeNowOrder = async (req, res) => {
   try {
@@ -1652,23 +1793,58 @@ const passbook = async (req, res) => {
       // 🔥 Slice only required page BEFORE unwind
       ...(finalLimit
         ? [
-            {
-              $set: {
-                "wallet.transactions": {
-                  $slice: [
-                    "$wallet.transactions",
-                    skip,
-                    finalLimit,
-                  ],
-                },
+          {
+            $set: {
+              "wallet.transactions": {
+                $slice: [
+                  "$wallet.transactions",
+                  skip,
+                  finalLimit,
+                ],
               },
             },
-          ]
+          },
+        ]
         : []),
 
       // 🔥 Now unwind only sliced results
       { $unwind: "$wallet.transactions" },
-
+      {
+        $lookup: {
+          from: "newOrders",
+          let: { txnAwb: "$wallet.transactions.awb_number" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $ne: ["$$txnAwb", null] },
+                    {
+                      $eq: [
+                        { $toString: "$awb_number" }, // change if field is awbNumber
+                        { $toString: "$$txnAwb" },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              $project: {
+                courierServiceName: 1,
+                _id: 0,
+              },
+            },
+          ],
+          as: "orderDetails",
+        },
+      },
+      {
+        $unwind: {
+          path: "$orderDetails",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
       {
         $project: {
           _id: 0,
@@ -1680,6 +1856,7 @@ const passbook = async (req, res) => {
           awb_number: "$wallet.transactions.awb_number",
           orderId: "$wallet.transactions.channelOrderId",
           description: "$wallet.transactions.description",
+          courierServiceName: "$orderDetails.courierServiceName",
         },
       },
     ];
@@ -1926,7 +2103,7 @@ const bulkCancelOrder = async (req, res) => {
         // ✅ Determine provider
         const provider =
           currentOrder.partner === "ZipyPost" &&
-          currentOrder.provider === "Bluedart"
+            currentOrder.provider === "Bluedart"
             ? "ZipyPost"
             : currentOrder.provider;
 
@@ -2079,7 +2256,7 @@ const checkBulkPickup = async (req, res) => {
 
     // Fetch orders with their pickupAddress
     const orders = await Order.find({ _id: { $in: orderIds } }).select(
-      "pickupAddress",
+      "pickupAddress userId",
     );
 
     if (orders.length === 0) {
@@ -2178,6 +2355,76 @@ const checkCourier = async (req, res) => {
   }
 };
 
+// Master Search Controller - Search across multiple fields
+const masterSearch = async (req, res) => {
+  try {
+    const { query } = req.query;
+
+    const userId = req.user?._id || req.employee?._id;
+
+    if (!query || query.trim().length < 2) {
+      return res.json({ orders: [] });
+    }
+
+    // ✅ Fetch user properly
+    const userData = await user.findById(userId).select("isAdmin adminTab");
+
+    const isAdmin =
+      userData?.isAdmin === true && userData?.adminTab === true;
+
+    const searchTerm = query.trim();
+
+    const searchConditions = [];
+
+    // If numeric → match orderId
+    if (!isNaN(searchTerm)) {
+      searchConditions.push({ orderId: parseInt(searchTerm) });
+    }
+
+    // Text search
+    searchConditions.push(
+      { awb_number: { $regex: searchTerm, $options: "i" } },
+      { "pickupAddress.contactName": { $regex: searchTerm, $options: "i" } },
+      { "pickupAddress.email": { $regex: searchTerm, $options: "i" } },
+      { "pickupAddress.phoneNumber": { $regex: searchTerm, $options: "i" } },
+      { "receiverAddress.contactName": { $regex: searchTerm, $options: "i" } },
+      { "receiverAddress.email": { $regex: searchTerm, $options: "i" } },
+      { "receiverAddress.phoneNumber": { $regex: searchTerm, $options: "i" } },
+      { courierServiceName: { $regex: searchTerm, $options: "i" } },
+      { provider: { $regex: searchTerm, $options: "i" } }
+    );
+
+    // ✅ Build filter dynamically
+    let filter;
+
+    if (isAdmin) {
+      // Admin → no userId restriction
+      filter = { $or: searchConditions };
+    } else {
+      // Normal user → restrict by userId
+      filter = {
+        $and: [
+          { userId },
+          { $or: searchConditions }
+        ]
+      };
+    }
+
+    const orders = await Order.find(filter)
+      .select("orderId awb_number status courierServiceName provider paymentDetails createdAt")
+      .sort({ updatedAt: -1 })
+      .limit(10)
+      .lean();
+
+    res.json({ orders });
+
+  } catch (error) {
+    console.error("Master search error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+
 module.exports = {
   newOrder,
   getOrders,
@@ -2187,6 +2434,7 @@ module.exports = {
   getOrdersById,
   getpickupAddress,
   getreceiverAddress,
+  searchReceiver,
   newPickupAddress,
   newReciveAddress,
   ShipeNowOrder,
@@ -2195,6 +2443,7 @@ module.exports = {
   cancelOrdersAtBooked,
   // tracking,
   updateOrder,
+  updateProductDetails,
   passbook,
   getUser,
   updatePackageDetails,
@@ -2208,4 +2457,5 @@ module.exports = {
   checkBulkPickup,
   checkBulkUser,
   checkCourier,
+  masterSearch,
 };

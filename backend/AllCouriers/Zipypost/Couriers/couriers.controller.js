@@ -112,6 +112,7 @@ const createZipypostOrder = async (req, res) => {
       courierServiceName,
       courier,
       estimatedDeliveryDate,
+      priceBreakup
     } = req.body;
 
     // ✅ Fetch order first
@@ -357,6 +358,7 @@ const createZipypostOrder = async (req, res) => {
     currentOrder.courierServiceName = courierServiceName;
     currentOrder.zone = zone.zone;
     currentOrder.estimatedDeliveryDate = estimatedDeliveryDate || "";
+    currentOrder.priceBreakup = priceBreakup;
     currentOrder.tracking.push({
       status: "Booked",
       StatusLocation: currentOrder.pickupAddress.city,

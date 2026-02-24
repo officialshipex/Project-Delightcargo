@@ -31,6 +31,7 @@ const createOrder = async (req, res) => {
       courierServiceName,
       courier,
       estimatedDeliveryDate,
+      priceBreakup
     } = req.body;
 
     if (!courier) {
@@ -243,6 +244,7 @@ const createOrder = async (req, res) => {
           shipmentCreatedAt: new Date(),
           zone: zone.zone,
           estimatedDeliveryDate: estimatedDeliveryDate || "",
+          priceBreakup
         },
         $push: {
           tracking: {

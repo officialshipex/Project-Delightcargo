@@ -17,7 +17,8 @@ const createShipmentFunctionShreeMaruti = async (
   orderId,
   wh,
   walletId,
-  finalCharges
+  finalCharges,
+  priceBreakup
 ) => {
   const API_URL = `${BASE_URL}/fulfillment/public/seller/order/ecomm/push-order`;
 
@@ -218,6 +219,7 @@ const createShipmentFunctionShreeMaruti = async (
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.zone = zone.zone;
       currentOrder.estimatedDeliveryDate = estimateDate;
+      currentOrder.priceBreakup = priceBreakup;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress?.city || "N/A",

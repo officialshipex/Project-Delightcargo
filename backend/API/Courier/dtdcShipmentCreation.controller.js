@@ -28,6 +28,7 @@ const createDTDCShipment = async ({
   finalCharges,
   courierServiceName,
   courier,
+  priceBreakup
 }) => {
   const session = await mongoose.startSession();
 
@@ -234,6 +235,7 @@ const createDTDCShipment = async ({
           shipmentCreatedAt: new Date(),
           zone: zone.zone,
           estimatedDeliveryDate: estimateDate || "",
+          priceBreakup
         },
         $push: {
           tracking: {

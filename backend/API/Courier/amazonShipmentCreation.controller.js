@@ -30,6 +30,7 @@ const createAmazonShipment = async ({
   provider,
   finalCharges,
   courierServiceName,
+  priceBreakup
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -177,6 +178,7 @@ const createAmazonShipment = async ({
     currentOrder.label = labelUrl;
     currentOrder.zone = zone.zone;
     currentOrder.estimatedDeliveryDate = estimateDate;
+    currentOrder.priceBreakup = priceBreakup;
     currentOrder.tracking.push({
       status: "Booked",
       StatusLocation: currentOrder.pickupAddress?.city || "N/A",

@@ -24,6 +24,7 @@ const createZipypostShipment = async ({
   provider,
   finalCharges,
   courierServiceName,
+  priceBreakup
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -270,6 +271,7 @@ const createZipypostShipment = async ({
     currentOrder.totalFreightCharges = finalCharges || 0;
     currentOrder.courierServiceName = courierServiceName;
     currentOrder.zone = zone.zone;
+    currentOrder.priceBreakup = priceBreakup;
 
     // 🔹 Take estimatedDeliveryDate from DB
     currentOrder.estimatedDeliveryDate = estimateDate || "";

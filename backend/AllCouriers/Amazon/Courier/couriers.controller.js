@@ -26,6 +26,7 @@ const createOneClickShipment = async (req, res) => {
       finalCharges,
       courierServiceName,
       estimatedDeliveryDate,
+      priceBreakup
     } = req.body;
 
     // Step 1️⃣ Fetch order and lock it
@@ -186,6 +187,7 @@ const createOneClickShipment = async (req, res) => {
       label: labelUrl,
       zone: zone.zone,
       estimatedDeliveryDate,
+      priceBreakup,
       tracking: [
         ...currentOrder.tracking,
         {

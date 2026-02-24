@@ -31,7 +31,7 @@ const DelhiveryController = require("./AllCouriersRoutes/delhivery.router");
 const DtdcController = require("./AllCouriersRoutes/dtdc.router");
 const AmazonRouter = require("./AllCouriersRoutes/amazon.router");
 const Ekart = require("./AllCouriersRoutes/ekart.router");
-const Vamaship=require("./AllCouriersRoutes/vamaship.router")
+const Vamaship = require("./AllCouriersRoutes/vamaship.router")
 const LabelRouter = require("./label/label.router");
 // const couriersB2CRoutes = require("./routes/couriersB2C.router");
 // const courierServicesRoutes=require('./routes/courierServiceB2C.router');
@@ -51,25 +51,25 @@ const channel = require("./Channels/allChannel.routes");
 const staffRoleRoutes = require("./routes/rolesRouter");
 const trackSingleOrder = require("./Orders/tracking.controller");
 const LabelSettings = require("./label/label.router");
-const statusMap=require("./statusMap/StatusMap.router")
-const EDDMap=require("./routes/EDDMap.router")
-const ZipyPostRouter=require("./AllCouriersRoutes/zipypost.router")
-const CourierRouter=require("./routes/courier.router")
-const referralRoute=require("./Referral/referal.router")
-const Notification=require("./notification/notification.router")
-const webhook=require("./webhook/webhook.router")
-const Invoice=require("./Invoice/invoice.router")
-const B2B=require("./B2B/routes");
-router.use("/b2b",B2B);
+const statusMap = require("./statusMap/StatusMap.router")
+const EDDMap = require("./routes/EDDMap.router")
+const ZipyPostRouter = require("./AllCouriersRoutes/zipypost.router")
+const CourierRouter = require("./routes/courier.router")
+const referralRoute = require("./Referral/referal.router")
+const Notification = require("./notification/notification.router")
+const webhook = require("./webhook/webhook.router")
+const Invoice = require("./Invoice/invoice.router")
+const B2B = require("./B2B/routes");
+router.use("/b2b", B2B);
 
-router.use("/notification",Notification);
+router.use("/notification", Notification);
 
-router.use("/referral",referralRoute);
-router.use("/courier",CourierRouter);
-router.use("/statusMap",statusMap);
-router.use("/EDD",EDDMap)
-router.use("/webhook",webhook)
-router.use("/invoice",Invoice);
+router.use("/referral", referralRoute);
+router.use("/courier", CourierRouter);
+router.use("/statusMap", statusMap);
+router.use("/EDD", EDDMap)
+router.use("/webhook", webhook)
+router.use("/invoice", Invoice);
 
 
 router.use("/label", LabelSettings);
@@ -137,9 +137,9 @@ router.use("/Smartship", SmartShipController);
 router.use("/Dtdc", DtdcController);
 router.use("/Delhivery", DelhiveryController);
 router.use("/AmazonShipping", AmazonRouter);
-router.use("/Ekart",Ekart)
-router.use("/Vamaship",Vamaship)
-router.use("/ZipyPost",ZipyPostRouter)
+router.use("/Ekart", Ekart)
+router.use("/Vamaship", Vamaship)
+router.use("/ZipyPost", ZipyPostRouter)
 
 router.use("/label", LabelRouter);
 router.use("/user", userRouter);

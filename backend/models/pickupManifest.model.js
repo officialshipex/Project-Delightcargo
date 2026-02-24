@@ -46,6 +46,16 @@ const pickupManifestSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+
+    orderType: {
+      type: String,
+      enum: ["B2C", "B2B"],
+      default: "B2C",
+    },
+    pickupAddress: {
+      type: Object,
+      default: null,
+    },
   },
   { timestamps: true }
 );

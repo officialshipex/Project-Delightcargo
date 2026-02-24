@@ -74,7 +74,7 @@ const getAllPassbookTransactions = async (req, res) => {
       transactionFilterConditions.push({ $eq: ["$$t.category", category] });
     }
 
-    if(description){
+    if (description) {
       transactionFilterConditions.push({ $eq: ["$$t.description", description] });
     }
 
@@ -157,7 +157,8 @@ const getAllPassbookTransactions = async (req, res) => {
                   userId: "$userId",
                   phoneNumber: "$phoneNumber",
                 },
-                id: "$transactions._id",
+                _id: { $toString: "$transactions._id" },
+                id: { $toString: "$transactions._id" },
                 category: "$transactions.category",
                 amount: "$transactions.amount",
                 balanceAfterTransaction:

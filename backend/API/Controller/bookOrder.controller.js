@@ -144,6 +144,13 @@ const bookOrder = async (req, res) => {
       });
     }
 
+    const priceBreakup = {
+      freight: matchedChargeObj?.forward?.charges,
+      cod: matchedChargeObj?.cod,
+      gst: matchedChargeObj?.forward?.gst,
+      total: matchedChargeObj?.forward?.finalCharges,
+    }
+
     // ✅ Check wallet balance
     const walletHoldAmount = wallet.holdAmount || 0;
     const effectiveBalance = wallet.balance - walletHoldAmount;
@@ -185,6 +192,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
+          priceBreakup
         });
         break;
       case "Delhivery":
@@ -193,6 +201,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
+          priceBreakup
         });
         break;
       case "Dtdc":
@@ -202,6 +211,7 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           courier: courierService?.courier,
+          priceBreakup
         });
         break;
       case "Smartship":
@@ -210,6 +220,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
+          priceBreakup
         });
         break;
       case "Shree Maruti":
@@ -218,6 +229,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
+          priceBreakup
         });
         break;
       case "ZipyPost":
@@ -226,6 +238,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
+          priceBreakup
         });
         break;
       case "Ekart":
@@ -234,6 +247,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
+          priceBreakup
         });
         break;
 

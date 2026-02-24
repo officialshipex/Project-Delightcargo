@@ -40,10 +40,8 @@ const updatePickup = async (req, res) => {
   try {
     // console.log(req.body)
     const { formData, setSelectedData } = req.body;
-    console.log(formData, setSelectedData);
-
     if (!setSelectedData || !formData) {
-      res
+      return res
         .status(400)
         .json({ success: false, message: "id and pickup address not found" });
     }
@@ -54,7 +52,7 @@ const updatePickup = async (req, res) => {
         });
       })
     );
-    res.status(200).json({ success: true, message: "Internal server error" });
+    res.status(200).json({ success: true, message: "Pickup address updated successfully" });
   } catch (error) {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
@@ -77,6 +75,7 @@ const callProviderWithRetry = async (
   wh,
   walletId,
   charges,
+  priceBreakup,
   maxRetries = 1,
   retryDelay = 1000
 ) => {
@@ -92,7 +91,8 @@ const callProviderWithRetry = async (
             order._id,
             wh,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
           break;
         case "Amazon Shipping":
@@ -101,7 +101,8 @@ const callProviderWithRetry = async (
             order._id,
             wh,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
           // console.log("result",result)
           break;
@@ -111,7 +112,8 @@ const callProviderWithRetry = async (
             order._id,
             wh,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
           break;
         case "EcomExpress":
@@ -120,7 +122,8 @@ const callProviderWithRetry = async (
             order._id,
             wh,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
           break;
         case "Dtdc":
@@ -129,7 +132,8 @@ const callProviderWithRetry = async (
             order._id,
             wh,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
           break;
         case "Smartship":
@@ -138,7 +142,8 @@ const callProviderWithRetry = async (
             order._id,
             wh,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
           break;
         case "Shree Maruti":
@@ -147,7 +152,8 @@ const callProviderWithRetry = async (
             order._id,
             wh,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
           break;
         case "ZipyPost":
@@ -156,16 +162,18 @@ const callProviderWithRetry = async (
             order._id,
             wh,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
           break;
-          case "Ekart":
+        case "Ekart":
           result = await createOrderEkart(
             serviceDetails,
             order._id,
             wh,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
           break;
         default:
@@ -427,6 +435,7 @@ const createBulkOrder = async (req, res) => {
           };
 
           const rates = await calculateRateForServiceBulk(details);
+          console.log("rates",rates)
           const charges = parseFloat(rates?.[0]?.forward?.finalCharges || 0);
 
           if (!charges || isNaN(charges) || charges <= 0) {
@@ -438,13 +447,20 @@ const createBulkOrder = async (req, res) => {
             provider: courier.courierProviderName,
             name: courier.courierServiceName,
           };
+          const priceBreakup={
+            freight:rates?.[0]?.forward?.charges,
+            cod:rates?.[0]?.cod,
+            gst:rates?.[0]?.forward?.gst,
+            total:rates?.[0]?.forward?.finalCharges,
+          }
 
           const result = await callProviderWithRetry(
             courierDetails,
             order,
             order.pickupAddress,
             walletId,
-            charges
+            charges,
+            priceBreakup
           );
 
           if (result) {

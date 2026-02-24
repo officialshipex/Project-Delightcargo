@@ -722,8 +722,8 @@ const codRemittanceRecharge = async (req, res) => {
     // Calculate actual pending COD available from remittanceData
     const pendingCodAvailable = Array.isArray(remittanceRecord.remittanceData)
       ? remittanceRecord.remittanceData
-          .filter((r) => r.status === "Pending")
-          .reduce((sum, r) => sum + Number(r.codAvailable || 0), 0)
+        .filter((r) => r.status === "Pending")
+        .reduce((sum, r) => sum + Number(r.codAvailable || 0), 0)
       : 0;
 
     // Determine the lower value between RemittanceInitiated and pendingCodAvailable
@@ -1262,11 +1262,10 @@ const courierCodRemittance = async (req, res) => {
     const skip = limit ? (page - 1) * limit : 0;
 
     const searchFilter = req.query.searchFilter?.trim().toLowerCase() || "";
-    const orderIdAwbNumberFilter =
-      req.query.orderIdAwbNumberFilter?.trim() || "";
+    const orderID = req.query.orderID?.trim() || "";
+    const awbNumber = req.query.awbNumber?.trim() || "";
     const statusFilter = req.query.statusFilter?.trim() || "";
-    const courierProvider =
-      req.query.courierProvider?.trim().toLowerCase() || "";
+    const courierProvider = req.query.courierProvider?.trim() || "";
 
     let matchStage = {};
 
@@ -1337,25 +1336,27 @@ const courierCodRemittance = async (req, res) => {
       ];
     }
 
-    // Order ID / AWB filter
-    if (orderIdAwbNumberFilter) {
-      const filterValues = orderIdAwbNumberFilter
-        .split(",")
-        .map((v) => v.trim());
-      matchStage.$or = (matchStage.$or || []).concat([
-        { orderID: { $in: filterValues } },
-        { AwbNumber: { $in: filterValues } },
-      ]);
+    // Order ID filter
+    if (orderID) {
+      const ids = orderID.split(",").map(v => v.trim());
+      matchStage.orderID = { $in: ids };
+    }
+
+    // AWB filter
+    if (awbNumber) {
+      const awbs = awbNumber.split(",").map(v => v.trim());
+      matchStage.AwbNumber = { $in: awbs };
     }
 
     // Status filter
     if (statusFilter) {
-      matchStage.status = { $regex: statusFilter, $options: "i" };
+      matchStage.status = { $regex: new RegExp(`^${statusFilter}$`, "i") };
     }
 
-    // Courier provider filter
+    // Courier provider filter (Multi-select)
     if (courierProvider) {
-      matchStage.courierProvider = { $regex: courierProvider, $options: "i" };
+      const couriers = courierProvider.split(",").map(c => c.trim());
+      matchStage.courierServiceName = { $in: couriers.map(c => new RegExp(`^${c}$`, "i")) };
     }
 
     // Fetch and paginate in MongoDB
@@ -1524,24 +1525,24 @@ const getAdminCodRemitanceData = async (req, res) => {
       { $unwind: "$user" },
       ...(userNameFilter
         ? [
-            {
-              $match: {
-                $or: [
-                  ...(mongoose.Types.ObjectId.isValid(userNameFilter)
-                    ? [
-                        {
-                          "user._id": new mongoose.Types.ObjectId(
-                            userNameFilter
-                          ),
-                        },
-                      ]
-                    : []),
-                  { "user.email": new RegExp(userNameFilter, "i") },
-                  { "user.fullname": new RegExp(userNameFilter, "i") },
-                ],
-              },
+          {
+            $match: {
+              $or: [
+                ...(mongoose.Types.ObjectId.isValid(userNameFilter)
+                  ? [
+                    {
+                      "user._id": new mongoose.Types.ObjectId(
+                        userNameFilter
+                      ),
+                    },
+                  ]
+                  : []),
+                { "user.email": new RegExp(userNameFilter, "i") },
+                { "user.fullname": new RegExp(userNameFilter, "i") },
+              ],
             },
-          ]
+          },
+        ]
         : []),
     ];
 
@@ -1861,12 +1862,18 @@ const CodRemittanceOrder = async (req, res) => {
 
     const {
       searchFilter = "",
-      orderIdAwbNumberFilter = "",
+      orderID = "",
+      awbNumber = "",
       statusFilter = "",
       courierProvider = "",
       startDate,
       endDate,
+      userId,
+      selectedUserId,
+      userSearch,
     } = req.query;
+
+    const targetUserId = userId || selectedUserId || userSearch;
 
     let allocatedUserIds = null;
     let allowedOrderIds = null;
@@ -1907,8 +1914,23 @@ const CodRemittanceOrder = async (req, res) => {
     if (statusFilter) {
       matchStage.status = statusFilter;
     }
-    if (courierProvider) {
-      matchStage.courierProvider = new RegExp(`^${courierProvider}$`, "i");
+
+    if (targetUserId) {
+      try {
+        const userDoc = await User.findById(targetUserId);
+        if (userDoc) {
+          matchStage.$or = [
+            { userId: new mongoose.Types.ObjectId(targetUserId) },
+            { Email: { $regex: new RegExp(`^${userDoc.email}$`, "i") } }
+          ];
+        } else if (mongoose.Types.ObjectId.isValid(targetUserId)) {
+          matchStage.userId = new mongoose.Types.ObjectId(targetUserId);
+        }
+      } catch (err) {
+        if (mongoose.Types.ObjectId.isValid(targetUserId)) {
+          matchStage.userId = new mongoose.Types.ObjectId(targetUserId);
+        }
+      }
     }
     if (startDate && endDate) {
       matchStage.createdAt = {
@@ -1916,14 +1938,20 @@ const CodRemittanceOrder = async (req, res) => {
         $lte: new Date(endDate),
       };
     }
-    if (orderIdAwbNumberFilter) {
-      const filterValues = orderIdAwbNumberFilter
-        .split(",")
-        .map((val) => val.trim());
-      matchStage.$or = [
-        { orderID: { $in: filterValues } },
-        { AWB_Number: { $in: filterValues } },
-      ];
+
+    if (orderID) {
+      const filterValues = orderID.split(",").map((val) => val.trim());
+      matchStage.orderID = { $in: filterValues };
+    }
+
+    if (awbNumber) {
+      const filterValues = awbNumber.split(",").map((val) => val.trim());
+      matchStage.AWB_Number = { $in: filterValues };
+    }
+
+    if (courierProvider) {
+      const couriers = courierProvider.split(",").map(c => c.trim());
+      matchStage.courierProvider = { $in: couriers.map(c => new RegExp(`^${c}$`, "i")) };
     }
 
     // MongoDB aggregation
@@ -2048,16 +2076,16 @@ const sellerremittanceTransactionData = async (req, res) => {
 
     const filteredOrders = orderIds.length
       ? await Order.find(
-          { _id: { $in: orderIds } },
-          {
-            orderId: 1,
-            awb_number: 1,
-            provider: 1,
-            courierServiceName: 1,
-            tracking: 1,
-            paymentDetails: 1,
-          }
-        ).lean()
+        { _id: { $in: orderIds } },
+        {
+          orderId: 1,
+          awb_number: 1,
+          provider: 1,
+          courierServiceName: 1,
+          tracking: 1,
+          paymentDetails: 1,
+        }
+      ).lean()
       : [];
 
     const transactions = {
@@ -2279,11 +2307,11 @@ const exportOrderInRemittance = async (req, res) => {
         paymentAmount: order.paymentDetails?.amount,
         deliveryDate: deliveryEvent?.StatusDateTime
           ? new Date(deliveryEvent.StatusDateTime).toLocaleDateString("en-US", {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          })
           : null,
       };
     });
@@ -2365,17 +2393,22 @@ const validateCODTransfer = async (req, res) => {
 const getCODTransferData = async (req, res) => {
   try {
     const { id } = req.params;
-    const { selectedRemittanceIds } = req.query;
+    let { selectedRemittanceIds } = req.query;
 
     if (!id) {
       return res.status(400).json({ message: "User ID is required." });
     }
 
-    // selectedRemittanceIds MUST be an array
-    if (
-      !Array.isArray(selectedRemittanceIds) ||
-      selectedRemittanceIds.length === 0
-    ) {
+    // Ensure selectedRemittanceIds is an array
+    if (selectedRemittanceIds) {
+      if (!Array.isArray(selectedRemittanceIds)) {
+        selectedRemittanceIds = [selectedRemittanceIds];
+      }
+    } else {
+      return res.status(400).json({ message: "selectedRemittanceIds are required." });
+    }
+
+    if (selectedRemittanceIds.length === 0) {
       return res
         .status(400)
         .json({ message: "selectedRemittanceIds array is required." });

@@ -2,7 +2,7 @@ const Order = require("../../../models/newOrder.model");
 const User = require("../../../models/User.model");
 const mongoose = require("mongoose");
 const AllocatedRole = require("../../../models/allocateRoleSchema");
-const {createDelhiveryPickupRequest}=require("../Couriers/AllCouriers/Delhivery/Courier/couriers.controller")
+const { createDelhiveryPickupRequest } = require("../Couriers/AllCouriers/Delhivery/Courier/couriers.controller")
 
 const adminB2BOrders = async (req, res) => {
   try {
@@ -46,9 +46,14 @@ const adminB2BOrders = async (req, res) => {
     }
 
     if (paymentType) filter["paymentDetails.method"] = paymentType;
-    if (courier) filter.courierServiceName = courier;
-    if (pickupContactName)
-      filter["pickupAddress.contactName"] = pickupContactName;
+    if (courier) {
+      const couriers = courier.split(",").map((c) => c.trim());
+      filter.courierServiceName = { $in: couriers };
+    }
+    if (pickupContactName) {
+      const names = pickupContactName.split(",").map((n) => n.trim());
+      filter["pickupAddress.contactName"] = { $in: names };
+    }
 
     let allocatedUserIds = [];
 
@@ -66,7 +71,7 @@ const adminB2BOrders = async (req, res) => {
           totalPages: 0,
           totalCount: 0,
           currentPage: parseInt(page),
-          couriers: [],
+          courierServices: [],
           pickupLocations: [],
         });
       }
@@ -84,7 +89,7 @@ const adminB2BOrders = async (req, res) => {
           totalPages: 0,
           totalCount: 0,
           currentPage: parseInt(page),
-          couriers: [],
+          courierServices: [],
           pickupLocations: [],
         });
       }
@@ -117,7 +122,7 @@ const adminB2BOrders = async (req, res) => {
           totalPages: 0,
           totalCount: 0,
           currentPage: parseInt(page),
-          couriers: [],
+          courierServices: [],
           pickupLocations: [],
         });
       }
@@ -132,7 +137,7 @@ const adminB2BOrders = async (req, res) => {
           totalPages: 0,
           totalCount: 0,
           currentPage: parseInt(page),
-          couriers: [],
+          courierServices: [],
           pickupLocations: [],
         });
       }
@@ -224,7 +229,7 @@ const adminB2BOrders = async (req, res) => {
       totalPages,
       totalCount,
       currentPage: parseInt(page),
-      couriers,
+      courierServices: couriers,
       pickupLocations,
     });
   } catch (error) {
@@ -309,7 +314,8 @@ const userB2BOrders = async (req, res) => {
       andConditions.push({ trackingId: { $regex: trackingId, $options: "i" } });
     }
     if (req.query.courierServiceName) {
-      andConditions.push({ courierServiceName: req.query.courierServiceName });
+      const couriers = req.query.courierServiceName.split(",").map((c) => c.trim());
+      andConditions.push({ courierServiceName: { $in: couriers } });
     }
 
     if (paymentType) {
@@ -324,8 +330,9 @@ const userB2BOrders = async (req, res) => {
     }
 
     if (req.query.pickupContactName) {
+      const names = req.query.pickupContactName.split(",").map((n) => n.trim());
       andConditions.push({
-        "pickupAddress.contactName": req.query.pickupContactName,
+        "pickupAddress.contactName": { $in: names },
       });
     }
 
@@ -412,7 +419,7 @@ const userB2BOrders = async (req, res) => {
 const generatePickupController = async (req, res) => {
   try {
     const { orderIds } = req.body;
-    console.log("order pickup",orderIds)
+    console.log("order pickup", orderIds)
 
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
       return res.status(400).json({ message: "orderIds array is required" });
@@ -475,4 +482,4 @@ const generatePickupController = async (req, res) => {
 
 
 
-module.exports = { adminB2BOrders, userB2BOrders,generatePickupController };
+module.exports = { adminB2BOrders, userB2BOrders, generatePickupController };

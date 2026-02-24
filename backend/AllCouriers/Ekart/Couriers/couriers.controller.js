@@ -64,6 +64,7 @@ const orderCreationEkart = async (req, res) => {
       courierServiceName,
       provider,
       estimatedDeliveryDate,
+      priceBreakup
     } = req.body;
     // console.log("Received orderCreationEkart request:", req.body);
 
@@ -367,6 +368,7 @@ const orderCreationEkart = async (req, res) => {
           shipmentCreatedAt: new Date(),
           zone: zone.zone,
           estimatedDeliveryDate: estimatedDeliveryDate || null,
+          priceBreakup
         },
         $push: {
           tracking: {

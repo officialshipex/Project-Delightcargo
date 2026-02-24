@@ -23,23 +23,31 @@ const {
   getShiprocketCourierServices
 } = require("./controller/Couriers/couriers.controller");
 const shiprocketRouter = require("./controller/Couriers/AllCourierRoutes/shiprocket.router");
-const delhiveryRouter=require("./controller/Couriers/AllCourierRoutes/delhivery.router")
+const delhiveryRouter = require("./controller/Couriers/AllCourierRoutes/delhivery.router")
 const {
   ShipNowB2BOrder,
 } = require("./controller/Orders/ShipNowB2BOrder.controller");
 
-const {getB2BPackages,updateB2BPackages} = require("./controller/Orders/b2bPackage.controller");
+const {
+  getPickupManifests,
+  getManifestOrders,
+  schedulePickup
+} = require("./controller/Orders/pickupManifest.controller");
 
-const {CalculateB2BRateWithoutOrder}=require("./controller/Orders/rateCalculator.controller");
+const { getB2BPackages, updateB2BPackages } = require("./controller/Orders/b2bPackage.controller");
 
-const {generateLabel} = require("./controller/labelInvoiceManifest/label.controller");
+const { CalculateB2BRateWithoutOrder } = require("./controller/Orders/rateCalculator.controller");
 
-const {downloadSampleExcelB2B,bulkOrderB2B} = require("./controller/Orders/addBulkOrder.controller");
+const { generateLabel } = require("./controller/labelInvoiceManifest/label.controller");
+
+const { downloadSampleExcelB2B, bulkOrderB2B } = require("./controller/Orders/addBulkOrder.controller");
 
 
-router.get("/getb2badminorder", adminB2BOrders);
+router.get("/getb2badminorder", isAuthorized, adminB2BOrders);
+router.get("/pickupManifests", isAuthorized, getPickupManifests);
+router.get("/pickupManifest/:manifestId", isAuthorized, getManifestOrders);
 router.get("/getb2buserorder", isAuthorized, userB2BOrders);
-router.post("/generatePickup",isAuthorized,generatePickupController)
+router.post("/generatePickup", isAuthorized, generatePickupController)
 router.get("/zonematrix/getAll", isAuthorized, zoneMatrix.getAll);
 router.post("/zonematrix/addLocation", isAuthorized, zoneMatrix.addLocation);
 router.put(
@@ -85,7 +93,7 @@ router.get("/couriers/getShiprocketCourierServices", getShiprocketCourierService
 
 
 router.use("/shiprocket", shiprocketRouter);
-router.use("/delhivery",delhiveryRouter)
+router.use("/delhivery", delhiveryRouter)
 
 router.get("/courierServices/getAllCourierServices", getAllCourierServices);
 router.post("/courierServices/createCourier", createCourier);
@@ -113,6 +121,6 @@ router.post("/rateCalculator/calculateB2BRateWithoutOrder", isAuthorized, Calcul
 
 const upload = multer({ dest: 'uploads/' });
 router.get("/bulkOrderUpload/download-excel", isAuthorized, downloadSampleExcelB2B);
-router.post("/bulkOrderUpload/upload",upload.single('file'), isAuthorized, bulkOrderB2B);
+router.post("/bulkOrderUpload/upload", upload.single('file'), isAuthorized, bulkOrderB2B);
 
 module.exports = router;

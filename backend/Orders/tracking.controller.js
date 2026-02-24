@@ -1163,7 +1163,7 @@ const trackOrders = async () => {
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
       // provider: "Dtdc",
-      // awb_number: "7D113289194",
+      // awb_number: "77697394622",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);

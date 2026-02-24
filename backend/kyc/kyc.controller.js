@@ -111,7 +111,7 @@ verfication.post("/gstin", async (req, res) => {
     const newGstin = new Gstin({
       user: userId,
       gstin: response.data.GSTIN,
-      nameOfBusiness: response.data.legal_name_of_business,
+      nameOfBusiness: response.data.trade_name_of_business,
       referenceId: response.data.reference_id,
       legalNameOfBusiness: response.data.legal_name_of_business,
       taxPayerType: response.data.taxpayer_type,
@@ -147,6 +147,60 @@ verfication.post("/gstin", async (req, res) => {
     });
   }
 });
+
+
+async function verifyGstin(gstin, businessName = "") {
+  try {
+    if (!gstin) {
+      console.log("GSTIN is required");
+      return;
+    }
+
+    const validateGstin = validateGST(gstin);
+
+    if (!validateGstin) {
+      console.log("Invalid GSTIN");
+      return;
+    }
+
+    const data = JSON.stringify({
+      GSTIN: gstin,
+      businessName: businessName || "",
+    });
+
+    const signature = getSignature();
+
+    const config = {
+      method: "post",
+      maxBodyLength: Infinity,
+      url: `${cashfreeUrl}/gstin`,
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        "x-client-id": process.env.X_CLIENT_ID,
+        "x-client-secret": process.env.X_CLIENT_SECRET,
+        "x-cf-signature": signature,
+        "x-api-version": "2022-10-26",
+      },
+      data: data,
+    };
+
+    const response = await axios.request(config);
+
+    console.log("GSTIN API Response:");
+    console.log(response.data);
+
+    return response.data;
+  } catch (err) {
+    if (err.isAxiosError && err.response) {
+      console.log("API Error:", err.response.data);
+    } else {
+      console.log("Internal Error:", err.message);
+    }
+  }
+}
+
+// verifyGstin("33HPZPK7732E1ZC");
 
 /**
  * verify Pan number
