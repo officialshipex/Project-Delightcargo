@@ -82,18 +82,18 @@ const getAllCodRemittance = async (req, res) => {
       { $unwind: "$user" },
       ...(userSearch
         ? [
-            {
-              $match: {
-                $or: [
-                  ...(mongoose.Types.ObjectId.isValid(userSearch)
-                    ? [{ "user._id": new mongoose.Types.ObjectId(userSearch) }]
-                    : []),
-                  { "user.email": new RegExp(userSearch, "i") },
-                  { "user.fullname": new RegExp(userSearch, "i") },
-                ],
-              },
+          {
+            $match: {
+              $or: [
+                ...(mongoose.Types.ObjectId.isValid(userSearch)
+                  ? [{ "user._id": new mongoose.Types.ObjectId(userSearch) }]
+                  : []),
+                { "user.email": new RegExp(userSearch, "i") },
+                { "user.fullname": new RegExp(userSearch, "i") },
+              ],
             },
-          ]
+          },
+        ]
         : []),
     ];
 
@@ -184,7 +184,7 @@ const getAllCodRemittance = async (req, res) => {
             },
             {
               $project: {
-                _id: 0,
+                _id: "$remittanceData._id",
                 user: {
                   userId: "$user.userId",
                   name: "$user.fullname",

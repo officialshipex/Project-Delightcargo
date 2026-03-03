@@ -147,7 +147,7 @@ const orderSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
-    priceBreakup:{
+    priceBreakup: {
       freight: { type: Number },
       cod: { type: Number },
       gst: { type: Number },
@@ -173,6 +173,7 @@ const orderSchema = new mongoose.Schema(
     walletRefunded: { type: Boolean, default: false },
     manifestJobId: { type: String },
     invoiceDate: { type: Date },
+    pickupDate: { type: Date },
 
     tracking: [
       {

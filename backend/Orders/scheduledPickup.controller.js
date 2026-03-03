@@ -106,6 +106,7 @@ const schedulePickup = async (req, res) => {
 
         // 5️⃣ Update order status
         order.status = "Ready To Ship";
+        order.pickupDate = pickupDateObj;
         await order.save();
         successCount++;
       } catch (err) {

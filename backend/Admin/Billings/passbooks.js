@@ -143,7 +143,8 @@ const getAllPassbookTransactions = async (req, res) => {
                       $expr: { $eq: ["$awb_number", "$$awb"] },
                     },
                   },
-                  { $project: { courierServiceName: 1, provider: 1, _id: 0 } },
+                  { $project: { courierServiceName: 1, provider: 1, priceBreakup: 1, rateBreakup: 1, orderType: 1, _id: 0 } },
+                  { $limit: 1 },
                 ],
                 as: "orderInfo",
               },
@@ -175,6 +176,15 @@ const getAllPassbookTransactions = async (req, res) => {
                 },
                 provider: {
                   $ifNull: [{ $arrayElemAt: ["$orderInfo.provider", 0] }, null],
+                },
+                priceBreakup: {
+                  $ifNull: [{ $arrayElemAt: ["$orderInfo.priceBreakup", 0] }, null],
+                },
+                rateBreakup: {
+                  $ifNull: [{ $arrayElemAt: ["$orderInfo.rateBreakup", 0] }, null],
+                },
+                orderType: {
+                  $ifNull: [{ $arrayElemAt: ["$orderInfo.orderType", 0] }, null],
                 },
               },
             },
@@ -247,6 +257,9 @@ const exportPassbook = async (req, res) => {
               $project: {
                 courierServiceName: 1,
                 provider: 1,
+                priceBreakup: 1,
+                rateBreakup: 1,
+                orderType: 1,
                 _id: 0,
               },
             },
@@ -277,6 +290,9 @@ const exportPassbook = async (req, res) => {
             $arrayElemAt: ["$orderInfo.courierServiceName", 0],
           },
           provider: { $arrayElemAt: ["$orderInfo.provider", 0] },
+          priceBreakup: { $arrayElemAt: ["$orderInfo.priceBreakup", 0] },
+          rateBreakup: { $arrayElemAt: ["$orderInfo.rateBreakup", 0] },
+          orderType: { $arrayElemAt: ["$orderInfo.orderType", 0] },
         },
       },
       { $sort: { date: -1 } },

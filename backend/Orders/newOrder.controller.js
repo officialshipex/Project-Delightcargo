@@ -324,7 +324,7 @@ const getOrders = async (req, res) => {
       courierServiceName
     } = req.query;
     let userId = null;
-    console.log("req", req.query)
+    // console.log("req", req.query)
     if (id && id !== "undefined" && id !== "null") {
       userId = id;
     } else if (req.user?._id) {
@@ -1703,54 +1703,27 @@ const passbook = async (req, res) => {
     }
 
     const currentUser = await user.findById(userId).select("_id Wallet");
-
     if (!currentUser || !currentUser.Wallet) {
       return res.status(404).json({ message: "Wallet not found" });
     }
 
-    const parsedLimit =
-      typeof limit === "string" && limit.toLowerCase() === "all"
-        ? null
-        : Number(limit);
+    const parsedLimit = limit === "all" ? 0 : Number(limit);
+    const skip = (Number(page) - 1) * parsedLimit;
 
-    const finalLimit =
-      parsedLimit === null || isNaN(parsedLimit) ? null : parsedLimit;
-
-    const skip = finalLimit ? (Number(page) - 1) * finalLimit : 0;
-
-    /* ---------------- BUILD FILTER CONDITIONS FOR $filter ---------------- */
-
-    const filterConditions = [];
-
+    // Build filters for transactions
+    const matchFilters = {};
     if (fromDate && toDate) {
-      const start = new Date(new Date(fromDate).setHours(0, 0, 0, 0));
-      const end = new Date(new Date(toDate).setHours(23, 59, 59, 999));
-
-      filterConditions.push({ $gte: ["$$txn.date", start] });
-      filterConditions.push({ $lte: ["$$txn.date", end] });
+      matchFilters["wallet.transactions.date"] = {
+        $gte: new Date(new Date(fromDate).setHours(0, 0, 0, 0)),
+        $lte: new Date(new Date(toDate).setHours(23, 59, 59, 999)),
+      };
     }
+    if (category) matchFilters["wallet.transactions.category"] = category;
+    if (description) matchFilters["wallet.transactions.description"] = description;
+    if (awbNumber) matchFilters["wallet.transactions.awb_number"] = awbNumber;
+    if (orderId) matchFilters["wallet.transactions.channelOrderId"] = orderId;
 
-    if (category) {
-      filterConditions.push({ $eq: ["$$txn.category", category] });
-    }
-
-    if (description) {
-      filterConditions.push({ $eq: ["$$txn.description", description] });
-    }
-
-    if (awbNumber) {
-      filterConditions.push({ $eq: ["$$txn.awb_number", awbNumber] });
-    }
-
-    if (orderId) {
-      filterConditions.push({
-        $eq: ["$$txn.channelOrderId", orderId],
-      });
-    }
-
-    /* ---------------- MAIN PIPELINE ---------------- */
-
-    const dataPipeline = [
+    const pipeline = [
       { $match: { _id: currentUser._id } },
       {
         $lookup: {
@@ -1761,168 +1734,72 @@ const passbook = async (req, res) => {
         },
       },
       { $unwind: "$wallet" },
-
-      // 🔥 Filter transactions inside array
-      {
-        $set: {
-          "wallet.transactions": {
-            $filter: {
-              input: "$wallet.transactions",
-              as: "txn",
-              cond:
-                filterConditions.length > 0
-                  ? { $and: filterConditions }
-                  : { $ne: ["$$txn", null] },
-            },
-          },
-        },
-      },
-
-      // 🔥 Sort inside array (NOT documents)
-      {
-        $set: {
-          "wallet.transactions": {
-            $sortArray: {
-              input: "$wallet.transactions",
-              sortBy: { date: -1 },
-            },
-          },
-        },
-      },
-
-      // 🔥 Slice only required page BEFORE unwind
-      ...(finalLimit
-        ? [
-          {
-            $set: {
-              "wallet.transactions": {
-                $slice: [
-                  "$wallet.transactions",
-                  skip,
-                  finalLimit,
-                ],
-              },
-            },
-          },
-        ]
-        : []),
-
-      // 🔥 Now unwind only sliced results
       { $unwind: "$wallet.transactions" },
+      { $match: matchFilters },
       {
-        $lookup: {
-          from: "newOrders",
-          let: { txnAwb: "$wallet.transactions.awb_number" },
-          pipeline: [
+        $facet: {
+          metadata: [{ $count: "total" }],
+          data: [
+            { $sort: { "wallet.transactions.date": -1 } },
+            ...(parsedLimit > 0 ? [{ $skip: skip }, { $limit: parsedLimit }] : []),
             {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $ne: ["$$txnAwb", null] },
-                    {
-                      $eq: [
-                        { $toString: "$awb_number" }, // change if field is awbNumber
-                        { $toString: "$$txnAwb" },
-                      ],
-                    },
-                  ],
-                },
-              },
+              $lookup: {
+                from: "neworders",
+                let: { txnAwb: "$wallet.transactions.awb_number" },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $ne: ["$$txnAwb", null] },
+                          { $eq: [{ $toString: "$awb_number" }, { $toString: "$$txnAwb" }] }
+                        ]
+                      }
+                    }
+                  },
+                  { $limit: 1 },
+                  { $project: { courierServiceName: 1, priceBreakup: 1, rateBreakup: 1, orderType: 1, _id: 0 } }
+                ],
+                as: "orderInfo"
+              }
             },
             {
               $project: {
-                courierServiceName: 1,
-                _id: 0,
-              },
-            },
-          ],
-          as: "orderDetails",
-        },
-      },
-      {
-        $unwind: {
-          path: "$orderDetails",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          category: "$wallet.transactions.category",
-          amount: "$wallet.transactions.amount",
-          balanceAfterTransaction:
-            "$wallet.transactions.balanceAfterTransaction",
-          date: "$wallet.transactions.date",
-          awb_number: "$wallet.transactions.awb_number",
-          orderId: "$wallet.transactions.channelOrderId",
-          description: "$wallet.transactions.description",
-          courierServiceName: "$orderDetails.courierServiceName",
-        },
-      },
-    ];
-
-    /* ---------------- COUNT PIPELINE ---------------- */
-
-    const countPipeline = [
-      { $match: { _id: currentUser._id } },
-      {
-        $lookup: {
-          from: "wallets",
-          localField: "Wallet",
-          foreignField: "_id",
-          as: "wallet",
-        },
-      },
-      { $unwind: "$wallet" },
-      { $unwind: "$wallet.transactions" },
-    ];
-
-    if (filterConditions.length > 0) {
-      const matchStage = {};
-      if (fromDate && toDate) {
-        const start = new Date(new Date(fromDate).setHours(0, 0, 0, 0));
-        const end = new Date(new Date(toDate).setHours(23, 59, 59, 999));
-        matchStage["wallet.transactions.date"] = { $gte: start, $lte: end };
+                _id: { $toString: "$wallet.transactions._id" },
+                id: { $toString: "$wallet.transactions._id" },
+                category: "$wallet.transactions.category",
+                amount: "$wallet.transactions.amount",
+                balanceAfterTransaction: "$wallet.transactions.balanceAfterTransaction",
+                date: "$wallet.transactions.date",
+                awb_number: "$wallet.transactions.awb_number",
+                orderId: "$wallet.transactions.channelOrderId",
+                description: "$wallet.transactions.description",
+                courierServiceName: { $arrayElemAt: ["$orderInfo.courierServiceName", 0] },
+                priceBreakup: { $arrayElemAt: ["$orderInfo.priceBreakup", 0] },
+                rateBreakup: { $arrayElemAt: ["$orderInfo.rateBreakup", 0] },
+                orderType: { $arrayElemAt: ["$orderInfo.orderType", 0] }
+              }
+            }
+          ]
+        }
       }
-      if (category)
-        matchStage["wallet.transactions.category"] = category;
-      if (description)
-        matchStage["wallet.transactions.description"] = description;
-      if (awbNumber)
-        matchStage["wallet.transactions.awb_number"] = awbNumber;
-      if (orderId)
-        matchStage["wallet.transactions.channelOrderId"] = orderId;
+    ];
 
-      countPipeline.push({ $match: matchStage });
-    }
-
-    countPipeline.push({ $count: "total" });
-
-    const [transactions, totalCountResult] = await Promise.all([
-      user.aggregate(dataPipeline),
-      user.aggregate(countPipeline),
-    ]);
-
-    const totalCount = totalCountResult[0]?.total || 0;
-
-    const totalPages = finalLimit
-      ? Math.ceil(totalCount / finalLimit)
-      : 1;
+    const result = await user.aggregate(pipeline);
+    const totalCount = result[0]?.metadata[0]?.total || 0;
+    const totalPages = parsedLimit === 0 ? 1 : Math.ceil(totalCount / parsedLimit);
 
     return res.status(200).json({
       message: "Passbook fetched successfully",
-      results: transactions,
+      results: result[0]?.data || [],
       totalCount,
       page: totalPages,
       currentPage: Number(page),
-      limit: finalLimit ?? "All",
+      limit: parsedLimit === 0 ? "All" : parsedLimit,
     });
   } catch (error) {
     console.error("Error fetching passbook:", error);
-    return res.status(500).json({
-      message: "Internal server error",
-      error: error.message,
-    });
+    return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 };
 

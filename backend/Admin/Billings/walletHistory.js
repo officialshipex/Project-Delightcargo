@@ -97,7 +97,7 @@ const getAllTransactionHistory = async (req, res) => {
       { $match: transactionMatchStage },
       {
         $project: {
-          _id: 0,
+          _id: "$wallet.walletHistory._id",
           user: {
             _id: "$_id",
             name: "$fullname",
@@ -122,10 +122,10 @@ const getAllTransactionHistory = async (req, res) => {
       parsedLimit === 0
         ? User.aggregate(basePipeline)
         : User.aggregate([
-            ...basePipeline,
-            { $skip: skip },
-            { $limit: parsedLimit },
-          ]),
+          ...basePipeline,
+          { $skip: skip },
+          { $limit: parsedLimit },
+        ]),
 
       User.aggregate([...basePipeline, { $count: "total" }]),
     ]);

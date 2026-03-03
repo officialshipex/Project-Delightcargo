@@ -9,6 +9,7 @@ const {
   submitNdrToAmazon,
   submitNdrToZipypost,
   submitNdrToShreeMaruti,
+  submitNdrToEkart,
 } = require("../services/ndrService");
 const Order = require("../models/newOrder.model");
 
@@ -23,11 +24,15 @@ const ndrProcessController = async (req, res) => {
     consignee_address,
     consignee_address2,
     customer_code,
-    rtoAction,
     remarks,
     next_attempt_date,
     phone,
     customer_name,
+    // Change Address fields
+    new_address,
+    new_address2,
+    new_phone,
+    new_pincode,
   } = req.body;
 
   // console.log("awb",awb_number)
@@ -86,10 +91,21 @@ const ndrProcessController = async (req, res) => {
         awb_number,
         actionType: action,
         remarks: comments,
-        consignee_address,
-        phone,
+        consignee_address: new_address || consignee_address,
+        phone: new_phone || phone,
       };
       response = await submitNdrToShreeMaruti(payload);
+    } else if (orderDetails.provider === "Ekart") {
+      response = await submitNdrToEkart({
+        awb_number,
+        action,
+        comments,
+        new_address,
+        new_address2,
+        customer_name,
+        new_phone,
+        new_pincode,
+      });
     } else if (orderDetails.partner === "ZipyPost") {
       // Implement ZipyPost NDR API call here
       // console.log("zipypost",req.body);
@@ -117,7 +133,7 @@ const ndrProcessController = async (req, res) => {
 const ndrBulkProcessController = async (req, res) => {
   try {
     const { payloads } = req.body;
-// console.log("Bulk NDR Payloads:", payloads);
+    // console.log("Bulk NDR Payloads:", payloads);
     if (!payloads || !Array.isArray(payloads) || payloads.length === 0) {
       return res
         .status(400)
@@ -219,7 +235,7 @@ const ndrBulkProcessController = async (req, res) => {
             awb_number,
             actionType: action,
             remarks: remarks,
-            consignee_address:address1,
+            consignee_address: address1,
             phone,
           };
           apiResponse = await submitNdrToShreeMaruti(payload);
@@ -228,10 +244,10 @@ const ndrBulkProcessController = async (req, res) => {
             action === "RE-ATTEMPT"
               ? "Re-Attempt"
               : action === "CHANGE CONTACT"
-              ? "Change Contact"
-              : action === "CHANGE ADDRESS"
-              ? "Change Address"
-              : action; // Default to original action if it doesn't match any case
+                ? "Change Contact"
+                : action === "CHANGE ADDRESS"
+                  ? "Change Address"
+                  : action; // Default to original action if it doesn't match any case
           const payload = {
             action: customAction,
             seller_remark: remarks,

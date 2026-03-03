@@ -183,7 +183,9 @@ const availableCourierService = async (req, res) => {
       } else if (provider === "Ekart") {
         const payload={
           pickUpPincode,
-          deliveryPincode
+          deliveryPincode,
+          paymentMethod:paymentType,
+          codAmount:declaredValue
         }
         serviceable = await checkEkartServiceability(
           payload

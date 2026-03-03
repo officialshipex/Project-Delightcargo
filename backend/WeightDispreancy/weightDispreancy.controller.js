@@ -431,11 +431,18 @@ const getAllDiscrepancy = async (req, res) => {
 
     const total = totalResult[0]?.total || 0;
 
+    // Extract unique courier services for filter dropdown
+    const courierServices = await WeightDiscrepancy.distinct("courierServiceName", {
+      ...discrepancyMatchStage,
+      courierServiceName: { $exists: true, $ne: null, $ne: "" }
+    });
+
     return res.json({
       total,
       page: Number(page),
       limit: parsedLimit === 0 ? "all" : parsedLimit,
       results,
+      courierServices: courierServices.filter(Boolean).sort(),
     });
   } catch (error) {
     console.error("Error fetching discrepancies:", error);
@@ -596,6 +603,12 @@ const AllDiscrepancyBasedId = async (req, res) => {
     const total = totalResult[0]?.total || 0;
     const totalPages = parsedLimit ? Math.ceil(total / parsedLimit) : 1;
 
+    // Extract unique courier services for filter dropdown
+    const courierServices = await WeightDiscrepancy.distinct("courierServiceName", {
+      ...discrepancyMatchStage,
+      courierServiceName: { $exists: true, $ne: null, $ne: "" }
+    });
+
     return res.json({
       total,
       page: Number(page),
@@ -603,6 +616,7 @@ const AllDiscrepancyBasedId = async (req, res) => {
       page: totalPages,
       currentPage: Number(page),
       results,
+      courierServices: courierServices.filter(Boolean).sort(),
     });
   } catch (error) {
     console.error("Error fetching user discrepancies:", error);
