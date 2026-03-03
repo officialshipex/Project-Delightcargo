@@ -93,6 +93,7 @@ const createOrder = async (req, res) => {
       provider,
       finalCharges,
       estimatedDeliveryDate,
+      priceBreakup
     } = req.body;
 
     session.startTransaction();
@@ -303,6 +304,7 @@ const createOrder = async (req, res) => {
       currentOrder.courierServiceName = courierServiceName;
       currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
       currentOrder.zone = zone.zone;
+      currentOrder.priceBreakup = priceBreakup;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress?.city || "N/A",

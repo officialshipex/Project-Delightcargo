@@ -64,6 +64,7 @@ const orderCreationEkart = async (req, res) => {
       courierServiceName,
       provider,
       estimatedDeliveryDate,
+      priceBreakup
     } = req.body;
     // console.log("Received orderCreationEkart request:", req.body);
 
@@ -367,6 +368,7 @@ const orderCreationEkart = async (req, res) => {
           shipmentCreatedAt: new Date(),
           zone: zone.zone,
           estimatedDeliveryDate: estimatedDeliveryDate || null,
+          priceBreakup
         },
         $push: {
           tracking: {
@@ -601,8 +603,8 @@ const checkEkartServiceability = async (payload) => {
     const pickupData = pickupResponse.data;
     const receiverData = receiverResponse.data;
 
-    // console.log("Ekart Serviceability Pickup Data:", pickupData);
-    // console.log("Ekart Serviceability Receiver Data:", receiverData);
+    console.log("Ekart Serviceability Pickup Data:", pickupData);
+    console.log("Ekart Serviceability Receiver Data:", receiverData);
 
     const pickupServiceable = pickupData?.status === true;
     const receiverServiceable = receiverData?.status === true;

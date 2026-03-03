@@ -218,6 +218,7 @@ const processCodRemittanceOrder = async () => {
     }
 
     const newRemittanceOrder = new CodRemittanceOrders({
+      userId: order.userId,
       Date: lastTrackingUpdate || new Date(),
       orderID: order.orderId,
       userName: userData.fullname || "",

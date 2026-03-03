@@ -115,7 +115,7 @@ const uploadDispreancy = async (req, res) => {
 
       const order = orderMap.get(awb);
       if (!order) continue;
-      if (order.status==="Booked" || order.status==="Not Picked" || order.status==="Ready To Ship") continue;
+      if (order.status === "Booked" || order.status === "Not Picked" || order.status === "Ready To Ship") continue;
 
       const userId = order.userId.toString();
       let userPlan = planCache.get(userId);
@@ -259,7 +259,7 @@ const uploadDispreancy = async (req, res) => {
       await WeightDiscrepancy.insertMany(discrepancies);
     }
 
-    fs.promises.unlink(filePath).catch(() => {});
+    fs.promises.unlink(filePath).catch(() => { });
 
     res.status(200).json({
       success: true,
@@ -318,7 +318,7 @@ const getAllDiscrepancy = async (req, res) => {
       awbNumber,
       orderId,
       status,
-      provider,
+      courierService,
     } = req.query;
     // console.log("re", req.query);
     const userMatchStage = {};
@@ -352,16 +352,23 @@ const getAllDiscrepancy = async (req, res) => {
       discrepancyMatchStage["adminStatus"] = status;
     }
 
-    if (provider) {
-      discrepancyMatchStage["provider"] = provider;
-    }
-
     if (awbNumber) {
       discrepancyMatchStage["awbNumber"] = awbNumber;
     }
 
     if (orderId) {
       discrepancyMatchStage["orderId"] = Number(orderId);
+    }
+
+    // ✅ Courier Service Name filter (multiple support)
+    if (courierService) {
+      const servicesArray = courierService
+        .split(",")
+        .map((item) => item.trim());
+
+      discrepancyMatchStage.courierServiceName = {
+        $in: servicesArray,
+      };
     }
 
     const parsedLimit = limit === "all" ? 0 : Number(limit);
@@ -414,21 +421,28 @@ const getAllDiscrepancy = async (req, res) => {
       parsedLimit === 0
         ? WeightDiscrepancy.aggregate(basePipeline)
         : WeightDiscrepancy.aggregate([
-            ...basePipeline,
-            { $skip: skip },
-            { $limit: parsedLimit },
-          ]),
+          ...basePipeline,
+          { $skip: skip },
+          { $limit: parsedLimit },
+        ]),
 
       WeightDiscrepancy.aggregate([...basePipeline, { $count: "total" }]),
     ]);
 
     const total = totalResult[0]?.total || 0;
 
+    // Extract unique courier services for filter dropdown
+    const courierServices = await WeightDiscrepancy.distinct("courierServiceName", {
+      ...discrepancyMatchStage,
+      courierServiceName: { $exists: true, $ne: null, $ne: "" }
+    });
+
     return res.json({
       total,
       page: Number(page),
       limit: parsedLimit === 0 ? "all" : parsedLimit,
       results,
+      courierServices: courierServices.filter(Boolean).sort(),
     });
   } catch (error) {
     console.error("Error fetching discrepancies:", error);
@@ -500,10 +514,10 @@ const AllDiscrepancyBasedId = async (req, res) => {
       awbNumber,
       orderId,
       status,
-      provider,
+      courierServiceName,
     } = req.query;
     let userId;
-    // console.log("id",id)
+    // console.log("id",req.query)
     if (id) {
       userId = id;
     } else {
@@ -525,16 +539,23 @@ const AllDiscrepancyBasedId = async (req, res) => {
       discrepancyMatchStage["status"] = status;
     }
 
-    if (provider) {
-      discrepancyMatchStage["provider"] = provider;
-    }
-
     if (awbNumber) {
       discrepancyMatchStage["awbNumber"] = awbNumber;
     }
 
     if (orderId) {
       discrepancyMatchStage["orderId"] = Number(orderId);
+    }
+
+    // ✅ Courier Service Name filter (multiple support)
+    if (courierServiceName) {
+      const servicesArray = courierServiceName
+        .split(",")
+        .map((item) => item.trim());
+
+      discrepancyMatchStage.courierServiceName = {
+        $in: servicesArray,
+      };
     }
 
     const parsedLimit = limit.toLowerCase() === "all" ? null : Number(limit);
@@ -572,15 +593,21 @@ const AllDiscrepancyBasedId = async (req, res) => {
       parsedLimit === null
         ? WeightDiscrepancy.aggregate(basePipeline)
         : WeightDiscrepancy.aggregate([
-            ...basePipeline,
-            { $skip: skip },
-            { $limit: parsedLimit },
-          ]),
+          ...basePipeline,
+          { $skip: skip },
+          { $limit: parsedLimit },
+        ]),
       WeightDiscrepancy.aggregate([...basePipeline, { $count: "total" }]),
     ]);
 
     const total = totalResult[0]?.total || 0;
     const totalPages = parsedLimit ? Math.ceil(total / parsedLimit) : 1;
+
+    // Extract unique courier services for filter dropdown
+    const courierServices = await WeightDiscrepancy.distinct("courierServiceName", {
+      ...discrepancyMatchStage,
+      courierServiceName: { $exists: true, $ne: null, $ne: "" }
+    });
 
     return res.json({
       total,
@@ -589,6 +616,7 @@ const AllDiscrepancyBasedId = async (req, res) => {
       page: totalPages,
       currentPage: Number(page),
       results,
+      courierServices: courierServices.filter(Boolean).sort(),
     });
   } catch (error) {
     console.error("Error fetching user discrepancies:", error);
@@ -1175,9 +1203,9 @@ const exportWeightDiscrepancy = async (req, res) => {
       // Join product names by comma
       ProductNames: Array.isArray(item.productDetails)
         ? item.productDetails
-            .map((pd) => pd.name)
-            .filter(Boolean)
-            .join(", ")
+          .map((pd) => pd.name)
+          .filter(Boolean)
+          .join(", ")
         : "",
 
       EnteredWeightApplicable: item.enteredWeightApplicable || "",
@@ -1218,7 +1246,7 @@ const exportWeightDiscrepancy = async (req, res) => {
 
 // const checkNonDeliveredDisputes = async () => {
 //   try {
-    
+
 //     const discrepancies = await WeightDiscrepancy.find({
 //       status: "new",
 //     }).select("awbNumber");
@@ -1228,19 +1256,19 @@ const exportWeightDiscrepancy = async (req, res) => {
 //       return;
 //     }
 
-   
+
 //     const awbNumbers = discrepancies.map((d) => d.awbNumber);
 
-    
+
 //     const orders = await Order.find(
 //       { awb_number: { $in: awbNumbers } },
 //       { awb_number: 1, status: 1 }
 //     );
 
-   
+
 //     const orderMap = new Map(orders.map((o) => [o.awb_number, o]));
 
-   
+
 //     let nonDeliveredCount = 0;
 //     const nonDeliveredDetails = [];
 
@@ -1257,7 +1285,7 @@ const exportWeightDiscrepancy = async (req, res) => {
 //       }
 //     }
 
-    
+
 //     console.log("========== DISPUTE DELIVERY CHECK ==========");
 //     console.log(`Total NEW disputes        : ${discrepancies.length}`);
 //     console.log(`Not Delivered Disputes    : ${nonDeliveredCount}`);

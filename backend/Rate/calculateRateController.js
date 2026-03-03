@@ -177,7 +177,16 @@ const calculateRate = async (req, res) => {
           };
           serviceable = await checkEkartServiceability(payload);
         }
-      } else {
+      } else if (provider === "Ekart") {
+        const payload = {
+          pickUpPincode: pickUpPincode,
+          deliveryPincode: deliveryPincode,
+          paymentMethod: paymentType,
+          codAmount: declaredValue,
+        };
+        serviceable = await checkEkartServiceability(payload);
+      }
+      else {
         // Local says not serviceable → skip API
         continue;
       }
@@ -192,7 +201,7 @@ const calculateRate = async (req, res) => {
 
       const count = Math.ceil(
         (chargedWeight - rc.weightPriceBasic[0].weight) /
-          rc.weightPriceAdditional[0].weight,
+        rc.weightPriceAdditional[0].weight,
       );
 
       let finalCharge =
@@ -285,7 +294,7 @@ async function calculateRateForService(payload) {
       let totalForwardCharge;
       const count = Math.ceil(
         (chargedWeight - rc.weightPriceBasic[0].weight) /
-          rc.weightPriceAdditional[0].weight,
+        rc.weightPriceAdditional[0].weight,
       );
       // console.log("count", count);
       // console.log("chargedWeight", chargedWeight);

@@ -14,7 +14,8 @@ const createOrderZipypost = async (
   orderId,
   wh,
   walletId,
-  charges
+  charges,
+  priceBreakup
 ) => {
   try {
     console.log("➡️ Creating ZipyPost order:", orderId);
@@ -289,7 +290,7 @@ const createOrderZipypost = async (
       currentOrder.courierServiceName = serviceDetails.name;
       currentOrder.zone = zone.zone;
       currentOrder.estimatedDeliveryDate = estimateDate;
-
+      currentOrder.priceBreakup = priceBreakup;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress.city,

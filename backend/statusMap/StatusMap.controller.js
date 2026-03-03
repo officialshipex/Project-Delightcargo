@@ -100,19 +100,48 @@ const uploadExcel = async (req, res) => {
 };
 
 const getStatusByPartnerName = async (req, res) => {
-  // console.log("hii",req.query)
-  const { courierProvider } = req.query;
+  const { courierProvider, page = 1, limit = 20 } = req.query;
   if (!courierProvider) {
     return res.status(400).json({ error: "partnerName is required" });
   }
+
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+  const skip = (pageNum - 1) * limitNum;
+
   try {
-    // Find documents where partnerName matches (case-sensitive by default)
-    const records = await StatusMap.find({
-      partnerName: courierProvider.toUpperCase(),
+    const result = await StatusMap.aggregate([
+      { $match: { partnerName: courierProvider.toUpperCase() } },
+      {
+        $project: {
+          partnerName: 1,
+          totalItems: { $size: "$data" },
+          paginatedData: { $slice: ["$data", skip, limitNum] }
+        }
+      }
+    ]);
+
+    if (!result || result.length === 0) {
+      return res.json({
+        courierProvider,
+        data: [],
+        totalPages: 0,
+        totalItems: 0
+      });
+    }
+
+    const { totalItems, paginatedData } = result[0];
+    const totalPages = Math.ceil(totalItems / limitNum);
+
+    return res.json({
+      courierProvider,
+      data: paginatedData,
+      totalPages,
+      currentPage: pageNum,
+      totalItems
     });
-    // console.log("recco",records)
-    return res.json({ courierProvider, data: records });
   } catch (error) {
+    console.error("Error fetching status by partner name:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 };

@@ -22,7 +22,8 @@ const createOrderDTDC = async (
   orderId,
   wh,
   walletId,
-  charges
+  charges,
+  priceBreakup
 ) => {
   try {
     console.log("API Key:", API_KEY);
@@ -188,6 +189,7 @@ const createOrderDTDC = async (
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.estimatedDeliveryDate = estimateDate;
       currentOrder.zone = zone.zone;
+      currentOrder.priceBreakup = priceBreakup;
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: currentOrder.pickupAddress?.city || "N/A",

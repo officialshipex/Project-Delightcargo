@@ -270,7 +270,7 @@ const trackSingleOrder = async (order) => {
               : null;
           if (
             normalizedData.Instructions ===
-              "Return as per client instruction." &&
+            "Return as per client instruction." &&
             (trackingLength === 0 ||
               (previousStatus !== "NONDLV" &&
                 previousStatus !== "Not Delivered" &&
@@ -465,9 +465,9 @@ const trackSingleOrder = async (order) => {
           normalizedData.Instructions === "ArrivedAtCarrierFacility" ||
           normalizedData.Instructions === "Departed" ||
           normalizedData.Instructions ===
-            "Package arrived at the carrier facility" ||
+          "Package arrived at the carrier facility" ||
           normalizedData.Instructions ===
-            "Package has left the carrier facility"
+          "Package has left the carrier facility"
         ) {
           order.status = "RTO In-transit";
           order.ndrStatus = "RTO In-transit";
@@ -527,7 +527,7 @@ const trackSingleOrder = async (order) => {
         SmartShipStatusMapping[instruction] === "Undelivered" &&
         (normalizedData.Instructions === "CONSIGNEE REFUSED TO ACCEPT" ||
           normalizedData.Instructions ===
-            "CONSIGNEE NOT AVAILABLE CANT DELIVER")
+          "CONSIGNEE NOT AVAILABLE CANT DELIVER")
       ) {
         order.status = "Undelivered";
 
@@ -781,9 +781,9 @@ const trackSingleOrder = async (order) => {
           normalizedData.Instructions === "ArrivedAtCarrierFacility" ||
           normalizedData.Instructions === "Departed" ||
           normalizedData.Instructions ===
-            "Package arrived at the carrier facility" ||
+          "Package arrived at the carrier facility" ||
           normalizedData.Instructions ===
-            "Package has left the carrier facility"
+          "Package has left the carrier facility"
         ) {
           order.status = "RTO In-transit";
           order.ndrStatus = "RTO In-transit";
@@ -813,11 +813,11 @@ const trackSingleOrder = async (order) => {
         const dbMapping = statusDoc?.data.find(
           (d) =>
             normalizeString(d?.scan_type) ===
-              normalizeString(normalizedData?.StatusType) &&
+            normalizeString(normalizedData?.StatusType) &&
             normalizeString(d?.scan) ===
-              normalizeString(normalizedData?.Status) &&
+            normalizeString(normalizedData?.Status) &&
             normalizeString(d?.instructions) ===
-              normalizeString(normalizedData?.Instructions),
+            normalizeString(normalizedData?.Instructions),
         );
 
         // console.log(dbMapping?.sy_status);
@@ -980,7 +980,7 @@ const trackSingleOrder = async (order) => {
           order.ndrStatus = "Undelivered";
           order.ndrReason = {
             date: normalizedData.StatusDateTime,
-            reason: normalizedData.StrRemarks,
+            reason: normalizedData.Instructions,
           };
 
           const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
@@ -1075,7 +1075,7 @@ const trackSingleOrder = async (order) => {
         newLast &&
         oldLast.Instructions === newLast.Instructions &&
         new Date(oldLast.StatusDateTime).getTime() ===
-          new Date(newLast.StatusDateTime).getTime();
+        new Date(newLast.StatusDateTime).getTime();
 
       // if (isSameAsPrevious) {
       //   console.log(
@@ -1163,7 +1163,7 @@ const trackOrders = async () => {
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
       // provider: "Dtdc",
-      // awb_number: "7D113289194",
+      // awb_number: "77697394622",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1500,8 +1500,7 @@ const updateNdrHistoryByAwb = async (awb_number) => {
       );
 
       console.log(
-        `✅ Updated order ${awb_number} — Removed ${
-          initialLength - finalLength
+        `✅ Updated order ${awb_number} — Removed ${initialLength - finalLength
         } NDR entries`,
       );
     } else {

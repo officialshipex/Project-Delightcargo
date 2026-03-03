@@ -197,8 +197,8 @@ const pincodeServiceability = async (req, res) => {
           checkEkartServiceability({
             pickUpPincode,
             deliveryPincode,
-            PaymentType: paymentType,
-            codAmount: declaredValue,
+            paymentMethod:paymentType,
+            codAmount:declaredValue
           }),
       },
     ].filter((p) => activeCourierNames.includes(p.name));

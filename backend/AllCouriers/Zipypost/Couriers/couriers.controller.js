@@ -112,6 +112,7 @@ const createZipypostOrder = async (req, res) => {
       courierServiceName,
       courier,
       estimatedDeliveryDate,
+      priceBreakup
     } = req.body;
 
     // ✅ Fetch order first
@@ -357,6 +358,7 @@ const createZipypostOrder = async (req, res) => {
     currentOrder.courierServiceName = courierServiceName;
     currentOrder.zone = zone.zone;
     currentOrder.estimatedDeliveryDate = estimatedDeliveryDate || "";
+    currentOrder.priceBreakup = priceBreakup;
     currentOrder.tracking.push({
       status: "Booked",
       StatusLocation: currentOrder.pickupAddress.city,
@@ -387,8 +389,8 @@ const createZipypostOrder = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
-    awb_number:result.awb,
-    orderId:currentOrder.orderId
+      awb_number: result.awb,
+      orderId: currentOrder.orderId
     });
   } catch (error) {
     await session.abortTransaction();
@@ -567,7 +569,7 @@ const trackOrderZipypost = async (AWBNo) => {
     };
   }
 };
-// trackOrderZipypost("78079015884")
+// trackOrderZipypost("77699762184")
 
 module.exports = {
   createWarehouse,

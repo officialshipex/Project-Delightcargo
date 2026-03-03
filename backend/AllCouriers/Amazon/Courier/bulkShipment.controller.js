@@ -13,7 +13,8 @@ const createShipmentAmazon = async (
   orderId,
   wh,
   walletId,
-  charges
+  charges,
+  priceBreakup
 ) => {
   try {
     // console.log("amazon", serviceDetails, orderId, walletId, charges);
@@ -177,6 +178,7 @@ const createShipmentAmazon = async (
     currentOrder.label = labelUrl;
     currentOrder.zone = zone.zone;
     currentOrder.estimatedDeliveryDate = estimateDate;
+    currentOrder.priceBreakup = priceBreakup;
     currentOrder.tracking.push({
       status: "Booked",
       StatusLocation: currentOrder.pickupAddress?.city || "N/A",

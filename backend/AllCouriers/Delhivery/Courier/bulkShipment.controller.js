@@ -16,7 +16,8 @@ const createShipmentFunctionDelhivery = async (
   id,
   wh,
   walletId,
-  finalCharges
+  finalCharges,
+  priceBreakup
 ) => {
   const delUrl = `${url}/api/cmu/create.json`;
 
@@ -151,6 +152,7 @@ const createShipmentFunctionDelhivery = async (
         currentOrder.shipmentCreatedAt = new Date();
         currentOrder.estimatedDeliveryDate = estimateDate;
         currentOrder.zone = zone.zone;
+        currentOrder.priceBreakup = priceBreakup;
         currentOrder.tracking.push({
           status: "Booked",
           StatusLocation: currentOrder.pickupAddress?.city || "N/A",

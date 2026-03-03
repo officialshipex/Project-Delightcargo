@@ -185,7 +185,7 @@ const availableCourierService = async (req, res) => {
           pickUpPincode,
           deliveryPincode,
           paymentMethod:paymentType,
-          codAmount:declaredValue,
+          codAmount:declaredValue
         }
         serviceable = await checkEkartServiceability(
           payload

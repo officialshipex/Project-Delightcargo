@@ -76,7 +76,7 @@ const createClientWarehouse = async (payload) => {
         );
         throw new Error(
           response.data.error?.[0] ||
-            "Unknown error during warehouse creation.",
+          "Unknown error during warehouse creation.",
         );
       }
     }
@@ -109,6 +109,7 @@ const createOrder = async (req, res) => {
       finalCharges,
       courierServiceName,
       estimatedDeliveryDate,
+      priceBreakup
     } = req.body;
 
     session.startTransaction();
@@ -301,6 +302,7 @@ const createOrder = async (req, res) => {
             shipmentCreatedAt: new Date(),
             zone: zone.zone,
             estimatedDeliveryDate,
+            priceBreakup
           },
           $push: {
             tracking: {
@@ -530,7 +532,7 @@ const createPickupRequest = async (warehouse_name, awb) => {
         success: true,
         message: "Pickup request created successfully",
         data: response.data,
-        pickupDate: pickup_date,
+        pickupDate: pickupDetails.pickup_date,
       };
     } else {
       return {

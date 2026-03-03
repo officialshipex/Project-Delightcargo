@@ -14,12 +14,12 @@ const filterOrdersForEmployee = async (req, res) => {
       searchQuery, // <-- add this
       paymentType,
       pickupContactName,
-      courier,
+      courierServiceName,
       userId,
       page = 1,
       limit = 20,
     } = req.query;
-
+    // console.log("req", req.query)
     const filter = {};
 
     // Include only B2C + older orders without orderType
@@ -48,9 +48,26 @@ const filterOrdersForEmployee = async (req, res) => {
     }
 
     if (paymentType) filter["paymentDetails.method"] = paymentType;
-    if (courier) filter.courierServiceName = courier;
-    if (pickupContactName)
-      filter["pickupAddress.contactName"] = pickupContactName;
+    if (courierServiceName && courierServiceName.length > 0) {
+      const couriers = Array.isArray(courierServiceName)
+        ? courierServiceName
+        : courierServiceName.split(",");
+
+      filter.courierServiceName = {
+        $in: couriers.map((c) => c.trim()),
+      };
+    }
+
+    if (pickupContactName && pickupContactName.length > 0) {
+      const names = Array.isArray(pickupContactName)
+        ? pickupContactName
+        : pickupContactName.split(",");
+
+      filter["pickupAddress.contactName"] = {
+        $in: names.map((n) => n.trim()),
+      };
+    }
+
 
     let allocatedUserIds = [];
 
@@ -68,7 +85,7 @@ const filterOrdersForEmployee = async (req, res) => {
           totalPages: 0,
           totalCount: 0,
           currentPage: parseInt(page),
-          couriers: [],
+          courierServices: [],
           pickupLocations: [],
         });
       }
@@ -86,7 +103,7 @@ const filterOrdersForEmployee = async (req, res) => {
           totalPages: 0,
           totalCount: 0,
           currentPage: parseInt(page),
-          couriers: [],
+          courierServices: [],
           pickupLocations: [],
         });
       }
@@ -94,36 +111,28 @@ const filterOrdersForEmployee = async (req, res) => {
     }
 
     if (searchQuery) {
-      const userFilter = {
+      const users = await User.find({
         $or: [
           { fullname: { $regex: searchQuery, $options: "i" } },
           { email: { $regex: searchQuery, $options: "i" } },
           { phoneNumber: { $regex: searchQuery, $options: "i" } },
         ],
-      };
-      const users = await User.find(userFilter).select("_id");
-      const matchedIds = users.map((u) => u._id.toString());
+      }).select("_id");
 
-      let validUserIds = matchedIds;
-      if (allocatedUserIds.length > 0) {
-        validUserIds = matchedIds.filter((id) => allocatedUserIds.includes(id));
-      }
+      const matchedUserIds = users.map((u) => u._id);
 
-      if (validUserIds.length > 0) {
-        filter.userId = {
-          $in: validUserIds.map((id) => new mongoose.Types.ObjectId(id)),
-        };
-      } else {
-        return res.json({
-          orders: [],
-          totalPages: 0,
-          totalCount: 0,
-          currentPage: parseInt(page),
-          couriers: [],
-          pickupLocations: [],
-        });
-      }
-    } else if (userId) {
+      filter.$and = filter.$and || [];
+
+      filter.$and.push({
+        $or: [
+          { userId: { $in: matchedUserIds } },
+          { "receiverAddress.contactName": { $regex: searchQuery, $options: "i" } },
+          { "receiverAddress.email": { $regex: searchQuery, $options: "i" } },
+          { "receiverAddress.phoneNumber": { $regex: searchQuery, $options: "i" } },
+        ],
+      });
+    }
+    else if (userId) {
       const objectId = new mongoose.Types.ObjectId(userId);
       if (
         allocatedUserIds.length > 0 &&
@@ -134,7 +143,7 @@ const filterOrdersForEmployee = async (req, res) => {
           totalPages: 0,
           totalCount: 0,
           currentPage: parseInt(page),
-          couriers: [],
+          courierServices: [],
           pickupLocations: [],
         });
       }
@@ -226,7 +235,7 @@ const filterOrdersForEmployee = async (req, res) => {
       totalPages,
       totalCount,
       currentPage: parseInt(page),
-      couriers,
+      courierServices: couriers,
       pickupLocations,
     });
   } catch (error) {
@@ -277,11 +286,13 @@ const filterDelayDeliveredOrders = async (req, res) => {
     }
 
     if (courier) {
-      filter.courierServiceName = courier;
+      const couriers = courier.split(",").map((c) => c.trim());
+      filter.courierServiceName = { $in: couriers };
     }
 
     if (pickupContactName) {
-      filter["pickupAddress.contactName"] = pickupContactName;
+      const names = pickupContactName.split(",").map((n) => n.trim());
+      filter["pickupAddress.contactName"] = { $in: names };
     }
 
     let allocatedUserIds = [];
@@ -430,7 +441,7 @@ const filterDelayDeliveredOrders = async (req, res) => {
       totalPages,
       totalCount,
       currentPage: parseInt(page),
-      couriers,
+      courierServices: couriers,
       pickupLocations,
     });
   } catch (err) {
@@ -447,7 +458,7 @@ const filterNdrOrdersForEmployee = async (req, res) => {
       ndrStatus,
       status,
       tab,
-      courier,
+      courierServiceName,
       startDate,
       endDate,
       userId,
@@ -501,14 +512,27 @@ const filterNdrOrdersForEmployee = async (req, res) => {
     // }
 
     // Courier
-    if (courier) {
-      filter.courierServiceName = courier;
+    if (courierServiceName && courierServiceName.length > 0) {
+      const couriers = Array.isArray(courierServiceName)
+        ? courierServiceName
+        : courierServiceName.split(",");
+
+      filter.courierServiceName = {
+        $in: couriers.map((c) => c.trim()),
+      };
     }
 
     // Pickup Address
-    if (pickupContactName) {
-      filter["pickupAddress.contactName"] = pickupContactName;
+    if (pickupContactName && pickupContactName.length > 0) {
+      const names = Array.isArray(pickupContactName)
+        ? pickupContactName
+        : pickupContactName.split(",");
+
+      filter["pickupAddress.contactName"] = {
+        $in: names.map((n) => n.trim()),
+      };
     }
+
 
     // Date Range
     if (startDate && endDate) {
@@ -735,7 +759,7 @@ const getAllOrdersByManualRtoStatusForEmployee = async (req, res) => {
       totalPages,
       totalCount,
       currentPage: page,
-      couriers, // Include couriers in the response
+      courierServices: couriers, // Use consistent key
     });
   } catch (error) {
     console.error("Error fetching Manual RTO orders (Employee):", error);
@@ -816,7 +840,8 @@ const getOrdersByStatus = async (req, res) => {
     }
 
     if (courierServiceName) {
-      andConditions.push({ courierServiceName });
+      const couriers = courierServiceName.split(",").map((c) => c.trim());
+      andConditions.push({ courierServiceName: { $in: couriers } });
     }
 
     if (paymentType) {
@@ -833,7 +858,8 @@ const getOrdersByStatus = async (req, res) => {
     }
 
     if (pickupContactName) {
-      andConditions.push({ "pickupAddress.contactName": pickupContactName });
+      const names = pickupContactName.split(",").map((n) => n.trim());
+      andConditions.push({ "pickupAddress.contactName": { $in: names } });
     }
 
     const filter = andConditions.length ? { $and: andConditions } : {};
@@ -1022,7 +1048,8 @@ const getAllOrdersByNdrStatus = async (req, res) => {
     }
 
     if (courierServiceName) {
-      andConditions.push({ courierServiceName });
+      const couriers = courierServiceName.split(",").map((c) => c.trim());
+      andConditions.push({ courierServiceName: { $in: couriers } });
     }
 
     if (paymentType) {
@@ -1039,7 +1066,8 @@ const getAllOrdersByNdrStatus = async (req, res) => {
     }
 
     if (pickupContactName) {
-      andConditions.push({ "pickupAddress.contactName": pickupContactName });
+      const names = pickupContactName.split(",").map((n) => n.trim());
+      andConditions.push({ "pickupAddress.contactName": { $in: names } });
     }
 
     const filter = andConditions.length ? { $and: andConditions } : {};
@@ -1159,6 +1187,8 @@ const getAllOrdersByManualRtoStatus = async (req, res) => {
       totalPages,
       totalCount,
       currentPage: page,
+      courierServices: [], // Added for consistency
+      pickupLocations: [],
     });
   } catch (error) {
     console.error("Error fetching NDR orders:", error);
@@ -1206,7 +1236,10 @@ const filterOrders = async (req, res) => {
     }
 
     if (type) filter["paymentDetails.method"] = type;
-    if (courier) filter.courierServiceName = courier;
+    if (courier) {
+      const couriers = courier.split(",").map((c) => c.trim());
+      filter.courierServiceName = { $in: couriers };
+    }
     if (userId) {
       filter.userId = new mongoose.Types.ObjectId(userId);
     } else if (name || email || contactNumber) {
@@ -1253,6 +1286,8 @@ const filterOrders = async (req, res) => {
       totalPages,
       totalCount,
       currentPage: parseInt(page),
+      courierServices: [],
+      pickupLocations: [],
     });
   } catch (error) {
     console.error("Error filtering orders:", error);
@@ -1296,7 +1331,10 @@ const filterNdrOrders = async (req, res) => {
     }
     if (ndrStatus && ndrStatus !== "All") filter.ndrStatus = ndrStatus;
     if (status && status !== "All") filter.status = status; // <-- add this line
-    if (courier) filter.courierServiceName = courier;
+    if (courier) {
+      const couriers = courier.split(",").map((c) => c.trim());
+      filter.courierServiceName = { $in: couriers };
+    }
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);

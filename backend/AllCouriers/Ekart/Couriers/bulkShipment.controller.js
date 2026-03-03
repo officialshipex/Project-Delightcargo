@@ -16,6 +16,7 @@ const createOrderEkart = async (
   walletId,
   charges,
   estimatedDeliveryDate = null,
+  priceBreakup
 ) => {
   try {
     /* --------------------------------------------------
@@ -220,6 +221,7 @@ const createOrderEkart = async (
     currentOrder.shipmentCreatedAt = new Date();
     currentOrder.zone = zone.zone;
     currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
+    currentOrder.priceBreakup = priceBreakup;
 
     currentOrder.tracking.push({
       status: "Booked",

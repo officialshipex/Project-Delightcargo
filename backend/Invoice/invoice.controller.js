@@ -550,9 +550,8 @@ async function uploadToS3(localPath, key) {
     }),
   );
 
-  return `https://${process.env.AWS_BUCKET_NAME}.s3.${
-    process.env.AWS_REGION
-  }.amazonaws.com/${encodeURIComponent(key)}`;
+  return `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION
+    }.amazonaws.com/${encodeURIComponent(key)}`;
 }
 
 /* -------------------------
@@ -1078,9 +1077,9 @@ const adminGetInvoices = async (req, res) => {
       finalLimit === null
         ? Invoice.find(filters).sort({ createdAt: -1 })
         : Invoice.find(filters)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(finalLimit),
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(finalLimit),
       Invoice.countDocuments(filters),
     ]);
 
@@ -1173,9 +1172,9 @@ const userGetInvoices = async (req, res) => {
       finalLimit === null
         ? Invoice.find(filters).sort({ createdAt: -1 })
         : Invoice.find(filters)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(finalLimit),
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(finalLimit),
       Invoice.countDocuments(filters),
     ]);
 

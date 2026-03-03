@@ -76,6 +76,16 @@ const getAllShippingTransactions = async (req, res) => {
       orderMatchStage["provider"] = provider;
     }
 
+    // Courier service filter (supports multiple couriers)
+    if (req.query.courierServiceName) {
+      const couriers = req.query.courierServiceName.split(",").map(c => c.trim());
+      if (couriers.length === 1) {
+        orderMatchStage["courierServiceName"] = couriers[0];
+      } else {
+        orderMatchStage["courierServiceName"] = { $in: couriers };
+      }
+    }
+
     if (awbNumber) {
       orderMatchStage["awb_number"] = awbNumber;
     }
@@ -89,6 +99,7 @@ const getAllShippingTransactions = async (req, res) => {
 
     const basePipeline = [
       { $match: orderMatchStage },
+      { $sort: { createdAt: -1 } },
       {
         $lookup: {
           from: "users",
@@ -101,7 +112,7 @@ const getAllShippingTransactions = async (req, res) => {
       { $match: userMatchStage },
       {
         $project: {
-          _id: 0,
+          _id: 1,
           orderId: 1,
           awb_number: 1,
           orderType: 1,
@@ -127,27 +138,34 @@ const getAllShippingTransactions = async (req, res) => {
           B2BPackageDetails: 1,
         },
       },
-      { $sort: { createdAt: -1 } },
+      
     ];
 
     const [results, totalResult] = await Promise.all([
       parsedLimit === 0
         ? NewOrder.aggregate(basePipeline)
         : NewOrder.aggregate([
-            ...basePipeline,
-            { $skip: skip },
-            { $limit: parsedLimit },
-          ]),
+          ...basePipeline,
+          { $skip: skip },
+          { $limit: parsedLimit },
+        ]),
       NewOrder.aggregate([...basePipeline, { $count: "total" }]),
     ]);
 
     const total = totalResult[0]?.total || 0;
+
+    // Extract unique courier services for filter dropdown
+    const courierServices = await NewOrder.distinct("courierServiceName", {
+      ...orderMatchStage,
+      courierServiceName: { $exists: true, $ne: null, $ne: "" }
+    });
 
     return res.json({
       total,
       page: Number(page),
       limit: parsedLimit === 0 ? "all" : parsedLimit,
       results,
+      courierServices: courierServices.filter(Boolean).sort(), // Return sorted unique couriers
     });
   } catch (error) {
     console.error("Error in getAllShippingTransactions:", error);

@@ -146,8 +146,7 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
 
       await statDoc.save();
       console.log(
-        `✅ Saved referral stat for user ${user.userId} (${
-          uniqueOrders.length
+        `✅ Saved referral stat for user ${user.userId} (${uniqueOrders.length
         } orders, ₹${totalShipping.toFixed(2)})`
       );
     }
@@ -192,17 +191,27 @@ const getReferralStats = async (req, res) => {
     // Extract filters
     const { month, year } = req.query;
 
-    // Build filter query
-    const query = { userId };
+    // Pagination
+    const pageNum = parseInt(req.query.page) || 1;
+    const limitNum = parseInt(req.query.limit) || 20;
+
+    // Build filter query for ALL matching records to get totals
+    const allRecordsQuery = { userId };
     if (month && year) {
-      query.month = Number(month);
-      query.year = Number(year);
+      allRecordsQuery.month = Number(month);
+      allRecordsQuery.year = Number(year);
     }
 
-    // Fetch monthly stats
-    const monthlyStats = await ReferralMonthlyStat.find(query)
+    const allMatchingStats = await ReferralMonthlyStat.find(allRecordsQuery).lean();
+
+    // Fetch paginated monthly stats
+    const monthlyStats = await ReferralMonthlyStat.find(allRecordsQuery)
       .sort({ year: -1, month: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum)
       .lean();
+
+    const totalRecords = await ReferralMonthlyStat.countDocuments(allRecordsQuery);
 
     // Initialize totals
     const stats = {
@@ -214,8 +223,8 @@ const getReferralStats = async (req, res) => {
       remaining: 0,
     };
 
-    // Calculate totals from monthly records
-    monthlyStats.forEach((month) => {
+    // Calculate totals from ALL matching records
+    allMatchingStats.forEach((month) => {
       stats.referralOrders += month.totalOrderCount || 0;
       stats.totalShipping += month.totalShipping || 0;
       stats.totalCommission += month.totalCommission || 0;
@@ -227,7 +236,7 @@ const getReferralStats = async (req, res) => {
       "subUserId referralCommissionPercentage"
     ).lean();
     stats.referredFriends = parentUser?.subUserId?.length || 0;
-    // console.log("Parent user:", parentUser);
+
     // Prepare data for frontend
     const monthlyData = monthlyStats.map((month) => ({
       month: `${dayjs()
@@ -244,6 +253,8 @@ const getReferralStats = async (req, res) => {
     return res.status(200).json({
       stats,
       monthlyData,
+      total: totalRecords,
+      totalPages: Math.ceil(totalRecords / limitNum),
       referralCommissionPercentage:
         parentUser?.referralCommissionPercentage || 0,
     });
@@ -255,7 +266,7 @@ const getReferralStats = async (req, res) => {
 
 const getAllReferralStats = async (req, res) => {
   try {
-    const { month, year, referById } = req.query;
+    const { month, year, referById, page, limit } = req.query;
     console.log("req.query", req.query);
 
     const query = {};
@@ -270,9 +281,21 @@ const getAllReferralStats = async (req, res) => {
       ];
     }
 
+    // Pagination
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+
+    // Get all matching referrals for summary calculation
+    const allReferrals = await ReferralMonthlyStat.find(query).lean();
+
+    // Get paginated referrals
     const referrals = await ReferralMonthlyStat.find(query)
       .sort({ year: -1, month: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum)
       .lean();
+
+    const totalRecords = await ReferralMonthlyStat.countDocuments(query);
 
     console.log("Referral Count Found:", referrals.length);
 
@@ -283,7 +306,8 @@ const getAllReferralStats = async (req, res) => {
       totalCommission: 0,
     };
 
-    referrals.forEach((r) => {
+    // Calculate summary from ALL matching referrals
+    allReferrals.forEach((r) => {
       summary.totalOrders += r.totalOrderCount || 0;
       summary.totalShipping += r.totalShipping || 0;
       summary.totalCommission += r.totalCommission || 0;
@@ -291,11 +315,11 @@ const getAllReferralStats = async (req, res) => {
 
     const userFilter = referById
       ? {
-          $or: [
-            { _id: new mongoose.Types.ObjectId(referById) },
-            { _id: referById },
-          ],
-        }
+        $or: [
+          { _id: new mongoose.Types.ObjectId(referById) },
+          { _id: referById },
+        ],
+      }
       : { subUserId: { $exists: true, $ne: [] } };
 
     const users = await User.find(
@@ -354,7 +378,10 @@ const getAllReferralStats = async (req, res) => {
     return res.status(200).json({
       referrals: enrichedReferrals,
       summary,
+      total: totalRecords,
+      totalPages: Math.ceil(totalRecords / limitNum),
     });
+
   } catch (err) {
     console.error("Error fetching admin referral stats:", err);
     return res.status(500).json({ message: "Failed to fetch referral stats" });

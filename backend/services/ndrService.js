@@ -19,6 +19,9 @@ const {
 const {
   getDTDCAuthToken,
 } = require("../AllCouriers/DTDC/Authorize/saveCourierContoller");
+const {
+  getAccessToken: getEkartAccessToken,
+} = require("../AllCouriers/Ekart/Authorize/Ekart.controller");
 
 const ordersDatabase = [
   {
@@ -500,7 +503,7 @@ const submitNdrToDtdc = async (
       remarks: remarks || "",
     },
   ];
-console.log("payload",payload);
+  console.log("payload", payload);
   const url = "http://bodb.dtdc.com/ctbs-sraa-api/sraa/validateAndSave";
 
   try {
@@ -661,9 +664,9 @@ const submitNdrToShreeMaruti = async ({
       actionType === "RE-ATTEMPT"
         ? "RE-ATTEMPT"
         : actionType === "RTO"
-        ? "RTO"
-        : actionType;
-console.log("action",actionTypeValue)
+          ? "RTO"
+          : actionType;
+    console.log("action", actionTypeValue)
     if (actionType === "RE-ATTEMPT" && (!remarks || !remarks.trim())) {
       return {
         status: 400,
@@ -732,7 +735,7 @@ console.log("action",actionTypeValue)
       return {
         status: 422,
         success: false,
-        error:result.message,
+        error: result.message,
         failedOrders,
         shreeMarutiResponse: result,
       };
@@ -1006,8 +1009,8 @@ const submitNdrToZipypost = async (awb, payload) => {
         action.toUpperCase() === "RE-ATTEMPT"
           ? "RE-ATTEMPT"
           : action.toUpperCase() === "RTO"
-          ? "RTO"
-          : action,
+            ? "RTO"
+            : action,
       actionBy: "ShipexIndia",
       remark: seller_remark || "NDR Action Requested",
       source: "ShipexIndia",
@@ -1057,6 +1060,123 @@ const submitNdrToZipypost = async (awb, payload) => {
   }
 };
 
+/**
+ * ─────────────────────────────────────────────────────────
+ * Ekart NDR Handler
+ * ─────────────────────────────────────────────────────────
+ * Ekart does not expose a direct NDR API endpoint.
+ * We handle this internally:
+ *  - RE-ATTEMPT / CHANGE_ADDRESS → log action in ndrHistory
+ *  - RTO → trigger Ekart cancel API (same as cancel shipment)
+ *
+ * Payload expected:
+ *  { awb_number, action, comments, new_address, new_address2,
+ *    customer_name, new_phone, new_pincode }
+ */
+const submitNdrToEkart = async ({
+  awb_number,
+  action,
+  comments,
+  new_address,
+  new_address2,
+  customer_name,
+  new_phone,
+  new_pincode,
+}) => {
+  try {
+    if (!awb_number || !action) {
+      return {
+        success: false,
+        error: "Missing required fields (awb_number, action)",
+      };
+    }
+
+    const orderInDb = await Order.findOne({ awb_number });
+    if (!orderInDb) {
+      return { success: false, error: "Order not found in DB" };
+    }
+
+    // For RTO → call Ekart cancel API
+    if (action.toUpperCase() === "RTO") {
+      const token = await getEkartAccessToken();
+      if (!token) {
+        return { success: false, error: "Failed to get Ekart access token" };
+      }
+
+      try {
+        const cancelUrl = `https://app.elite.ekartlogistics.in/api/v1/package/cancel?tracking_id=${encodeURIComponent(awb_number)}`;
+        const cancelRes = await axios.delete(cancelUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+        console.log("Ekart NDR RTO Response:", cancelRes.data);
+        if (!(cancelRes.status === 200 && cancelRes.data?.status === true)) {
+          return {
+            success: false,
+            error: cancelRes.data?.message || "Ekart RTO request failed",
+          };
+        }
+      } catch (cancelErr) {
+        console.error("Ekart RTO Error:", cancelErr.response?.data || cancelErr.message);
+        return {
+          success: false,
+          error: cancelErr.response?.data?.message || "Ekart RTO API error",
+        };
+      }
+    }
+
+    // For RE-ATTEMPT / CHANGE_ADDRESS → log in ndrHistory & update address if provided
+    const resolvedAction = action.toUpperCase() === "CHANGE_ADDRESS" ? "RE-ATTEMPT" : action.toUpperCase();
+
+    const entry = {
+      action: resolvedAction,
+      actionBy: "ShipexIndia",
+      remark: comments || "NDR Action Requested",
+      source: "ShipexIndia",
+      date: new Date(),
+    };
+
+    if (!Array.isArray(orderInDb.ndrHistory)) {
+      orderInDb.ndrHistory = [];
+    }
+
+    const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
+    if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
+      latest.actions.push(entry);
+    } else {
+      orderInDb.ndrHistory.push({ actions: [entry] });
+    }
+
+    // If change address, update receiver address
+    if (new_address || customer_name) {
+      if (new_address) orderInDb.receiverAddress.address = new_address;
+      if (new_address2) orderInDb.receiverAddress.address2 = new_address2;
+      if (customer_name) orderInDb.receiverAddress.contactName = customer_name;
+      if (new_phone) orderInDb.receiverAddress.phoneNumber = new_phone;
+      if (new_pincode) orderInDb.receiverAddress.pinCode = new_pincode;
+    }
+
+    orderInDb.ndrStatus = resolvedAction === "RTO" ? "RTO" : "Action_Requested";
+    orderInDb.status = "Undelivered";
+    orderInDb.reattempt = false;
+    await orderInDb.save();
+
+    return {
+      success: true,
+      message: `Ekart NDR action (${resolvedAction}) recorded successfully`,
+    };
+  } catch (error) {
+    console.error("Ekart NDR Error:", error?.message);
+    return {
+      success: false,
+      error: "Error occurred while processing Ekart NDR",
+      details: error.message,
+    };
+  }
+};
+
 module.exports = {
   getOrderDetails,
   callShiprocketNdrApi,
@@ -1068,4 +1188,5 @@ module.exports = {
   callSmartshipNdrApi,
   submitNdrToZipypost,
   submitNdrToShreeMaruti,
+  submitNdrToEkart,
 };

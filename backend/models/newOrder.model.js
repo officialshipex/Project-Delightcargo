@@ -147,6 +147,12 @@ const orderSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    priceBreakup: {
+      freight: { type: Number },
+      cod: { type: Number },
+      gst: { type: Number },
+      total: { type: Number },
+    },
     label: { type: String },
     manifest: { type: String },
     shipment_id: { type: String },
@@ -167,6 +173,7 @@ const orderSchema = new mongoose.Schema(
     walletRefunded: { type: Boolean, default: false },
     manifestJobId: { type: String },
     invoiceDate: { type: Date },
+    pickupDate: { type: Date },
 
     tracking: [
       {
