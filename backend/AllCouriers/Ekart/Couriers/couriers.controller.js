@@ -177,13 +177,8 @@ const orderCreationEkart = async (req, res) => {
       ekartAlias = addResult.alias;
 
       await pickupAddress.updateOne(
-        {
-          "pickupAddress.contactName": pickup.pickupAddress.contactName,
-          "pickupAddress.address": pickup.pickupAddress.address,
-          "pickupAddress.pinCode": pickup.pickupAddress.pinCode,
-        },
-        { ekartAlias },
-        { session },
+        { _id: pickup._id },
+        { $set: { ekartAlias } }
       );
 
       // console.log("Ekart alias saved:", ekartAlias);
@@ -315,6 +310,25 @@ const orderCreationEkart = async (req, res) => {
       console.log("Ekart Shipment Response:", response.data);
     } catch (err) {
       console.log("Ekart Shipment Error:", err.response?.data || err.message);
+
+      // ✅ If pickup_location 404, unset alias so it re-registers next time
+      const ekartErr = err.response?.data;
+      if (
+        err.response?.status === 404 &&
+        ekartErr?.message === "SWIFT_RESOURCE_NOT_FOUND_EXCEPTION" &&
+        ekartErr?.description?.includes("pickup_location")
+      ) {
+        console.log(`Clearing invalid ekartAlias for pickup address: ${pickup?._id}`);
+        // We set to empty string to ensure it enters the registration block next time
+        await pickupAddress.updateMany(
+          {
+            "pickupAddress.contactName": currentOrder?.pickupAddress?.contactName,
+            "pickupAddress.address": currentOrder?.pickupAddress?.address,
+            "pickupAddress.pinCode": currentOrder?.pickupAddress?.pinCode,
+          },
+          { $set: { ekartAlias: "" } }
+        );
+      }
 
       // ✅ SEND RESPONSE IMMEDIATELY
       res.status(500).json({

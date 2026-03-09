@@ -1294,7 +1294,7 @@ const trackOrders = async () => {
 
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery"] },
+      provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery","Ekart"] },
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
       // provider: "Dtdc",
