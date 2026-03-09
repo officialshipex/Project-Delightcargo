@@ -279,6 +279,7 @@ const createOrder = async (req, res) => {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
+      console.log("error delhivery",response.data)
       return res.status(400).json({
         success: false,
         message: "Failed to create shipment",

@@ -13,17 +13,21 @@ const pickupAddress = new mongoose.Schema({
     city: { type: String, required: true },
     state: { type: String, required: true },
   },
-  smartshipHubId:{
+  smartshipHubId: {
     type: String,
     default: "",
   },
-  zipypostHubId:{
-    type:String,
-    default:""
+  zipypostHubId: {
+    type: String,
+    default: ""
   },
-  ekartAlias:{
-    type:String,
-    default:""
+  ekartAlias: {
+    type: String,
+    default: ""
+  },
+  boxdLogisticsWarehouseId: {
+    type: String,
+    default: ""
   },
   createdAt: {
     type: Date,

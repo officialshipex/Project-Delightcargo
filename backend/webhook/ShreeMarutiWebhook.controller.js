@@ -199,7 +199,7 @@ const ShreeMarutiWebhook = async (req, res) => {
     ───────────────────────────────────────────────
   */
 
-        if (attemptCount <= 3 && (!lastNdrDate || currentDate > lastNdrDate)) {
+        if (!lastNdrDate || currentDate > lastNdrDate) {
           order.reattempt = true;
 
           order.ndrHistory.push({

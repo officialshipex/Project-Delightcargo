@@ -14,6 +14,7 @@ const mongoose = require("mongoose");
 const createShreeMarutiShipment = require("../Courier/shreeMarutiShipmentCreation.controller");
 const createZipypostShipment = require("../Courier/zipyPostShipmentCreation.controller");
 const createEkartShipment = require("../Courier/ekartShipmentCreation.controller");
+const createBoxdLogisticsShipment = require("../Courier/boxdLogisticsShipmentCreation.controller");
 
 // Provider mapping
 const providerMap = {
@@ -25,6 +26,7 @@ const providerMap = {
   "06": "Shree Maruti",
   "07": "ZipyPost",
   "08": "Ekart",
+  "09": "BoxdLogistics",
 };
 
 // Validation schema
@@ -247,6 +249,16 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
+          priceBreakup
+        });
+        break;
+      case "BoxdLogistics":
+        shipmentResult = await createBoxdLogisticsShipment({
+          id: order._id,
+          provider,
+          finalCharges,
+          courierServiceName,
+          courier: courierService?.courier,
           priceBreakup
         });
         break;

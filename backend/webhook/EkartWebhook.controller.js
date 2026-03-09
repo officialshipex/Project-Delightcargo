@@ -151,7 +151,7 @@ const EkartWebhook = async (req, res) => {
       /* ───────────────────────────────────────────────
          VALID NDR CASE
       ─────────────────────────────────────────────── */
-      if (attemptCount <= 3 && (!lastNdrDate || currentDate > lastNdrDate)) {
+      if (!lastNdrDate || currentDate > lastNdrDate) {
         order.reattempt = true;
 
         order.ndrHistory.push({

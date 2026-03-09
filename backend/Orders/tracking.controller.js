@@ -33,6 +33,9 @@ const {
 const {
   trackOrderZipypost,
 } = require("../AllCouriers/Zipypost/Couriers/couriers.controller");
+const {
+  trackOrderBoxdLogistics,
+} = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller");
 const Bottleneck = require("bottleneck");
 
 const statusMap = require("../statusMap/StatusMap.model");
@@ -68,6 +71,7 @@ const trackSingleOrder = async (order) => {
       Amazon: getShipmentTracking, // optional: keep both keys if needed
       Smartship: trackOrderSmartShip,
       ZipyPost: trackOrderZipypost,
+      BoxdLogistics: trackOrderBoxdLogistics,
     };
 
     // if (!trackingFunctions[provider]) {
@@ -78,6 +82,8 @@ const trackSingleOrder = async (order) => {
     // let normalizedData;
     if (partner && partner === "ZipyPost") {
       result = await trackingFunctions["ZipyPost"](awb_number, shipment_id);
+    } else if (partner && partner === "BoxdLogistics") {
+      result = await trackingFunctions["BoxdLogistics"](awb_number, shipment_id);
     } else if (provider && trackingFunctions[provider]) {
       result = await trackingFunctions[provider](awb_number, shipment_id);
     } else {
@@ -94,7 +100,7 @@ const trackSingleOrder = async (order) => {
     // Normalize only the latest one
     const normalizedData = mapTrackingResponse(
       [latestTrackingEvent],
-      partner === "ZipyPost" ? partner : provider,
+      (partner === "ZipyPost" || partner === "BoxdLogistics") ? partner : provider,
     );
     // console.log("normalized", normalizedData);
 
@@ -996,8 +1002,8 @@ const trackSingleOrder = async (order) => {
           // Avoid duplicate same-day entries & limit history entries
           if (
             (order.ndrHistory.length === 0 ||
-              lastEntryDate < currentStatusDate) &&
-            order.ndrHistory.length <= 3
+              lastEntryDate < currentStatusDate)
+            // order.ndrHistory.length <= 3
           ) {
             // console.log("Adding NDR history entry for AWB:", order.awb_number);
 
@@ -1049,11 +1055,140 @@ const trackSingleOrder = async (order) => {
       // console.log("ZipyPost normalizedData:", normalizedData);
     }
 
+    if (partner === "BoxdLogistics") {
+      // normalizedData.Instructions = the raw `status` field from the API (snake_case)
+      // e.g. 'shipped', 'pickup_scheduled', 'out_for_delivery', 'delivered', 'undelivered', 'rto', 'rto_delivered', 'cancelled'
+      const statusCode = normalizedData.Instructions?.toLowerCase(); // e.g. "shipped"
+
+      // --- Pickup Scheduled / Ready To Ship ---
+      if (
+        statusCode === "pickup_scheduled" ||
+        statusCode === "order_created" ||
+        statusCode === "shipped"
+      ) {
+        order.status = "Ready To Ship";
+      }
+
+      // --- Shipped / In-transit ---
+      if (
+        statusCode === "in_transit" ||
+        statusCode === "picked_up" ||
+        statusCode === "dispatched"
+      ) {
+        order.status = "In-transit";
+        order.ndrStatus = "In-transit";
+        if (!order.invoiceDate) {
+          order.invoiceDate = normalizedData.StatusDateTime;
+        }
+        order.reattempt = false;
+      }
+
+      // --- Out for Delivery ---
+      if (statusCode === "out_for_delivery") {
+        order.status = "Out for Delivery";
+        order.ndrStatus = "Out for Delivery";
+        order.reattempt = false;
+      }
+
+      // --- Delivered ---
+      if (statusCode === "delivered") {
+        order.status = "Delivered";
+        order.reattempt = false;
+        if (
+          order.ndrStatus === "Undelivered" ||
+          order.ndrStatus === "Out for Delivery" ||
+          order.ndrStatus === "Action_Requested"
+        ) {
+          order.ndrStatus = "Delivered";
+        }
+      }
+
+      // --- Undelivered / NDR ---
+      if (
+        statusCode === "undelivered" ||
+        statusCode === "delivery_failed" ||
+        statusCode === "delivery_attempt_failed"
+      ) {
+        if (order.ndrStatus !== "Action_Requested") {
+          order.status = "Undelivered";
+          order.ndrStatus = "Undelivered";
+          order.ndrReason = {
+            date: normalizedData.StatusDateTime,
+            reason: normalizedData.Description || normalizedData.Instructions,
+          };
+
+          const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+          const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+          const lastEntryDate = lastAction?.date
+            ? new Date(lastAction.date).getTime()
+            : null;
+          const currentStatusDate = new Date(normalizedData.StatusDateTime).getTime();
+
+          if (
+            (order.ndrHistory.length === 0 || lastEntryDate < currentStatusDate)
+            // order.ndrHistory.length <= 3
+          ) {
+            const attemptCount = order.ndrHistory?.length + 1 || 0;
+            order.reattempt = true;
+            const newHistoryEntry = {
+              actions: [
+                {
+                  action: `NDR ${attemptCount} Raised`,
+                  actionBy: order.courierServiceName,
+                  remark: normalizedData.Description || normalizedData.Remarks || "Delivery Failed",
+                  source: order.provider,
+                  date: normalizedData.StatusDateTime,
+                },
+              ],
+            };
+            order.ndrHistory.push(newHistoryEntry);
+          }
+        }
+      }
+
+      if (order.ndrHistory.length >= 4) {
+        order.reattempt = false;
+      }
+
+      // --- RTO ---
+      if (statusCode === "rto" || statusCode === "rto_initiated") {
+        order.status = "RTO";
+        order.ndrStatus = "RTO";
+        order.reattempt = false;
+      }
+
+      // --- RTO In-transit ---
+      if (statusCode === "rto_in_transit" || statusCode === "rto_intransit") {
+        order.status = "RTO In-transit";
+        order.ndrStatus = "RTO In-transit";
+        order.reattempt = false;
+      }
+
+      // --- RTO Delivered ---
+      if (statusCode === "rto_delivered") {
+        order.status = "RTO Delivered";
+        order.ndrStatus = "RTO Delivered";
+        order.reattempt = false;
+      }
+
+      // --- Cancelled ---
+      if (statusCode === "cancelled" || statusCode === "shipment_cancelled") {
+        order.status = "Cancelled";
+        order.ndrStatus = "Cancelled";
+        balanceTobeAdded =
+          order.totalFreightCharges === "N/A"
+            ? 0
+            : parseFloat(order.totalFreightCharges);
+        shouldUpdateWallet = true;
+      }
+    }
+
+
     if (Array.isArray(result.data) && result.data.length > 0) {
       // If API returned a full list of tracking events
       const newTrackingArray = result.data.map((item) => {
         const mapped =
-          partner === "ZipyPost"
+          partner === "ZipyPost" || partner === "BoxdLogistics"
             ? mapTrackingResponse([item], partner)
             : mapTrackingResponse([item], provider, result?.remark);
 
@@ -1163,7 +1298,7 @@ const trackOrders = async () => {
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
       // provider: "Dtdc",
-      // awb_number: "77697394622",
+      // awb_number: "77716626503",
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1261,6 +1396,30 @@ const mapTrackingResponse = (data, provider, remark) => {
       StatusLocation: latestScan?.location || "Unknown",
       StatusDateTime: latestScan?.scan_time || null,
       Instructions: latestScan?.remark || "N/A",
+    };
+  }
+
+  if (provider === "BoxdLogistics") {
+    // Real API response: { id, shipment_id, awb_number, status, description, remarks, location, datetime, created_at, ... }
+    // Dates from API are naive IST strings like '2026-03-07T16:42:19.578337' (no timezone suffix)
+    // Append 'Z' directly so the frontend reads it as-is (same pattern as ShreeMaruti in this codebase)
+    // e.g. '2026-03-07T16:42:19.578337Z' → frontend displays 4:42 PM correctly
+    const formatBoxdDateTime = (rawDate) => {
+      if (!rawDate) return null;
+      if (rawDate.includes("Z") || rawDate.includes("+")) return rawDate;
+      return rawDate + "Z"; // treat the IST time as-is so frontend shows correct time
+    };
+
+    const scanArray = data || [];
+    const latestScan = scanArray?.[0];
+    return {
+      Status: latestScan?.status || "N/A",          // e.g. 'shipped', 'pickup_scheduled'
+      Description: latestScan?.description || "N/A", // human-readable description
+      scanCode: latestScan?.status ?? null,           // use status string as code
+      StatusLocation: latestScan?.location || "Unknown",
+      StatusDateTime: formatBoxdDateTime(latestScan?.created_at),
+      Instructions: latestScan?.status || "N/A",     // used for status-matching logic
+      Remarks: latestScan?.remarks || null,
     };
   }
   // console.log(data, provider);

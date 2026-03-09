@@ -22,7 +22,10 @@ const mongoose = require("mongoose");
 const {
   cancelOrderShreeMaruti,
 } = require("../../AllCouriers/ShreeMaruti/Couriers/couriers.controller");
-const {cancelShipmentEkart} = require("../../AllCouriers/Ekart/Couriers/couriers.controller");
+const { cancelShipmentEkart } = require("../../AllCouriers/Ekart/Couriers/couriers.controller");
+const {
+  cancelOrderBoxdLogistics,
+} = require("../../AllCouriers/BoxdLogistics/Courier/couriers.controller");
 
 const cancelOrdersAtBooked = async (req, res) => {
   const MAX_RETRIES = 1;
@@ -68,6 +71,8 @@ const cancelOrdersAtBooked = async (req, res) => {
         currentOrder.provider === "Bluedart"
       ) {
         provider = "ZipyPost";
+      } else if (currentOrder.partner === "BoxdLogistics") {
+        provider = "BoxdLogistics";
       } else {
         provider = currentOrder.provider;
       }
@@ -92,11 +97,15 @@ const cancelOrdersAtBooked = async (req, res) => {
         case "ZipyPost":
           result = await cancelOrderZipypost(currentOrder.awb_number);
           break;
-          case "Ekart":
-            result=await cancelShipmentEkart(currentOrder.awb_number);
-            break;
+        case "Ekart":
+          result = await cancelShipmentEkart(currentOrder.awb_number);
+          break;
+        case "BoxdLogistics":
+          result = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
+          break;
         default:
           throw new Error("Unsupported courier provider");
+
       }
 
       if (result?.error || result.success === false) {

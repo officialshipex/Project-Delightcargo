@@ -10,6 +10,7 @@ const {
   submitNdrToZipypost,
   submitNdrToShreeMaruti,
   submitNdrToEkart,
+  submitNdrToBoxdLogistics,
 } = require("../services/ndrService");
 const Order = require("../models/newOrder.model");
 
@@ -33,6 +34,10 @@ const ndrProcessController = async (req, res) => {
     new_address2,
     new_phone,
     new_pincode,
+    // BoxdLogistics specific
+    updated_city,
+    updated_state,
+    action_date,
   } = req.body;
 
   // console.log("awb",awb_number)
@@ -107,8 +112,6 @@ const ndrProcessController = async (req, res) => {
         new_pincode,
       });
     } else if (orderDetails.partner === "ZipyPost") {
-      // Implement ZipyPost NDR API call here
-      // console.log("zipypost",req.body);
       const payload = {
         action,
         seller_remark: remarks,
@@ -119,6 +122,19 @@ const ndrProcessController = async (req, res) => {
         provider: orderDetails.provider,
       };
       response = await submitNdrToZipypost(awb_number, payload);
+    } else if (orderDetails.partner === "BoxdLogistics") {
+      response = await submitNdrToBoxdLogistics({
+        awb_number,
+        action,
+        remarks: remarks || comments,
+        action_date,
+        updated_address_line1: new_address || consignee_address,
+        updated_address_line2: new_address2 || consignee_address2,
+        updated_city,
+        updated_state,
+        updated_pincode: new_pincode,
+        updated_mobile: new_phone || phone,
+      });
     } else {
       return res.status(400).json({ error: "Unsupported platform" });
     }
@@ -247,7 +263,7 @@ const ndrBulkProcessController = async (req, res) => {
                 ? "Change Contact"
                 : action === "CHANGE ADDRESS"
                   ? "Change Address"
-                  : action; // Default to original action if it doesn't match any case
+                  : action;
           const payload = {
             action: customAction,
             seller_remark: remarks,
@@ -257,8 +273,20 @@ const ndrBulkProcessController = async (req, res) => {
             address2,
             provider,
           };
-          // console.log("payload", payload);
           apiResponse = await submitNdrToZipypost(awb_number, payload);
+        } else if (partner === "BoxdLogistics") {
+          apiResponse = await submitNdrToBoxdLogistics({
+            awb_number,
+            action,
+            remarks,
+            action_date: null,
+            updated_address_line1: address1,
+            updated_address_line2: address2,
+            updated_city: p.updated_city || null,
+            updated_state: p.updated_state || null,
+            updated_pincode: p.new_pincode || null,
+            updated_mobile: phone,
+          });
         } else {
           apiResponse = { success: false, message: "Unsupported provider" };
         }
