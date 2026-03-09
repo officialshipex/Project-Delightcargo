@@ -38,12 +38,14 @@ const {
 const {
   checkZipypostServiceability,
 } = require("../AllCouriers/Zipypost/Couriers/couriers.controller");
-
+const {
+  checkServiceabilityBoxdLogistics,
+} = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller");
 const checkServiceabilityAll = async (service, id, pincode) => {
   try {
     const currentOrder = await Order.findById(id);
     if (!currentOrder) throw new Error("Order not found");
-
+    // console.log("service",service)
     const pickupPincode = pincode;
     const deliveryPincode = currentOrder.receiverAddress?.pinCode || "";
     const paymentMethod = currentOrder.paymentDetails?.method || "prepaid";
@@ -261,6 +263,32 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         const result = await checkZipypostServiceability(payload);
         return result;
       }
+    }
+    if (service.provider.toLowerCase() === "boxdlogistics") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
+      const payload = {
+        pickupPincode: pickupPincode,
+        shippingPincode: deliveryPincode,
+        paymentMode: paymentMethod === "COD" ? "cod" : "prepaid",
+        codAmount: currentOrder.paymentDetails?.amount || 0,
+        weight: weight,
+        length: currentOrder.packageDetails.volumetricWeight?.length || 0,
+        breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
+        height: currentOrder.packageDetails.volumetricWeight?.height || 0,
+      };
+      const res = await checkServiceabilityBoxdLogistics(payload);
+
+      if (res && res.success && Array.isArray(res.courier_ids)) {
+        const sName = service.name.toLowerCase();
+        if (sName.includes("surface")) {
+          return { ...res, success: res.courier_ids.includes(4) };
+        } else if (sName.includes("air")) {
+          return { ...res, success: res.courier_ids.includes(6) };
+        }
+      }
+      return res;
     }
 
     // Default

@@ -35,6 +35,7 @@ const {
   createOrderZipypost,
 } = require("../AllCouriers/Zipypost/Couriers/bulkShipment.controller");
 const { createOrderEkart } = require("../AllCouriers/Ekart/Couriers/bulkShipment.controller");
+const { createOrderBoxdLogistics } = require("../AllCouriers/BoxdLogistics/Courier/bulkShipmentcontroller");
 
 const updatePickup = async (req, res) => {
   try {
@@ -176,6 +177,16 @@ const callProviderWithRetry = async (
             priceBreakup
           );
           break;
+        case "BoxdLogistics":
+          result = await createOrderBoxdLogistics(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges,
+            priceBreakup
+          );
+          break;
         default:
           console.error(
             `No shipment function defined for ${serviceDetails.provider}`
@@ -196,7 +207,7 @@ const callProviderWithRetry = async (
 
 const shipBulkOrder = async (req, res) => {
   try {
-    //   const { id, pincode, plan, isBulkShip } = req.body;
+    
     const { selectedOrders, pinCode } = req.body;
     // console.log(pinCode)
     const userID = req.user._id;
@@ -293,7 +304,7 @@ const shipBulkOrder = async (req, res) => {
 
 const createBulkOrder = async (req, res) => {
   const { selectedOrders } = req.body;
-
+// console.log("order",selectedOrders)
   if (!Array.isArray(selectedOrders) || selectedOrders.length === 0) {
     return res
       .status(400)
@@ -333,6 +344,7 @@ const createBulkOrder = async (req, res) => {
       const EDDRates = await EDDMap.find();
       const couriers = await Courier.find({ status: "Enable" });
       const courierServices = await Services.find({ status: "Enable" });
+      // console.log("courierServices",courierServices)
 
       // 5) Determine eligible couriers (weight slab logic)
       let eligibleCouriers = (plans.rateCard || [])
@@ -341,6 +353,8 @@ const createBulkOrder = async (req, res) => {
           const weightSlab = rc.weightPriceBasic?.[0]?.weight / 1000 || 0;
           return weightSlab >= applicableWeight;
         });
+
+        // console.log("eligibleCouriers",eligibleCouriers)
 
       if (eligibleCouriers.length > 0) {
         const minSlab = Math.min(
@@ -377,6 +391,8 @@ const createBulkOrder = async (req, res) => {
         );
         return !!service && provider?.status === "Enable";
       });
+
+      // console.log("eligibleCouriers",eligibleCouriers)
 
       // zone and priority sorting
       const zone = await getZone(
@@ -435,7 +451,7 @@ const createBulkOrder = async (req, res) => {
           };
 
           const rates = await calculateRateForServiceBulk(details);
-          console.log("rates",rates)
+          // console.log("rates", rates)
           const charges = parseFloat(rates?.[0]?.forward?.finalCharges || 0);
 
           if (!charges || isNaN(charges) || charges <= 0) {
@@ -447,11 +463,11 @@ const createBulkOrder = async (req, res) => {
             provider: courier.courierProviderName,
             name: courier.courierServiceName,
           };
-          const priceBreakup={
-            freight:rates?.[0]?.forward?.charges,
-            cod:rates?.[0]?.cod,
-            gst:rates?.[0]?.forward?.gst,
-            total:rates?.[0]?.forward?.finalCharges,
+          const priceBreakup = {
+            freight: rates?.[0]?.forward?.charges,
+            cod: rates?.[0]?.cod,
+            gst: rates?.[0]?.forward?.gst,
+            total: rates?.[0]?.forward?.finalCharges,
           }
 
           const result = await callProviderWithRetry(

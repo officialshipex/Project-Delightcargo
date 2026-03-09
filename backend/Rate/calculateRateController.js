@@ -28,6 +28,7 @@ const {
   checkZipypostServiceability,
 } = require("../AllCouriers/Zipypost/Couriers/couriers.controller.js");
 const { checkEkartServiceability } = require("../AllCouriers/Ekart/Couriers/couriers.controller.js");
+const { checkServiceabilityBoxdLogistics } = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller.js");
 
 const calculateRate = async (req, res) => {
   try {
@@ -88,9 +89,10 @@ const calculateRate = async (req, res) => {
           "Dtdc",
           "Smartship",
           "Amazon Shipping",
-          "EcomExpres",
+          "EcomExpress",
           "ZipyPost",
-          "Ekart"
+          "Ekart",
+          "BoxdLogistics"
         ].includes(provider)
       ) {
         continue;
@@ -113,7 +115,7 @@ const calculateRate = async (req, res) => {
         )
       ) {
         // Local data missing → use API
-        if (provider === "EcomExpres") {
+        if (provider === "EcomExpress") {
           serviceable = await checkServiceabilityEcomExpress(
             pickUpPincode,
             deliveryPincode,
@@ -185,13 +187,35 @@ const calculateRate = async (req, res) => {
           codAmount: declaredValue,
         };
         serviceable = await checkEkartServiceability(payload);
-      }
-      else {
+      } else if (provider === "BoxdLogistics") {
+        const payload = {
+          pickupPincode: pickUpPincode,
+          shippingPincode: deliveryPincode,
+          paymentMode: paymentType === "COD" ? "cod" : "prepaid",
+          codAmount: paymentType === "COD" ? declaredValue : 0,
+          weight: chargedWeight,
+          length: dimensions?.length || 10,
+          breadth: dimensions?.width || 10,
+          height: dimensions?.height || 10,
+        };
+        serviceable = await checkServiceabilityBoxdLogistics(payload);
+      } else {
         // Local says not serviceable → skip API
         continue;
       }
 
-      if (!serviceable || serviceable.success === false) continue;
+      let isServiceable = serviceable && serviceable.success !== false;
+
+      if (provider === "BoxdLogistics" && isServiceable && Array.isArray(serviceable.courier_ids)) {
+        const sName = rc.courierServiceName.toLowerCase();
+        if (sName.includes("surface")) {
+          isServiceable = serviceable.courier_ids.includes(4);
+        } else if (sName.includes("air")) {
+          isServiceable = serviceable.courier_ids.includes(6);
+        }
+      }
+
+      if (!isServiceable) continue;
 
       // Step 5: Rate calculation
       let basicCharge = parseFloat(rc.weightPriceBasic[0][currentZone]);

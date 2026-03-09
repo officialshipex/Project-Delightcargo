@@ -28,6 +28,9 @@ const {
 const {
   checkEkartServiceability,
 } = require("../../AllCouriers/Ekart/Couriers/couriers.controller.js");
+const {
+  checkServiceabilityBoxdLogistics,
+} = require("../../AllCouriers/BoxdLogistics/Courier/couriers.controller.js");
 
 // ✅ Input Validation Schema
 const serviceabilitySchema = Joi.object({
@@ -56,6 +59,7 @@ const courierIds = {
   "Shree Maruti": "06",
   ZipyPost: "07",
   Ekart: "08",
+  BoxdLogistics: "09",
 };
 
 const pincodeServiceability = async (req, res) => {
@@ -197,11 +201,29 @@ const pincodeServiceability = async (req, res) => {
           checkEkartServiceability({
             pickUpPincode,
             deliveryPincode,
-            paymentMethod:paymentType,
-            codAmount:declaredValue
+            paymentMethod: paymentType,
+            codAmount: declaredValue,
           }),
       },
-    ].filter((p) => activeCourierNames.includes(p.name));
+      {
+        name: "BoxdLogistics",
+        check: async () =>
+          checkServiceabilityBoxdLogistics({
+            pickupPincode: pickUpPincode,
+            shippingPincode: deliveryPincode,
+            paymentMode: paymentType === "COD" ? "cod" : "prepaid",
+            codAmount: paymentType === "COD" ? declaredValue : 0,
+            weight: chargedWeight,
+            length,
+            breadth: width,
+            height,
+          }),
+      },
+    ].filter((p) =>
+      activeCourierNames.some(
+        (name) => name.toLowerCase() === p.name.toLowerCase()
+      )
+    );
 
     let ans = [];
 
@@ -210,14 +232,30 @@ const pincodeServiceability = async (req, res) => {
       if (rc.status !== "Active") continue;
       // console.log("rate card",rc)
       const provider = rc.courierProviderName;
-      const providerCheck = providers.find((p) => p.name.toLowerCase() === provider.toLowerCase());
-      // console.log("Checking serviceability for provider:", providerCheck);
+      // console.log("provider", provider)
+      const providerCheck = providers.find((p) => {
+        // console.log("p.name.toLowerCase()", p.name.toLowerCase())
+        // console.log("provider.toLowerCase()", provider.toLowerCase())
+        return p.name.toLowerCase() === provider.toLowerCase()
+      });
+      console.log("Checking serviceability for provider:", providerCheck);
       if (!providerCheck) continue;
 
       const serviceable = await providerCheck.check();
       // console.log("serviceable",serviceable)
       // console.log(`Serviceability for ${provider}:`, serviceable);
-      if (!serviceable || serviceable.success === false) continue;
+      let isServiceable = serviceable && serviceable.success !== false;
+
+      if (provider.toLowerCase() === "boxdlogistics" && isServiceable && Array.isArray(serviceable.courier_ids)) {
+        const sName = rc.courierServiceName.toLowerCase();
+        if (sName.includes("surface")) {
+          isServiceable = serviceable.courier_ids.includes(4);
+        } else if (sName.includes("air")) {
+          isServiceable = serviceable.courier_ids.includes(6);
+        }
+      }
+
+      if (!isServiceable) continue;
 
       // ✅ Charges calculation
       const basicCharge = parseFloat(rc.weightPriceBasic[0][currentZone]);

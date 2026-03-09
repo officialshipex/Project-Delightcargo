@@ -27,6 +27,9 @@ const {
 const {
   checkEkartServiceability,
 } = require("../../AllCouriers/Ekart/Couriers/couriers.controller.js");
+const {
+  checkServiceabilityBoxdLogistics,
+} = require("../../AllCouriers/BoxdLogistics/Courier/couriers.controller.js");
 
 // Define courier IDs for each provider
 const courierIds = {
@@ -38,6 +41,7 @@ const courierIds = {
   "Shree Maruti": "06",
   ZipyPost: "07",
   Ekart: "08",
+  BoxdLogistics: "09",
 };
 
 // Input Validation Schema
@@ -181,18 +185,39 @@ const availableCourierService = async (req, res) => {
         serviceable = await checkZipypostServiceability(payload);
         // console.log("serviceable",serviceable)
       } else if (provider === "Ekart") {
-        const payload={
+        const payload = {
           pickUpPincode,
           deliveryPincode,
-          paymentMethod:paymentType,
-          codAmount:declaredValue
-        }
-        serviceable = await checkEkartServiceability(
-          payload
-        );
+          paymentMethod: paymentType,
+          codAmount: declaredValue,
+        };
+        serviceable = await checkEkartServiceability(payload);
+      } else if (provider === "BoxdLogistics") {
+        const payload = {
+          pickupPincode: pickUpPincode,
+          shippingPincode: deliveryPincode,
+          paymentMode: paymentType === "COD" ? "cod" : "prepaid",
+          codAmount: paymentType === "COD" ? declaredValue : 0,
+          weight: applicableWeight * 1000,
+          length: 10,
+          breadth: 10,
+          height: 10,
+        };
+        serviceable = await checkServiceabilityBoxdLogistics(payload);
       }
 
-      if (!serviceable || serviceable.success === false) continue;
+      let isServiceable = serviceable && serviceable.success !== false;
+
+      if (provider === "BoxdLogistics" && isServiceable && Array.isArray(serviceable.courier_ids)) {
+        const sName = rc.courierServiceName.toLowerCase();
+        if (sName.includes("surface")) {
+          isServiceable = serviceable.courier_ids.includes(4);
+        } else if (sName.includes("air")) {
+          isServiceable = serviceable.courier_ids.includes(6);
+        }
+      }
+
+      if (!isServiceable) continue;
 
       // ✅ Charges calculation
       let basicCharge = parseFloat(rc.weightPriceBasic[0][currentZone]);
@@ -201,7 +226,7 @@ const availableCourierService = async (req, res) => {
       );
       const count = Math.ceil(
         (chargedWeight - rc.weightPriceBasic[0].weight) /
-          rc.weightPriceAdditional[0].weight,
+        rc.weightPriceAdditional[0].weight,
       );
       let finalCharge =
         rc.weightPriceBasic[0].weight >= chargedWeight

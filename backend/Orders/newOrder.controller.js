@@ -58,6 +58,9 @@ const {
 const {
   cancelShipmentEkart,
 } = require("../AllCouriers/Ekart/Couriers/couriers.controller");
+const {
+  cancelOrderBoxdLogistics,
+} = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller");
 // Create a shipment
 const newOrder = async (req, res) => {
   try {
@@ -1317,34 +1320,46 @@ const ShipeNowOrder = async (req, res) => {
       if (provider?.status === "Enable" && srvc.status === "Enable") {
         // console.log("plan", plan);
         const planRateCard = plan.rateCard.filter(
-          (card) =>
-            normalize(card.courierServiceName) === normalize(srvc.name) &&
-            normalize(card.courierProviderName) === normalize(srvc.provider) &&
-            card.status === "Active",
+          (card) => {
+            const sameProvider = normalize(card.courierProviderName) === normalize(srvc.provider);
+            const sameName = normalize(card.courierServiceName) === normalize(srvc.name);
+            const isBoxdSpecial = normalize(srvc.provider) === "boxdlogistics";
+
+            return sameProvider && (sameName || isBoxdSpecial) && card.status === "Active";
+          }
         );
         // console.log("planRateCard",planRateCard)
-        if (planRateCard) {
+        if (planRateCard && planRateCard.length > 0) {
           enabledServices.push(srvc);
         }
       }
     }
 
-    const availableServices = await Promise.all(
+    const availableServicesResults = await Promise.all(
       enabledServices.map(async (item) => {
         let result = await checkServiceabilityAll(
           item,
           order._id,
           order.pickupAddress.pinCode,
         );
+        // console.log("result",result)
         if (result && result.success) {
-          return { item };
+          if (item.provider?.toLowerCase() === "boxdlogistics" && Array.isArray(result.courier_ids)) {
+            return result.courier_ids.map((cid) => ({
+              item,
+              courierId: cid,
+              virtualName: cid === 4 ? "BlueDart Surface" : cid === 6 ? "BlueDart Air" : item.name,
+            }));
+          }
+          return [{ item }];
         }
+        return [];
       }),
     );
     // console.log("available", availableServices);
 
-    const filteredServices = availableServices.filter(Boolean);
-
+    const filteredServices = availableServicesResults.flat();
+    // console.log("filterservice",filteredServices)
     // ✅ calculate zone
     const zone = await getZone(
       order.pickupAddress.pinCode,
@@ -1374,7 +1389,7 @@ const ShipeNowOrder = async (req, res) => {
       .map((service) => {
         const matchedRate = rates.find(
           (rate) =>
-            normalize(rate.courierServiceName) === normalize(service.item.name),
+            normalize(rate.courierServiceName) === normalize(service.virtualName || service.item.name),
         );
 
         if (!matchedRate) return null;
@@ -1398,8 +1413,8 @@ const ShipeNowOrder = async (req, res) => {
           ...matchedRate,
           provider: service.item.provider,
           courierType: service.item.courierType,
-          courier: service.item?.courier,
-          serviceName: service.item.name,
+          courier: service.courierId || service.item?.courier,
+          serviceName: service.virtualName || service.item.name,
           estimatedDeliveryDate,
         };
       })
@@ -1611,7 +1626,13 @@ const cancelOrdersAtBooked = async (req, res) => {
       if (result.error) {
         return res.status(400).send({ error: result.error });
       }
-    } else {
+    } else if (currentOrder.partner === "BoxdLogistics") {
+      const result = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
+      if (result.error) {
+        return res.status(400).send({ error: result.error });
+      }
+    }
+    else {
       return {
         error: "Unsupported courier provider",
         orderId: currentOrder._id,
@@ -1982,7 +2003,9 @@ const bulkCancelOrder = async (req, res) => {
           currentOrder.partner === "ZipyPost" &&
             currentOrder.provider === "Bluedart"
             ? "ZipyPost"
-            : currentOrder.provider;
+            : currentOrder.partner === "BoxdLogistics"
+              ? "BoxdLogistics"
+              : currentOrder.provider;
 
         // --- Cancel order by provider ---
         let cancelResponse;
@@ -2006,6 +2029,9 @@ const bulkCancelOrder = async (req, res) => {
             break;
           case "Ekart":
             cancelResponse = await cancelShipmentEkart(currentOrder.awb_number);
+            break;
+          case "BoxdLogistics":
+            cancelResponse = await cancelOrderBoxdLogistics(currentOrder.awb_number,currentOrder.orderId);
             break;
           default:
             failedCount++;

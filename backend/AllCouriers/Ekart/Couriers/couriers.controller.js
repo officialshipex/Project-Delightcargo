@@ -603,8 +603,8 @@ const checkEkartServiceability = async (payload) => {
     const pickupData = pickupResponse.data;
     const receiverData = receiverResponse.data;
 
-    console.log("Ekart Serviceability Pickup Data:", pickupData);
-    console.log("Ekart Serviceability Receiver Data:", receiverData);
+    // console.log("Ekart Serviceability Pickup Data:", pickupData);
+    // console.log("Ekart Serviceability Receiver Data:", receiverData);
 
     const pickupServiceable = pickupData?.status === true;
     const receiverServiceable = receiverData?.status === true;

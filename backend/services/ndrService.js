@@ -1177,6 +1177,155 @@ const submitNdrToEkart = async ({
   }
 };
 
+const submitNdrToBoxdLogistics = async ({
+  awb_number,
+  action,
+  remarks,
+  action_date,
+  updated_address_line1,
+  updated_address_line2,
+  updated_city,
+  updated_state,
+  updated_pincode,
+  updated_mobile,
+}) => {
+  try {
+    const BOXD_TOKEN = process.env.BOXDLOGISTICS_TOKEN;
+    const BASE_URL = "https://api.boxdlogistics.com/seller/v1";
+    const headers = {
+      Authorization: `Token ${BOXD_TOKEN}`,
+      "Content-Type": "application/json",
+    };
+
+    if (!awb_number || !action || !remarks) {
+      return {
+        success: false,
+        error: "awb_number, action, and remarks are required",
+      };
+    }
+
+    // Step 1: Fetch NDR details to get ndr_id for this AWB
+    const ndrDetailsRes = await axios.get(
+      `${BASE_URL}/ndr/by-awbs/?awb_numbers=${encodeURIComponent(awb_number)}`,
+      { headers }
+    );
+
+    const ndrList = ndrDetailsRes.data;
+    const ndrRecord = Array.isArray(ndrList) ? ndrList[0] : ndrList;
+    const ndrId = ndrRecord?.id || ndrRecord?.ndr_id;
+
+    if (!ndrId) {
+      console.warn("BoxdLogistics NDR: No NDR ID found for AWB:", awb_number);
+      // If no NDR found, do an internal-only log (like Ekart)
+      const orderInDb = await Order.findOne({ awb_number });
+      if (!orderInDb) return { success: false, error: "Order not found in DB" };
+      const entry = {
+        action: action.toUpperCase() === "CHANGE_ADDRESS" ? "RE-ATTEMPT" : action,
+        actionBy: "ShipexIndia",
+        remark: remarks || "NDR Action Requested",
+        source: "ShipexIndia",
+        date: new Date(),
+      };
+      if (!Array.isArray(orderInDb.ndrHistory)) orderInDb.ndrHistory = [];
+      const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
+      if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
+        latest.actions.push(entry);
+      } else {
+        orderInDb.ndrHistory.push({ actions: [entry] });
+      }
+      orderInDb.ndrStatus = "Action_Requested";
+      orderInDb.reattempt = false;
+      await orderInDb.save();
+      return { success: true, message: "NDR action logged internally (no NDR ID from BoxdLogistics)" };
+    }
+
+    // Step 2: Map action to BoxdLogistics endpoint path
+    // BoxdLogistics endpoint: POST /seller/v1/ndr-action/{action_type}/
+    // action_type options: reattempt, rto, update-address, update-mobile
+    let endpoint;
+    const actionUpper = action.toUpperCase();
+    if (actionUpper === "RTO") {
+      endpoint = `${BASE_URL}/ndr-action/rto/`;
+    } else if (actionUpper === "CHANGE_ADDRESS") {
+      endpoint = `${BASE_URL}/ndr-action/update-address/`;
+    } else {
+      // RE-ATTEMPT
+      endpoint = `${BASE_URL}/ndr-action/reattempt/`;
+    }
+
+    const todayDate = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+    const payload = {
+      ndr_id: ndrId,
+      remarks,
+      action_date: action_date || todayDate,
+      action_by: "seller",
+      ...(updated_mobile ? { updated_mobile } : {}),
+      ...(actionUpper === "CHANGE_ADDRESS"
+        ? {
+          updated_address_line1: updated_address_line1 || "",
+          updated_address_line2: updated_address_line2 || "",
+          updated_city: updated_city || "",
+          updated_state: updated_state || "",
+          updated_pincode: updated_pincode || "",
+        }
+        : {}),
+    };
+
+    console.log("📦 BoxdLogistics NDR Payload:", endpoint, payload);
+    const response = await axios.post(endpoint, payload, { headers });
+    console.log("✅ BoxdLogistics NDR Response:", response.data);
+
+    // Step 3: Update order in DB
+    const orderInDb = await Order.findOne({ awb_number });
+    if (!orderInDb) {
+      return { success: true, message: "NDR submitted but order not found in DB", data: response.data };
+    }
+
+    const entry = {
+      action: actionUpper === "CHANGE_ADDRESS" ? "RE-ATTEMPT" : action,
+      actionBy: "ShipexIndia",
+      remark: remarks,
+      source: "ShipexIndia",
+      date: new Date(),
+    };
+
+    if (!Array.isArray(orderInDb.ndrHistory)) orderInDb.ndrHistory = [];
+    const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
+    if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
+      latest.actions.push(entry);
+    } else {
+      orderInDb.ndrHistory.push({ actions: [entry] });
+    }
+
+    // If Change Address — also update the receiver address
+    if (actionUpper === "CHANGE_ADDRESS") {
+      if (updated_address_line1) orderInDb.receiverAddress.address = updated_address_line1;
+      if (updated_city) orderInDb.receiverAddress.city = updated_city;
+      if (updated_state) orderInDb.receiverAddress.state = updated_state;
+      if (updated_pincode) orderInDb.receiverAddress.pinCode = updated_pincode;
+      if (updated_mobile) orderInDb.receiverAddress.phoneNumber = updated_mobile;
+    }
+
+    orderInDb.ndrStatus = actionUpper === "RTO" ? "RTO" : "Action_Requested";
+    orderInDb.status = "Undelivered";
+    orderInDb.reattempt = false;
+    await orderInDb.save();
+
+    return {
+      success: true,
+      message: "BoxdLogistics NDR action submitted successfully",
+      data: response.data,
+    };
+  } catch (error) {
+    console.error("❌ BoxdLogistics NDR Error:", error?.response?.data || error.message);
+    return {
+      success: false,
+      error: "Error occurred while submitting NDR to BoxdLogistics",
+      details: error?.response?.data || error.message,
+    };
+  }
+};
+
 module.exports = {
   getOrderDetails,
   callShiprocketNdrApi,
@@ -1189,4 +1338,5 @@ module.exports = {
   submitNdrToZipypost,
   submitNdrToShreeMaruti,
   submitNdrToEkart,
+  submitNdrToBoxdLogistics,
 };
