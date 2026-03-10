@@ -238,7 +238,7 @@ const pincodeServiceability = async (req, res) => {
         // console.log("provider.toLowerCase()", provider.toLowerCase())
         return p.name.toLowerCase() === provider.toLowerCase()
       });
-      console.log("Checking serviceability for provider:", providerCheck);
+      // console.log("Checking serviceability for provider:", providerCheck);
       if (!providerCheck) continue;
 
       const serviceable = await providerCheck.check();
