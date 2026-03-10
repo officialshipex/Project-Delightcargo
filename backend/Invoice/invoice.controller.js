@@ -7,6 +7,8 @@ const path = require("path");
 const { uploads, s3 } = require("../config/s3");
 const cron = require("node-cron");
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
+const ExcelJS = require("exceljs");
+const moment = require("moment");
 const Pan = require("../models/Pan.model");
 
 const Wallet = require("../models/wallet"); // adjust path
@@ -1220,6 +1222,112 @@ const userGetInvoices = async (req, res) => {
   }
 };
 
+const exportInvoiceToExcel = async (req, res) => {
+  try {
+    const { invoiceNumber } = req.query;
+
+    if (!invoiceNumber) {
+      return res.status(400).json({ success: false, message: "Invoice number is required" });
+    }
+
+    const invoice = await Invoice.findOne({ invoiceNumber });
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: "Invoice not found" });
+    }
+
+    const transactions = invoice.chargesBreakup?.transactions || [];
+    if (!transactions.length) {
+      return res.status(404).json({ success: false, message: "No transactions found for this invoice" });
+    }
+
+    const awbs = [...new Set(transactions.map((t) => t.awb).filter(Boolean))];
+    const orders = await Order.find({ awb_number: { $in: awbs } });
+    const orderMap = new Map(orders.map((o) => [o.awb_number, o]));
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Invoice Details");
+
+    worksheet.columns = [
+      { header: "Order ID", key: "orderId", width: 15 },
+      { header: "AWB Number", key: "awb_number", width: 20 },
+      { header: "Description", key: "txnDescription", width: 40 },
+      { header: "Status", key: "status", width: 15 },
+      { header: "Pickup Name", key: "pickupName", width: 20 },
+      { header: "Pickup Phone", key: "pickupPhone", width: 15 },
+      { header: "Pickup City", key: "pickupCity", width: 15 },
+      { header: "Pickup Pincode", key: "pickupPincode", width: 12 },
+      { header: "Receiver Name", key: "customerName", width: 20 },
+      { header: "Receiver Phone", key: "customerPhone", width: 15 },
+      { header: "Receiver City", key: "customerCity", width: 15 },
+      { header: "Receiver Pincode", key: "customerPincode", width: 12 },
+      { header: "Products", key: "products", width: 40 },
+      { header: "Weight", key: "weight", width: 12 },
+      { header: "Length", key: "length", width: 10 },
+      { header: "Width", key: "width", width: 10 },
+      { header: "Height", key: "height", width: 10 },
+      { header: "Payment Method", key: "paymentMode", width: 15 },
+      { header: "Payment Amount", key: "amount", width: 15 },
+      { header: "Freight", key: "freight", width: 12 },
+      { header: "COD Charges", key: "codCharges", width: 12 },
+      { header: "GST", key: "gst", width: 12 },
+      { header: "Total Shipping", key: "totalShipping", width: 15 },
+      { header: "Courier Service Name", key: "courierServiceName", width: 25 },
+      { header: "Booked On", key: "shipmentCreatedAt", width: 25 },
+    ];
+
+    transactions.forEach((txn) => {
+      const order = orderMap.get(txn.awb);
+      worksheet.addRow({
+        orderId: order?.orderId || txn.channelOrderId || "N/A",
+        awb_number: txn.awb,
+        txnDescription: txn.description || "N/A",
+        status: order?.status || "N/A",
+        pickupName: order?.pickupAddress?.contactName || "N/A",
+        pickupPhone: order?.pickupAddress?.phoneNumber || "N/A",
+        pickupCity: order?.pickupAddress?.city || "N/A",
+        pickupPincode: order?.pickupAddress?.pinCode || "N/A",
+        customerName: order?.receiverAddress?.contactName || "N/A",
+        customerPhone: order?.receiverAddress?.phoneNumber || "N/A",
+        customerCity: order?.receiverAddress?.city || "N/A",
+        customerPincode: order?.receiverAddress?.pinCode || "N/A",
+        products: order?.productDetails?.map(p => `${p.name} (${p.sku || 'No SKU'}) x ${p.quantity}`).join(" | ") || "N/A",
+        weight: order?.packageDetails?.applicableWeight || order?.packageDetails?.deadWeight || 0,
+        length: order?.packageDetails?.volumetricWeight?.length || 0,
+        width: order?.packageDetails?.volumetricWeight?.width || 0,
+        height: order?.packageDetails?.volumetricWeight?.height || 0,
+        paymentMode: order?.paymentDetails?.method || "N/A",
+        amount: order?.paymentDetails?.amount || 0,
+        freight: order?.priceBreakup?.freight || 0,
+        codCharges: order?.priceBreakup?.cod || 0,
+        gst: order?.priceBreakup?.gst || 0,
+        totalShipping: txn.amount || order?.totalFreightCharges || 0,
+        courierServiceName: order?.courierServiceName || "N/A",
+        shipmentCreatedAt: order?.shipmentCreatedAt ? moment(order.shipmentCreatedAt).format("DD-MM-YYYY HH:mm") : "N/A",
+      });
+    });
+
+    // Formatting headers
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true };
+    });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=Invoice_${invoiceNumber}.xlsx`
+    );
+
+    await workbook.xlsx.write(res);
+    res.status(200).end();
+  } catch (err) {
+    console.error("Export to Excel error:", err);
+    res.status(500).json({ success: false, message: "Failed to export Excel" });
+  }
+};
+
 /* -------------------------
    Exports (controllers)
    -------------------------*/
@@ -1231,4 +1339,5 @@ module.exports = {
   adminGetInvoices,
   userGetInvoices,
   bulkDownloadInvoices,
+  exportInvoiceToExcel,
 };

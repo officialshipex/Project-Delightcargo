@@ -1,4 +1,6 @@
 const Order = require("../models/newOrder.model");
+const Wallet = require("../models/wallet");
+const User = require("../models/User.model");
 const { formatShreeMarutiDate } = require("../Orders/tracking.controller");
 
 const ShreeMarutiWebhook = async (req, res) => {
@@ -64,7 +66,7 @@ const ShreeMarutiWebhook = async (req, res) => {
     if (isRTOStatus) {
       order.reattempt = false; // not NDR case, this is RTO
 
-      if (status === "RTO" || status==="RTO_REQUESTED") {
+      if (status === "RTO" || status === "RTO_REQUESTED") {
         order.status = "RTO";
         order.ndrStatus = "RTO";
       }
@@ -93,11 +95,68 @@ const ShreeMarutiWebhook = async (req, res) => {
 
       if (status === "READY_FOR_DISPATCH") order.status = "Ready To Ship";
 
-      if (status === "PICKED_UP" || status==="PICKEDUP") {
+      const isPickupCancelled =
+        status === "CANCELLED" ||
+        status === "PICKUP_CANCELLED" ||
+        normalizedData.Instructions?.toLowerCase() === "pickup cancelled" ||
+        normalizedData.Instructions?.toLowerCase() === "pickup_cancelled";
+
+      if (isPickupCancelled) {
+        order.status = "Cancelled";
+        order.ndrStatus = "Cancelled";
+
+        const balanceToBeAdded =
+          order.totalFreightCharges === "N/A" || !order.totalFreightCharges
+            ? 0
+            : parseFloat(order.totalFreightCharges);
+
+        if (balanceToBeAdded > 0 && !order.walletRefunded) {
+          const userDoc = await User.findById(order.userId);
+          if (userDoc) {
+            const currentWallet = await Wallet.findById(userDoc.Wallet);
+            if (currentWallet) {
+              const alreadyRefunded = currentWallet.transactions.some(
+                (t) =>
+                  t.awb_number === order.awb_number &&
+                  t.category === "credit" &&
+                  (t.description === "Freight Charges Received" ||
+                    t.description === "Freight Charges Refunded")
+              );
+
+              if (!alreadyRefunded) {
+                const newBalance = (currentWallet.balance || 0) + balanceToBeAdded;
+                await Wallet.findOneAndUpdate(
+                  { _id: currentWallet._id },
+                  {
+                    $inc: { balance: balanceToBeAdded },
+                    $push: {
+                      transactions: {
+                        channelOrderId: order.orderId || null,
+                        category: "credit",
+                        amount: balanceToBeAdded,
+                        balanceAfterTransaction: newBalance,
+                        date: new Date(),
+                        awb_number: order.awb_number,
+                        description: "Freight Charges Received",
+                      },
+                    },
+                  }
+                );
+                order.walletRefunded = true;
+                console.log(
+                  `Refunded ${balanceToBeAdded} for AWB ${order.awb_number} due to pickup cancellation`
+                );
+              }
+            }
+          }
+        }
+      }
+
+      if (status === "PICKED_UP" || status === "PICKEDUP") {
         order.status = "In-transit";
         order.ndrStatus = "In-transit";
-        if(!order.invoiceDate){
-          order.invoiceDate=normalizedData.StatusDateTime
+        if (!order.invoiceDate) {
+          order.invoiceDate = normalizedData.StatusDateTime
         }
         order.reattempt = false;
       }

@@ -60,6 +60,7 @@ const calculateRate = async (req, res) => {
     );
 
     const activeCourierNames = activeCouriers.map((c) => c.courierName);
+    // console.log("activeCourierNames:", activeCourierNames);
 
     const rateCards = plan.rateCard;
     const orderType = paymentType === "COD" ? "cod" : "prepaid";
@@ -72,11 +73,15 @@ const calculateRate = async (req, res) => {
 
     for (let rc of rateCards) {
       const provider = rc.courierProviderName;
+      // console.log("provider:", provider);
       const mode = rc.mode;
       let serviceable = { success: false };
 
       // ✅ Skip if courier is disabled in DB
-      if (!activeCourierNames.includes(provider)) {
+      const activeCouriersLower = activeCourierNames.map(c => c.toLowerCase());
+
+      if (!activeCouriersLower.includes(provider.toLowerCase())) {
+        console.log(`SKIPPED (not in activeCouriers): "${provider}"`);
         continue;
       }
       if (rc.status !== "Active") continue;
@@ -90,7 +95,7 @@ const calculateRate = async (req, res) => {
           "Smartship",
           "Amazon Shipping",
           "EcomExpress",
-          "ZipyPost",
+          "Zipypost",
           "Ekart",
           "BoxdLogistics"
         ].includes(provider)
@@ -198,22 +203,111 @@ const calculateRate = async (req, res) => {
           breadth: dimensions?.width || 10,
           height: dimensions?.height || 10,
         };
-        serviceable = await checkServiceabilityBoxdLogistics(payload);
+        const boxdResult = await checkServiceabilityBoxdLogistics(payload);
+        // console.log("boxdlogistics serviceability:", boxdResult);
+
+        let boxdServiceable = boxdResult && boxdResult.success !== false;
+        if (boxdServiceable && Array.isArray(boxdResult.courier_ids)) {
+          const sName = rc.courierServiceName.toLowerCase();
+          if (sName.includes("surface")) {
+            boxdServiceable = boxdResult.courier_ids.includes(4);
+          } else if (sName.includes("air")) {
+            boxdServiceable = boxdResult.courier_ids.includes(6);
+          }
+        }
+        if (!boxdServiceable) continue;
+        // ✅ Mark serviceable so the outer check below passes
+        serviceable = { success: true };
       } else {
-        // Local says not serviceable → skip API
-        continue;
-      }
+
+        let localServiceability = await checkPincodeServiceability(
+          pickUpPincode,
+          provider,
+          deliveryPincode,
+          paymentType,
+        );
+
+        // Step 4: Determine whether to call API fallback
+        if (localServiceability.success === true) {
+          serviceable = { success: true };
+        } else if (
+          ["courier_not_found", "error", "pincode_not_found"].includes(
+            localServiceability.reason,
+          )
+        ) {
+          // Local data missing → use API
+          if (provider === "EcomExpress") {
+            serviceable = await checkServiceabilityEcomExpress(
+              pickUpPincode,
+              deliveryPincode,
+            );
+          } else if (provider === "Shree Maruti") {
+            const payload = {
+              fromPincode: parseInt(pickUpPincode),
+              toPincode: parseInt(deliveryPincode),
+              isCodOrder: paymentType === "COD",
+              deliveryMode: "SURFACE",
+            };
+            serviceable = await checkServiceabilityShreeMaruti(payload);
+          } else if (provider === "Delhivery") {
+            serviceable = await checkPincodeServiceabilityDelhivery(
+              pickUpPincode,
+              deliveryPincode,
+              orderType,
+            );
+          } else if (provider === "Dtdc") {
+            serviceable = await checkServiceabilityDTDC(
+              pickUpPincode,
+              deliveryPincode,
+              paymentType,
+            );
+          } else if (provider === "Smartship") {
+            const payload = {
+              source_pincode: pickUpPincode,
+              destination_pincode: deliveryPincode,
+              order_weight: applicableWeight,
+              order_value: declaredValue,
+            };
+            serviceable = await checkSmartshipHubServiceability(payload);
+          } else if (provider === "Amazon Shipping") {
+            serviceable = await checkAmazonServiceabilityWithoutOrder(
+              pickUpPincode,
+              deliveryPincode,
+              applicableWeight,
+              declaredValue,
+              paymentType,
+              dimensions,
+            );
+          } else if (provider === "Zipypost") {
+            const payload = {
+              source_pincode: pickUpPincode,
+              destination_pincode: deliveryPincode,
+              payment_type: paymentType,
+              order_value: declaredValue,
+              length: dimensions.length,
+              width: dimensions.width,
+              height: dimensions.height,
+              order_weight: applicableWeight,
+            };
+            serviceable = await checkZipypostServiceability(payload);
+            // console.log("service",serviceable)
+          } else if (provider === "Ekart") {
+            const payload = {
+              pickUpPincode: pickUpPincode,
+              deliveryPincode: deliveryPincode,
+              paymentMethod: paymentType,
+              codAmount: declaredValue,
+            };
+            serviceable = await checkEkartServiceability(payload);
+          }
+        } else {
+          // Local says not serviceable → skip API
+          continue;
+        }
+
+      } // end else (non-BoxdLogistics)
 
       let isServiceable = serviceable && serviceable.success !== false;
-
-      if (provider === "BoxdLogistics" && isServiceable && Array.isArray(serviceable.courier_ids)) {
-        const sName = rc.courierServiceName.toLowerCase();
-        if (sName.includes("surface")) {
-          isServiceable = serviceable.courier_ids.includes(4);
-        } else if (sName.includes("air")) {
-          isServiceable = serviceable.courier_ids.includes(6);
-        }
-      }
 
       if (!isServiceable) continue;
 

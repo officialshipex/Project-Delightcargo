@@ -1345,20 +1345,32 @@ const ShipeNowOrder = async (req, res) => {
         // console.log("result",result)
         if (result && result.success) {
           if (item.provider?.toLowerCase() === "boxdlogistics" && Array.isArray(result.courier_ids)) {
-            return result.courier_ids.map((cid) => ({
-              item,
-              courierId: cid,
-              virtualName: cid === 4 ? "BlueDart Surface" : cid === 6 ? "BlueDart Air" : item.name,
-            }));
+            // Determine which courierId this specific service name maps to
+            const sName = item.name?.toLowerCase() || "";
+            const requiredCid = sName.includes("surface") ? 4 : sName.includes("air") ? 6 : null;
+            if (requiredCid !== null && result.courier_ids.includes(requiredCid)) {
+              return [{ item, courierId: requiredCid, virtualName: normalize(item.name) }];
+            }
+            return [];
           }
           return [{ item }];
         }
         return [];
       }),
     );
-    // console.log("available", availableServices);
+    // console.log("available", availableServicesResults);
 
-    const filteredServices = availableServicesResults.flat();
+    const filteredServices = Array.from(
+      new Map(
+        availableServicesResults
+          .flat()
+          .map((s) => [
+            // Use normalized service name so each rate card variant (0.5KG, 1KG) is a unique key
+            `${s.item.provider}-${normalize(s.virtualName || s.item.name)}`,
+            s,
+          ])
+      ).values()
+    );
     // console.log("filterservice",filteredServices)
     // ✅ calculate zone
     const zone = await getZone(
@@ -1387,10 +1399,14 @@ const ShipeNowOrder = async (req, res) => {
     // ✅ Build updatedRates only for serviceable couriers
     const updatedRates = filteredServices
       .map((service) => {
-        const matchedRate = rates.find(
-          (rate) =>
-            normalize(rate.courierServiceName) === normalize(service.virtualName || service.item.name),
-        );
+        const matchedRate = rates.find((rate) => {
+          const rateName = normalize(rate.courierServiceName);
+          const serviceName = normalize(
+            service.virtualName || service.item.name
+          );
+          // Exact match for all couriers including BoxdLogistics variants
+          return rateName === serviceName;
+        });
 
         if (!matchedRate) return null;
 
@@ -2031,7 +2047,7 @@ const bulkCancelOrder = async (req, res) => {
             cancelResponse = await cancelShipmentEkart(currentOrder.awb_number);
             break;
           case "BoxdLogistics":
-            cancelResponse = await cancelOrderBoxdLogistics(currentOrder.awb_number,currentOrder.orderId);
+            cancelResponse = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
             break;
           default:
             failedCount++;
