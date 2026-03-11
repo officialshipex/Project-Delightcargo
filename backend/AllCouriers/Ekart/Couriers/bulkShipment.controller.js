@@ -8,6 +8,7 @@ const {
   calculateGSTForItems,
   addEkartAddress,
 } = require("./couriers.controller");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const createOrderEkart = async (
   serviceDetails,
@@ -231,6 +232,13 @@ const createOrderEkart = async (
     });
 
     await currentOrder.save();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   await assignPickupManifest(currentOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     /* --------------------------------------------------
        9️⃣ WALLET DEBIT (DTDC STYLE)

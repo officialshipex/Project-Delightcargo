@@ -7,13 +7,14 @@ const plan = require("../../models/Plan.model");
 const { getZone } = require("../../Rate/zoneManagementController");
 const {
   createClientWarehouse,
-} = require("../../AllCouriers/Delhivery/Courier/couriers.controller"); // Adjust path as needed
+} = require("../../AllCouriers/Delhivery/Courier/couriers.controller");
 const {
   fetchBulkWaybills,
-} = require("../../AllCouriers/Delhivery/Authorize/saveCourierContoller"); // Adjust path as needed
+} = require("../../AllCouriers/Delhivery/Authorize/saveCourierContoller");
 const url = process.env.DELHIVERY_URL;
 const API_TOKEN = process.env.DEL_API_TOKEN;
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
+const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
 const createDelhiveryShipment = async ({
   id,
@@ -253,6 +254,14 @@ const createDelhiveryShipment = async ({
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     return {
       success: true,

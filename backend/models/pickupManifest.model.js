@@ -19,6 +19,12 @@ const pickupManifestSchema = new mongoose.Schema(
       default: [],
     },
 
+    // Single provider — used for grouping manifests by courier
+    provider: {
+      type: String,
+      default: null,
+    },
+
     courierServiceNames: {
       type: [String],
       default: [],
@@ -60,7 +66,7 @@ const pickupManifestSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// One manifest per user per pickup date
-pickupManifestSchema.index({ userId: 1, pickupDate: 1 });
+// Compound index: one manifest per user + date + provider + pickup address
+pickupManifestSchema.index({ userId: 1, pickupDate: 1, provider: 1 });
 
 module.exports = mongoose.model("PickupManifest", pickupManifestSchema);

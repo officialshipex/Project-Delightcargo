@@ -18,6 +18,7 @@ const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const {
   getCachedZone,
 } = require("../../AllCouriers/Zipypost/Couriers/couriers.controller");
+const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
 const createZipypostShipment = async ({
   id,
@@ -301,6 +302,14 @@ const createZipypostShipment = async ({
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(currentOrder._id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     return {
       success: true,

@@ -174,6 +174,7 @@ const orderSchema = new mongoose.Schema(
     manifestJobId: { type: String },
     invoiceDate: { type: Date },
     pickupDate: { type: Date },
+    pickupId: { type: String, default: null },  // auto-assigned pickup manifest ID
 
     tracking: [
       {

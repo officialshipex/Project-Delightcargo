@@ -9,6 +9,7 @@ const { getZone } = require("../../../Rate/zoneManagementController");
 const CourierService = require("../../../models/CourierService.Schema");
 const commodityOptions = require("../../../config/commodityOptions");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 // const router = express.Router();
 
 // DTDC API Configuration from environment variables
@@ -197,6 +198,13 @@ const createOrderDTDC = async (
         Instructions: "Order booked successfully",
       });
       let savedOrder = await currentOrder.save();
+
+      // ── Auto-assign pickup manifest ──
+      // try {
+      //   await assignPickupManifest(currentOrder);
+      // } catch (pErr) {
+      //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      // }
 
       // console.log("sjakjska",balanceToBeDeducted)
       // Deduct wallet balance using atomic operation and update transaction

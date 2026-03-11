@@ -4,6 +4,7 @@ const user = require("../../../models/User.model");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
 const { fetchBulkWaybills } = require("../Authorize/saveCourierController");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const checkServiceabilityEcomExpress = async (
   originPincode,
   destinationPincode
@@ -232,6 +233,13 @@ const createManifest = async (req, res) => {
       //     stage: "Order Booked",
       //   });
       await currentOrder.save();
+
+      // ── Auto-assign pickup manifest ──
+      try {
+        await assignPickupManifest(currentOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      }
       let balanceToBeDeducted =
         finalCharges === "N/A" ? 0 : parseInt(finalCharges);
       //   let currentBalance = currentWallet.balance - balanceToBeDeducted;
@@ -457,7 +465,7 @@ const shipmentTrackingforward = async (awb) => {
     const refAWB = structuredData["ref_awb"];
     console.log("RTO AWB Number (ref_awb):", refAWB);
     // console.log("Final Parsed Response:", structuredData);
-    return { success: true, data: structuredData,rto_awb: refAWB, status: 200 };
+    return { success: true, data: structuredData, rto_awb: refAWB, status: 200 };
   } catch (error) {
     // console.error("Tracking API Error:", error.response?.data || error.message);
 

@@ -9,6 +9,7 @@ const PickupAddress = require("../../../models/pickupAddress.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const mongoose = require("mongoose");
 const https = require("https");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const createWarehouse = async (
   userId,
@@ -384,6 +385,14 @@ const createZipypostOrder = async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     // ✅ Fast success response
     return res.status(200).json({

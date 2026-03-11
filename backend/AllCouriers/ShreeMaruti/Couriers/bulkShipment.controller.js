@@ -10,6 +10,7 @@ const { getUniqueId } = require("../../getUniqueId");
 const Wallet = require("../../../models/wallet");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const BASE_URL = process.env.SHREEMA_PRODUCTION_URL;
 
 const createShipmentFunctionShreeMaruti = async (
@@ -112,9 +113,9 @@ const createShipmentFunctionShreeMaruti = async (
           unitPrice: Number(item.unitPrice) || 0, // Ensure valid unit price
           weight: currentOrder.packageDetails?.applicableWeight
             ? Math.max(
-                Number(currentOrder.packageDetails.applicableWeight) * 1000,
-                1
-              )
+              Number(currentOrder.packageDetails.applicableWeight) * 1000,
+              1
+            )
             : 1,
           sku: item.sku || null,
         };
@@ -228,8 +229,15 @@ const createShipmentFunctionShreeMaruti = async (
       });
       await currentOrder.save();
 
+      // ── Auto-assign pickup manifest ──
+      // try {
+      //   await assignPickupManifest(currentOrder);
+      // } catch (pErr) {
+      //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      // }
+
       const updatedWallet = await Wallet.findOneAndUpdate(
-        { _id: walletId}, // Ensure sufficient balance
+        { _id: walletId }, // Ensure sufficient balance
         {
           $inc: { balance: -parseFloat(finalCharges) },
           $push: {

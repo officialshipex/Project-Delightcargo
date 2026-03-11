@@ -7,6 +7,7 @@ const Wallet = require("../../../models/wallet");
 const User = require("../../../models/User.model");
 const { registerSmartshipHub } = require("./couriers.controller");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const orderRegistrationOneStep = async (
   serviceDetails,
   orderId,
@@ -82,7 +83,7 @@ const orderRegistrationOneStep = async (
 
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
-      const balance = currentWallet.balance + currentWallet.creditLimit;
+    const balance = currentWallet.balance + currentWallet.creditLimit;
     if (balance < charges) {
       return { success: false, message: "Insufficient Wallet Balance" };
     }
@@ -197,6 +198,13 @@ const orderRegistrationOneStep = async (
         Instructions: "Order booked successfully",
       });
       await currentOrder.save();
+
+      // ── Auto-assign pickup manifest ──
+      // try {
+      //   await assignPickupManifest(currentOrder);
+      // } catch (pErr) {
+      //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      // }
 
       const updatedWallet = await Wallet.findOneAndUpdate(
         { _id: walletId, balance: { $gte: parseFloat(charges) } },

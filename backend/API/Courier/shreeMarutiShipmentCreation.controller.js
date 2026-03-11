@@ -10,6 +10,7 @@ const user = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
 const { getZone } = require("../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
+const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
 const createShreeMarutiShipment = async ({
   id,
@@ -95,9 +96,9 @@ const createShreeMarutiShipment = async ({
       unitPrice: Number(item.unitPrice) || 0,
       weight: currentOrder.packageDetails?.applicableWeight
         ? Math.max(
-            Number(currentOrder.packageDetails.applicableWeight) * 1000,
-            1
-          )
+          Number(currentOrder.packageDetails.applicableWeight) * 1000,
+          1
+        )
         : 1,
       sku: item.sku || null,
     }));
@@ -233,6 +234,14 @@ const createShreeMarutiShipment = async ({
 
       await session.commitTransaction();
       session.endSession();
+
+      // ── Auto-assign pickup manifest (groups by date + address + courier) ──
+      // try {
+      //   const freshOrder = await Order.findById(currentOrder._id);
+      //   if (freshOrder) await assignPickupManifest(freshOrder);
+      // } catch (pErr) {
+      //   console.error("[Pickup] assignPickupManifest failed (non-blocking):", pErr.message);
+      // }
 
       // --- Call Manifest API (outside transaction) ---
       try {

@@ -5,6 +5,7 @@ const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const BOXDLOGISTICS_TOKEN = process.env.BOXDLOGISTICS_TOKEN;
 const BASE_URL = "https://api.boxdlogistics.com/seller/v1";
@@ -429,6 +430,14 @@ const createBoxdLogisticsOrder = async (req, res) => {
 
         await session.commitTransaction();
         session.endSession();
+
+        // ── Auto-assign pickup manifest ──
+        // try {
+        //     const freshOrder = await Order.findById(id);
+        //     if (freshOrder) await assignPickupManifest(freshOrder);
+        // } catch (pErr) {
+        //     console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+        // }
 
         // Send response immediately
         res.status(200).json({

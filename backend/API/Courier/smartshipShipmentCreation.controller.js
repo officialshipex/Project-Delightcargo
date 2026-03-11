@@ -11,6 +11,7 @@ const {
 } = require("../../AllCouriers/SmartShip/Authorize/smartShip.controller");
 const mongoose = require("mongoose");
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
+const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 /**
  * Registers order shipment in one step with Smartship
  *
@@ -257,6 +258,14 @@ const createSmartshipShipment = async ({
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(currentOrder._id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     return {
       success: true,

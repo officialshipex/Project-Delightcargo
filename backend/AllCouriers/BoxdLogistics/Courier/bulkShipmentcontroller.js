@@ -3,6 +3,7 @@ const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { createBoxdOrder, shipBoxdOrder } = require("./couriers.controller");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const createOrderBoxdLogistics = async (
     serviceDetails,
@@ -56,7 +57,7 @@ const createOrderBoxdLogistics = async (
                 message: createRes?.message || "BoxdLogistics did not return a valid order ID",
             };
         }
-// console.log("serviceDetails",serviceDetails)
+        // console.log("serviceDetails",serviceDetails)
         // Step 2: Ship (assign courier_id)
         // courier_id should be stored in serviceDetails or fallback to 3
         const courierId = parseInt(serviceDetails?.courierId) || 4;
@@ -102,6 +103,13 @@ const createOrderBoxdLogistics = async (
         });
 
         await currentOrder.save();
+
+        // ── Auto-assign pickup manifest ──
+        // try {
+        //     await assignPickupManifest(currentOrder);
+        // } catch (pErr) {
+        //     console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+        // }
 
         // Deduct wallet
         await Wallet.findOneAndUpdate(

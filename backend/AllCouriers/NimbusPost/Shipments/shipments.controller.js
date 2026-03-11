@@ -4,8 +4,9 @@ if (process.env.NODE_ENV != "production") {
 
 const axios = require('axios');
 const { getAuthToken } = require("../Authorize/nimbuspost.controller");
-// const Order = require("../../../models/orderSchema.model");
+const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const url = process.env.NIMBUSPOST_URL;
 
 
@@ -75,6 +76,13 @@ const createShipment = async (req, res) => {
                 stage: 'Order Booked'
             });
             let savedOrder = await currentOrder.save();
+
+            // ── Auto-assign pickup manifest ──
+            try {
+                await assignPickupManifest(currentOrder);
+            } catch (pErr) {
+                console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+            }
             let balanceToBeDeducted = req.body.finalCharges === "N/A" ? 0 : parseInt(req.body.finalCharges);
             let currentBalance = currentWallet.balance - balanceToBeDeducted;
             await currentWallet.updateOne({

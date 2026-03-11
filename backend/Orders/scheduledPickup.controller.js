@@ -4,7 +4,80 @@ const PickupManifest = require("../models/pickupManifest.model");
 const PickupManifestCounter = require("../models/pickupManifestCounter.model");
 const AllocateRole = require("../models/allocateRoleSchema");
 
+/* ================================================================
+   CORE UTILITY — called automatically after any shipment is created
+   Groups by: date + pickupAddress + provider (courier service)
+   ================================================================ */
+const assignPickupManifest = async (order, pickupDate = null) => {
+  try {
+    // Default to today (IST midnight)
+    const dateToUse = pickupDate ? new Date(pickupDate) : new Date();
+    dateToUse.setHours(0, 0, 0, 0);
 
+    // ── Look for existing manifest with same grouping key ──────────────────
+    const manifest = await PickupManifest.findOne({
+      userId: order.userId,
+      pickupDate: dateToUse,
+      orderType: order.orderType || "B2C",
+      provider: order.provider,                        // same courier
+      "pickupAddress.address": order.pickupAddress?.address,
+      "pickupAddress.contactName": order.pickupAddress?.contactName,
+      "pickupAddress.pinCode": order.pickupAddress?.pinCode,
+    });
+
+    if (!manifest) {
+      // ── Create new manifest and generate a fresh pickupId ─────────────────
+      const dateStr = dateToUse.toISOString().split("T")[0];
+      const pickupId = await generatePickupId(dateStr, order.orderType === "B2B");
+
+      const newManifest = await PickupManifest.create({
+        userId: order.userId,
+        pickupId,
+        pickupDate: dateToUse,
+        status: "Pickup_Scheduled",
+        orderIds: [order._id],
+        awb_numbers: order.awb_number ? [order.awb_number] : [],
+        provider: order.provider,
+        providers: [order.provider],
+        courierServiceNames: order.courierServiceName ? [order.courierServiceName] : [],
+        orderType: order.orderType || "B2C",
+        pickupAddress: order.pickupAddress,
+      });
+
+      // Save pickupId back to the order
+      await Order.findByIdAndUpdate(order._id, { pickupId: newManifest.pickupId });
+      console.log(`[Pickup] Created manifest ${newManifest.pickupId} for order ${order._id}`);
+      return newManifest.pickupId;
+
+    } else {
+      // ── Append to existing manifest (no duplicates) ────────────────────────
+      if (!manifest.orderIds.some((id) => id.equals(order._id))) {
+        manifest.orderIds.push(order._id);
+      }
+      if (order.awb_number && !manifest.awb_numbers.includes(order.awb_number)) {
+        manifest.awb_numbers.push(order.awb_number);
+      }
+      if (order.courierServiceName && !manifest.courierServiceNames.includes(order.courierServiceName)) {
+        manifest.courierServiceNames.push(order.courierServiceName);
+      }
+
+      manifest.status = "Pickup_Scheduled";
+      await manifest.save();
+
+      // Save pickupId back to the order
+      await Order.findByIdAndUpdate(order._id, { pickupId: manifest.pickupId });
+      console.log(`[Pickup] Appended order ${order._id} to manifest ${manifest.pickupId}`);
+      return manifest.pickupId;
+    }
+  } catch (err) {
+    console.error("[Pickup] assignPickupManifest error:", err.message);
+    return null;
+  }
+};
+
+/* ================================================================
+   HTTP CONTROLLER — kept for manual scheduling from admin panel
+   ================================================================ */
 const schedulePickup = async (req, res) => {
   try {
     const { orderIds, pickupDate } = req.body;
@@ -15,13 +88,9 @@ const schedulePickup = async (req, res) => {
         .json({ message: "orderIds (array) and pickupDate required" });
     }
 
-    const pickupDateObj = new Date(pickupDate);
-    pickupDateObj.setHours(0, 0, 0, 0);
-
     let successCount = 0;
     let failedOrders = [];
 
-    // Process each order
     for (const orderId of orderIds) {
       try {
         const order = await Order.findById(orderId);
@@ -30,84 +99,27 @@ const schedulePickup = async (req, res) => {
           continue;
         }
 
-        if (order.status !== "Booked") {
-          failedOrders.push({ orderId, reason: `Order is in ${order.status} status, expected Booked` });
+        if (!["Booked", "Ready To Ship"].includes(order.status)) {
+          failedOrders.push({ orderId, reason: `Order is in ${order.status} status` });
           continue;
         }
 
-        // 1️⃣ Call provider pickup API
-        const pickupResponse = await callPickupProvider(order.provider, {
-          order,
-          pickupDate,
-        });
+        // Call provider pickup API (mostly returns success:true as placeholder)
+        const pickupResponse = await callPickupProvider(order.provider, { order, pickupDate });
 
         if (!pickupResponse?.success) {
-          failedOrders.push({ orderId, reason: pickupResponse?.message || "Pickup scheduling failed at provider" });
+          failedOrders.push({ orderId, reason: pickupResponse?.message || "Provider pickup scheduling failed" });
           continue;
         }
 
-        // 2️⃣ Normalize pickup date (date-based manifest) + orderType + pickupAddress
-        let manifest = await PickupManifest.findOne({
-          userId: order.userId,
-          pickupDate: pickupDateObj,
-          orderType: order.orderType || "B2C",
-          "pickupAddress.address": order.pickupAddress?.address,
-          "pickupAddress.contactName": order.pickupAddress?.contactName,
-          "pickupAddress.pincode": order.pickupAddress?.pincode,
-        });
+        // Re-assign/update manifest with the specified pickup date
+        await assignPickupManifest(order, pickupDate);
 
-        // 3️⃣ Create new manifest if not exists
-        if (!manifest) {
-          const dateStr = pickupDateObj.toISOString().split("T")[0];
-          const pickupId = await generatePickupId(dateStr, order.orderType === "B2B");
-
-          manifest = await PickupManifest.create({
-            userId: order.userId,
-            pickupId,
-            pickupDate: pickupDateObj,
-            status: "Pickup_Scheduled",
-            orderIds: [order._id],
-            awb_numbers: order.awb_number ? [order.awb_number] : [],
-            providers: [order.provider],
-            courierServiceNames: order.courierServiceName
-              ? [order.courierServiceName]
-              : [],
-            orderType: order.orderType || "B2C",
-            pickupAddress: order.pickupAddress,
-          });
-        } else {
-          // 4️⃣ Update existing manifest safely (NO DUPLICATES)
-
-          if (!manifest.orderIds.some((id) => id.equals(order._id))) {
-            manifest.orderIds.push(order._id);
-          }
-
-          if (
-            order.awb_number &&
-            !manifest.awb_numbers.includes(order.awb_number)
-          ) {
-            manifest.awb_numbers.push(order.awb_number);
-          }
-
-          if (order.provider && !manifest.providers.includes(order.provider)) {
-            manifest.providers.push(order.provider);
-          }
-
-          if (
-            order.courierServiceName &&
-            !manifest.courierServiceNames.includes(order.courierServiceName)
-          ) {
-            manifest.courierServiceNames.push(order.courierServiceName);
-          }
-
-          manifest.status = "Pickup_Scheduled";
-          await manifest.save();
-        }
-
-        // 5️⃣ Update order status
-        order.status = "Ready To Ship";
-        order.pickupDate = pickupDateObj;
+        // Update order pickup date
+        order.pickupDate = new Date(pickupDate);
+        order.pickupDate.setHours(0, 0, 0, 0);
         await order.save();
+
         successCount++;
       } catch (err) {
         console.error(`Error scheduling pickup for order ${orderId}:`, err);
@@ -126,6 +138,7 @@ const schedulePickup = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
 
 const getPickupManifests = async (req, res) => {
   try {
@@ -444,6 +457,7 @@ const generatePickupId = async (dateStr, isB2B = false) => {
 };
 
 module.exports = {
+  assignPickupManifest,
   schedulePickup,
   getPickupManifests,
   getManifestOrders,

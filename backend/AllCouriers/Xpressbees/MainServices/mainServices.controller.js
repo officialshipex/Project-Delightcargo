@@ -9,7 +9,8 @@ const Wallet = require("../../../models/wallet");
 const user = require("../../../models/User.model");
 const BASE_URL = process.env.XpreesbeesUrl;
 const plan = require("../../../models/Plan.model");
-const {getZone}=require("../../../Rate/zoneManagementController")
+const { getZone } = require("../../../Rate/zoneManagementController")
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const createShipment = async (req, res) => {
   const url = `${BASE_URL}/api/shipments2`;
@@ -130,7 +131,7 @@ const createShipment = async (req, res) => {
       currentOrder.totalFreightCharges = finalCharges;
       currentOrder.shipmentCreatedAt = new Date();
       currentOrder.courierServiceName = courierServiceName;
-      currentOrder.zone=zone.zone;
+      currentOrder.zone = zone.zone;
       // currentOrder.service_details = selectedServiceDetails._id;
       // currentOrder.freightCharges =
       // req.body.finalCharges === "N/A" ? 0 : parseInt(req.body.finalCharges);
@@ -138,6 +139,13 @@ const createShipment = async (req, res) => {
 
       // console.log("sahkdjhsakdsa",currentOrder)
       await currentOrder.save();
+
+      // ── Auto-assign pickup manifest ──
+      try {
+        await assignPickupManifest(currentOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      }
 
       let balanceToBeDeducted =
         finalCharges === "N/A" ? 0 : parseInt(finalCharges);

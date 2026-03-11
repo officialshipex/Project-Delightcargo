@@ -7,6 +7,8 @@ const Wallet = require("../../../models/wallet");
 const User = require("../../../models/User.model");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const https = require("https");
+const mongoose = require("mongoose");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const registerSmartshipHub = async (userId, pinCode) => {
   try {
     const pickupAddress = await PickupAddress.findOne({
@@ -164,7 +166,7 @@ const orderRegistrationOneStep = async (req, res) => {
 
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
-      const balance = currentWallet.balance + currentWallet.creditLimit;
+    const balance = currentWallet.balance + currentWallet.creditLimit;
     if (balance < finalCharges) {
       await session.abortTransaction();
       session.endSession();
@@ -268,8 +270,8 @@ const orderRegistrationOneStep = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
-      orderId:currentOrder.orderId,
-      awb_number:result.awb_number
+      orderId: currentOrder.orderId,
+      awb_number: result.awb_number
     });
 
     // ✅ Continue in background safely
@@ -320,6 +322,14 @@ const orderRegistrationOneStep = async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
   } catch (error) {
     console.error("Smartship Order Registration Error:", error.message);
 
@@ -334,7 +344,7 @@ const orderRegistrationOneStep = async (req, res) => {
           { $set: { status: "new" } }
         );
       }
-    } catch {}
+    } catch { }
 
     return res.status(500).json({
       success: false,
