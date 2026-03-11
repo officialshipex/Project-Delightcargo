@@ -29,7 +29,7 @@ const createBoxdWarehouse = async (userId, pickup) => {
 
         if (!actualPickupRecord) {
             console.warn("No matching pickup address found for BoxdLogistics warehouse reg.");
-            return null;
+            throw new Error("pickup warehouse is not registered please add pickup address");
         }
 
         if (actualPickupRecord.boxdLogisticsWarehouseId) {
@@ -245,7 +245,7 @@ const checkServiceabilityBoxdLogistics = async ({
             .map((c) => c.courier_id);
 
         if (matchedCouriers.length > 0) {
-            console.log("matchedCouriers", matchedCouriers)
+            // console.log("matchedCouriers", matchedCouriers)
             return {
                 success: true,
                 courier_ids: matchedCouriers,
@@ -299,11 +299,23 @@ const createBoxdLogisticsOrder = async (req, res) => {
             });
         }
 
-        // Parallel: zone + user
-        const [zone, user] = await Promise.all([
+        // Parallel: zone + user + pickup address check
+        const [zone, user, actualPickupRecord] = await Promise.all([
             getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode),
-            require("../../../models/User.model").findById(currentOrder.userId).session(session),
+            User.findById(currentOrder.userId).session(session),
+            PickupAddress.findOne({
+                userId: currentOrder.userId,
+                "pickupAddress.pinCode": String(currentOrder.pickupAddress.pinCode),
+                "pickupAddress.contactName": currentOrder.pickupAddress.contactName
+            }).session(session)
         ]);
+
+        if (!actualPickupRecord) {
+            await Order.findByIdAndUpdate(id, { status: "new" });
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ success: false, message: "pickup warehouse is not registered please add pickup address" });
+        }
 
         if (!zone) {
             await Order.findByIdAndUpdate(id, { status: "new" });
@@ -349,7 +361,7 @@ const createBoxdLogisticsOrder = async (req, res) => {
             console.error("❌ BoxdLogistics create order failed:", err.response?.data || err.message);
             return res.status(500).json({
                 success: false,
-                message: err.response?.data?.message || "Failed to create order on BoxdLogistics",
+                message: err.response?.data?.message || err.message || "Failed to create order",
                 error: err.response?.data || err.message,
             });
         }
@@ -379,7 +391,7 @@ const createBoxdLogisticsOrder = async (req, res) => {
             console.error("❌ BoxdLogistics ship order failed:", err.response?.data || err.message);
             return res.status(500).json({
                 success: false,
-                message: err.response?.data?.message || "Failed to ship order on BoxdLogistics",
+                message: err.response?.data?.message || "Failed to ship order",
                 error: err.response?.data || err.message,
             });
         }

@@ -46,7 +46,7 @@ const createOrderBoxdLogistics = async (
             console.error("❌ BoxdLogistics bulk create failed:", err.response?.data || err.message);
             return {
                 success: false,
-                message: err.response?.data?.message || "Failed to create order on BoxdLogistics",
+                message: err.response?.data?.message || err.message || "Failed to create order",
             };
         }
 
@@ -69,7 +69,7 @@ const createOrderBoxdLogistics = async (
             console.error("❌ BoxdLogistics bulk ship failed:", err.response?.data || err.message);
             return {
                 success: false,
-                message: err.response?.data?.message || "Failed to ship order on BoxdLogistics",
+                message: err.response?.data?.message || "Failed to ship order",
             };
         }
 

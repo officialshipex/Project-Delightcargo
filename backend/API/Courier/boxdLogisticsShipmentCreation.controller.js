@@ -76,7 +76,7 @@ const createBoxdLogisticsShipment = async ({
                 success: false,
                 message:
                     err.response?.data?.message ||
-                    "Failed to create order on BoxdLogistics",
+                    "Failed to create order",
             };
         }
 
@@ -116,7 +116,7 @@ const createBoxdLogisticsShipment = async ({
                 success: false,
                 message:
                     err.response?.data?.message ||
-                    "Failed to ship order on BoxdLogistics",
+                    "Failed to ship order",
             };
         }
 
