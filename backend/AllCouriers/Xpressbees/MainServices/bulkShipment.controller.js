@@ -4,8 +4,10 @@ if (process.env.NODE_ENV != "production") {
 
 const axios = require("axios");
 
+const Order = require("../../../models/newOrder.model");
 const { getAuthToken } = require("../Authorize/XpressbeesAuthorize.controller");
 const Wallet = require("../../../models/wallet");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const BASE_URL = process.env.XpreesbeesUrl;
 
 const createShipmentFunctionXpressBees = async (
@@ -88,6 +90,13 @@ const createShipmentFunctionXpressBees = async (
         finalCharges === "N/A" ? 0 : parseInt(finalCharges);
       currentOrder.tracking = [{ stage: "Order Booked" }];
       await currentOrder.save();
+
+      // ── Auto-assign pickup manifest ──
+      try {
+        await assignPickupManifest(currentOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      }
 
       const balanceToBeDeducted =
         finalCharges === "N/A" ? 0 : parseInt(finalCharges);

@@ -8,6 +8,7 @@ const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { checkAmazonServiceability } = require("./couriers.controller");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const createShipmentAmazon = async (
   serviceDetails,
   orderId,
@@ -94,7 +95,7 @@ const createShipmentAmazon = async (
       origin: currentOrder.pickupAddress,
       destination: currentOrder.receiverAddress,
       payment_type: currentOrder.paymentDetails?.method,
-      gstin:currentOrder?.otherDetails?.gstin,
+      gstin: currentOrder?.otherDetails?.gstin,
       order_amount: currentOrder.paymentDetails?.amount || 0,
       weight: weight || 0,
       length: currentOrder.packageDetails.volumetricWeight?.length || 0,
@@ -151,9 +152,8 @@ const createShipmentAmazon = async (
     const base64Label =
       result.packageDocumentDetails[0].packageDocuments[0].contents;
     const labelBuffer = Buffer.from(base64Label, "base64");
-    const labelKey = `labels/${Date.now()}_${
-      currentOrder.orderId || "label"
-    }.pdf`;
+    const labelKey = `labels/${Date.now()}_${currentOrder.orderId || "label"
+      }.pdf`;
 
     const uploadCommand = new PutObjectCommand({
       Bucket: process.env.AWS_BUCKET_NAME,
@@ -186,6 +186,13 @@ const createShipmentAmazon = async (
       Instructions: "Order booked successfully",
     });
     await currentOrder.save();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   await assignPickupManifest(currentOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     const transaction = {
       channelOrderId: currentOrder.orderId,

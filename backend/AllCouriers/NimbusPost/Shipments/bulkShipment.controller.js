@@ -3,12 +3,13 @@ if (process.env.NODE_ENV != "production") {
 }
 
 const axios = require('axios');
-// const Order=require("../../../models/orderSchema.model");
-const Wallet=require("../../../models/wallet");
-const {getAuthToken} = require("../Authorize/nimbuspost.controller");
-const url=process.env.NIMBUSPOST_URL;
+const Order = require("../../../models/newOrder.model");
+const Wallet = require("../../../models/wallet");
+const { getAuthToken } = require("../Authorize/nimbuspost.controller");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
+const url = process.env.NIMBUSPOST_URL;
 
-const createShipmentFunctionNimbusPost= async (selectedServiceDetails, id, wh, walletId, finalCharges) => {
+const createShipmentFunctionNimbusPost = async (selectedServiceDetails, id, wh, walletId, finalCharges) => {
 
   try {
     console.log("I am in bulk shipment");
@@ -26,10 +27,10 @@ const createShipmentFunctionNimbusPost= async (selectedServiceDetails, id, wh, w
       sku: item.sku,
     }));
 
-  
+
     const payment_type = currentOrder.order_type === "Cash on Delivery" ? "cod" : "prepaid";
 
-   
+
     const shipmentData = {
       order_number: `${currentOrder.order_id}`,
       payment_type,
@@ -68,7 +69,7 @@ const createShipmentFunctionNimbusPost= async (selectedServiceDetails, id, wh, w
         Authorization: `Bearer ${token}`,
       },
     });
-    console.log("Response",response);
+    console.log("Response", response);
 
     if (response.data.status) {
       const result = response.data.data;
@@ -82,6 +83,13 @@ const createShipmentFunctionNimbusPost= async (selectedServiceDetails, id, wh, w
       currentOrder.freightCharges = finalCharges === "N/A" ? 0 : parseInt(finalCharges, 10);
       currentOrder.tracking = [{ stage: 'Order Booked' }];
       await currentOrder.save();
+
+      // ── Auto-assign pickup manifest ──
+      try {
+        await assignPickupManifest(currentOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      }
 
       // Deduct wallet balance and add transaction record
       const balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseInt(finalCharges, 10);
@@ -109,4 +117,4 @@ const createShipmentFunctionNimbusPost= async (selectedServiceDetails, id, wh, w
   }
 };
 
-module.exports ={createShipmentFunctionNimbusPost};
+module.exports = { createShipmentFunctionNimbusPost };

@@ -3,6 +3,7 @@ const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { createBoxdOrder, shipBoxdOrder } = require("./couriers.controller");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const createOrderBoxdLogistics = async (
     serviceDetails,
@@ -45,7 +46,7 @@ const createOrderBoxdLogistics = async (
             console.error("❌ BoxdLogistics bulk create failed:", err.response?.data || err.message);
             return {
                 success: false,
-                message: err.response?.data?.message || "Failed to create order on BoxdLogistics",
+                message: err.response?.data?.message || err.message || "Failed to create order",
             };
         }
 
@@ -56,7 +57,7 @@ const createOrderBoxdLogistics = async (
                 message: createRes?.message || "BoxdLogistics did not return a valid order ID",
             };
         }
-// console.log("serviceDetails",serviceDetails)
+        // console.log("serviceDetails",serviceDetails)
         // Step 2: Ship (assign courier_id)
         // courier_id should be stored in serviceDetails or fallback to 3
         const courierId = parseInt(serviceDetails?.courierId) || 4;
@@ -68,7 +69,7 @@ const createOrderBoxdLogistics = async (
             console.error("❌ BoxdLogistics bulk ship failed:", err.response?.data || err.message);
             return {
                 success: false,
-                message: err.response?.data?.message || "Failed to ship order on BoxdLogistics",
+                message: err.response?.data?.message || "Failed to ship order",
             };
         }
 
@@ -102,6 +103,13 @@ const createOrderBoxdLogistics = async (
         });
 
         await currentOrder.save();
+
+        // ── Auto-assign pickup manifest ──
+        // try {
+        //     await assignPickupManifest(currentOrder);
+        // } catch (pErr) {
+        //     console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+        // }
 
         // Deduct wallet
         await Wallet.findOneAndUpdate(

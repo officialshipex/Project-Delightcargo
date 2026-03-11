@@ -13,6 +13,7 @@ const user = require("../../../models/User.model");
 const plan = require("../../../models/Plan.model");
 const CourierService = require("../../../models/CourierService.Schema");
 const { getZone } = require("../../../Rate/zoneManagementController");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 // HELPER FUNCTIONS
 const getCurrentDateTime = () => {
   const now = new Date();
@@ -279,7 +280,7 @@ const createOrder = async (req, res) => {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
-      console.log("error delhivery",response.data)
+      console.log("error delhivery", response.data)
       return res.status(400).json({
         success: false,
         message: "Failed to create shipment",
@@ -338,6 +339,14 @@ const createOrder = async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     // ✅ Final Response
     return res.status(201).json({

@@ -11,6 +11,7 @@ const { findByPincode } = require("../../../B2B/pincodeLoader");
 const {
   markWooOrderAsSihpped,
 } = require("../../../Channels/WooCommerce/woocommerce.controller");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const createOneClickShipment = async (req, res) => {
   const session = await mongoose.startSession();
@@ -168,9 +169,8 @@ const createOneClickShipment = async (req, res) => {
     const base64Label =
       result.packageDocumentDetails[0].packageDocuments[0].contents;
     const labelBuffer = Buffer.from(base64Label, "base64");
-    const labelKey = `labels/${Date.now()}_${
-      currentOrder.orderId || "label"
-    }.pdf`;
+    const labelKey = `labels/${Date.now()}_${currentOrder.orderId || "label"
+      }.pdf`;
 
     const labelUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${labelKey}`;
 
@@ -232,13 +232,21 @@ const createOneClickShipment = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
+
     // ✅ Final response
     return res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
-        orderId: currentOrder.orderId,
-        awb_number: trackingId,
-        labelUrl,
+      orderId: currentOrder.orderId,
+      awb_number: trackingId,
+      labelUrl,
     });
   } catch (error) {
     await Order.findByIdAndUpdate(req.body.id, { status: "new" });

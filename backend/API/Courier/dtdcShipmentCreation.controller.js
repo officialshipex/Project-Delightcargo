@@ -8,6 +8,7 @@ const API_KEY = process.env.DTDC_API_KEY;
 const X_ACCESS_TOKEN = process.env.DTDC_X_ACCESS_TOKEN;
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const mongoose = require("mongoose");
+const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
 /**
  * Create shipment order with given parameters
@@ -282,6 +283,14 @@ const createDTDCShipment = async ({
     } catch (err) {
       console.error("Wallet update error:", err.message);
     }
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     // --- Return success ---
     return {

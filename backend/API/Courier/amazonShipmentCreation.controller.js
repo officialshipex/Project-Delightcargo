@@ -5,14 +5,15 @@ const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
 const {
   getAmazonAccessToken,
-} = require("../../AllCouriers/Amazon/Authorize/saveCourierController"); // Assuming you have this helper
+} = require("../../AllCouriers/Amazon/Authorize/saveCourierController");
 const { getZone } = require("../../Rate/zoneManagementController");
 const {
   checkAmazonServiceability,
 } = require("../../AllCouriers/Amazon/Courier/couriers.controller");
-const { s3 } = require("../../config/s3"); // Your AWS S3 client instance
+const { s3 } = require("../../config/s3");
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const mongoose = require("mongoose");
+const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
 /**
  * Creates an Amazon one-click shipment
@@ -152,9 +153,8 @@ const createAmazonShipment = async ({
     const base64Label =
       result.packageDocumentDetails[0].packageDocuments[0].contents;
     const labelBuffer = Buffer.from(base64Label, "base64");
-    const labelKey = `labels/${Date.now()}_${
-      currentOrder.orderId || "label"
-    }.pdf`;
+    const labelKey = `labels/${Date.now()}_${currentOrder.orderId || "label"
+      }.pdf`;
 
     await s3.send(
       new PutObjectCommand({
@@ -211,6 +211,14 @@ const createAmazonShipment = async ({
     // ✅ Commit transaction
     await session.commitTransaction();
     session.endSession();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(currentOrder._id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     return {
       success: true,

@@ -2,9 +2,10 @@ if (process.env.NODE_ENV != "production") {
   require('dotenv').config();
 }
 const axios = require("axios");
-// const Order = require("../../../models/orderSchema.model");
 const { getToken } = require("../Authorize/shiprocket.controller");
 const Wallet = require("../../../models/wallet");
+const Order = require("../../../models/newOrder.model");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const BASE_URL = process.env.BASE_URL;
 
@@ -145,6 +146,13 @@ const createCustomOrder = async (req, res) => {
       });
 
       const savedOrder = await currentOrder.save();
+
+      // ── Auto-assign pickup manifest ──
+      try {
+        await assignPickupManifest(currentOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      }
       let balanceToBeDeducted = req.body.finalCharges === "N/A" ? 0 : parseInt(req.body.finalCharges);
       let currentBalance = currentWallet.balance - balanceToBeDeducted;
       await currentWallet.updateOne({
@@ -204,11 +212,11 @@ const cancelOrder = async (awb_number) => {
 
     const response = await axios.post(
       `${BASE_URL}/orders/cancel/shipment/awbs`,
-      { awbs: [`${awb_number}`] }, 
+      { awbs: [`${awb_number}`] },
       {
         headers: {
-          Authorization: `Bearer ${token}`, 
-          'Content-Type': 'application/json', 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
       }
     );

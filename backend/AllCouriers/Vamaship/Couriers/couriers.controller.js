@@ -5,6 +5,7 @@ const { getZone } = require("../../../Rate/zoneManagementController");
 const Wallet = require("../../../models/wallet");
 const User = require("../../../models/User.model");
 const PickupAddress = require("../../../models/pickupAddress.model");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const token = process.env.VAMASHIP_API_KEY;
 
 function ensureValidAddress(addr) {
@@ -164,8 +165,15 @@ const createVamashipShipment = async (req, res) => {
       currentOrder.totalFreightCharges = parseInt(finalCharges);
       currentOrder.courierServiceName = courierServiceName;
       currentOrder.shipmentCreatedAt = new Date();
-      currentOrder.zone=zone.zone;
+      currentOrder.zone = zone.zone;
       await currentOrder.save();
+
+      // ── Auto-assign pickup manifest ──
+      try {
+        await assignPickupManifest(currentOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      }
 
       await currentWallet.updateOne({
         $inc: { balance: -parseInt(finalCharges) },

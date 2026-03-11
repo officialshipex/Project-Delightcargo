@@ -7,6 +7,7 @@ const {
     createBoxdOrder,
     shipBoxdOrder,
 } = require("../../AllCouriers/BoxdLogistics/Courier/couriers.controller");
+const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
 const createBoxdLogisticsShipment = async ({
     id,
@@ -75,7 +76,7 @@ const createBoxdLogisticsShipment = async ({
                 success: false,
                 message:
                     err.response?.data?.message ||
-                    "Failed to create order on BoxdLogistics",
+                    "Failed to create order",
             };
         }
 
@@ -115,7 +116,7 @@ const createBoxdLogisticsShipment = async ({
                 success: false,
                 message:
                     err.response?.data?.message ||
-                    "Failed to ship order on BoxdLogistics",
+                    "Failed to ship order",
             };
         }
 
@@ -176,6 +177,14 @@ const createBoxdLogisticsShipment = async ({
 
         await session.commitTransaction();
         session.endSession();
+
+        // ── Auto-assign pickup manifest ──
+        // try {
+        //     const freshOrder = await Order.findById(currentOrder._id);
+        //     if (freshOrder) await assignPickupManifest(freshOrder);
+        // } catch (pErr) {
+        //     console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+        // }
 
         return {
             success: true,

@@ -10,6 +10,7 @@ const { getUniqueId } = require("../../getUniqueId");
 const Wallet = require("../../../models/wallet");
 const user = require("../../../models/User.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const BASE_URL = process.env.SHREEMA_PRODUCTION_URL;
 
@@ -178,9 +179,9 @@ const createOrder = async (req, res) => {
           unitPrice: Number(item.unitPrice) || 0, // Ensure valid unit price
           weight: currentOrder.packageDetails?.applicableWeight
             ? Math.max(
-                Number(currentOrder.packageDetails.applicableWeight) * 1000,
-                1,
-              )
+              Number(currentOrder.packageDetails.applicableWeight) * 1000,
+              1,
+            )
             : 1,
           sku: item.sku || null,
         };
@@ -337,6 +338,14 @@ const createOrder = async (req, res) => {
       await session.commitTransaction();
       session.endSession();
 
+      // ── Auto-assign pickup manifest ──
+      // try {
+      //   const freshOrder = await Order.findById(id);
+      //   if (freshOrder) await assignPickupManifest(freshOrder);
+      // } catch (pErr) {
+      //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      // }
+
       // Call Manifest API outside transaction
       try {
         const manifestResponse = await axios.post(
@@ -362,7 +371,7 @@ const createOrder = async (req, res) => {
       return res
         .status(201)
         .json({
-          success:true,
+          success: true,
           message: "Shipment & Manifest Created Successfully",
           awb_number: result.awbNumber,
           orderId: currentOrder.orderId,

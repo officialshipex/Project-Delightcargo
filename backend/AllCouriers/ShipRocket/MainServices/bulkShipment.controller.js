@@ -1,12 +1,13 @@
-if(process.env.NODE_ENV!="production"){
+if (process.env.NODE_ENV != "production") {
     require('dotenv').config();
 }
 const axios = require("axios");
-// const Order = require("../../../models/orderSchema.model");
+const Order = require("../../../models/newOrder.model");
 const { getToken } = require("../Authorize/shiprocket.controller");
 const Wallet = require("../../../models/wallet");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
-const BASE_URL=process.env.SHIPROCKET_URL;
+const BASE_URL = process.env.SHIPROCKET_URL;
 
 const getCurrentDateTime = () => {
     const now = new Date();
@@ -121,9 +122,9 @@ const createShipmentFunctionShipRocket = async (
             { headers: { Authorization: `Bearer ${token}` } }
         );
 
-        console.log("Response from ShipRocket:",response);
+        console.log("Response from ShipRocket:", response);
 
-        if (response.status!=200) {
+        if (response.status != 200) {
             return { status: 400, error: 'Error creating shipment', details: response.data };
         }
 
@@ -146,10 +147,17 @@ const createShipmentFunctionShipRocket = async (
         currentOrder.tracking = [{ stage: "Order Booked" }];
 
         const savedOrder = await currentOrder.save();
+
+        // ── Auto-assign pickup manifest ──
+        try {
+            await assignPickupManifest(currentOrder);
+        } catch (pErr) {
+            console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+        }
         const balanceToBeDeducted =
             finalCharges === "N/A" ? 0 : parseInt(finalCharges);
 
-        const saveWallet=await currentWallet.updateOne({
+        const saveWallet = await currentWallet.updateOne({
             $inc: { balance: -balanceToBeDeducted },
             $push: {
                 transactions: {
@@ -162,7 +170,7 @@ const createShipmentFunctionShipRocket = async (
             },
         });
 
-        console.log("Saved Wallet",saveWallet);
+        console.log("Saved Wallet", saveWallet);
 
         return { status: 201, message: "Shipment Created Successfully" };
     } catch (error) {

@@ -5,9 +5,10 @@ const Wallet = require("../../models/wallet");
 const { getZone } = require("../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const mongoose = require("mongoose");
-const {getAccessToken}=require("../../AllCouriers/Ekart/Authorize/Ekart.controller")
-const pickupAddress=require("../../models/pickupAddress.model");
-const { calculateGSTForItems,addEkartAddress } = require("../../AllCouriers/Ekart/Couriers/couriers.controller");
+const { getAccessToken } = require("../../AllCouriers/Ekart/Authorize/Ekart.controller")
+const pickupAddress = require("../../models/pickupAddress.model");
+const { calculateGSTForItems, addEkartAddress } = require("../../AllCouriers/Ekart/Couriers/couriers.controller");
+const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
 
 const createEkartShipment = async ({
@@ -311,6 +312,14 @@ const createEkartShipment = async ({
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(currentOrder._id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
 
     // 🔟 Wallet update (post-commit)
     try {

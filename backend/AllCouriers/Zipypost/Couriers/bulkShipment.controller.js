@@ -9,6 +9,7 @@ const { getZone } = require("../../../Rate/zoneManagementController");
 const { checkZipypostServiceability } = require("./couriers.controller");
 // const ZipyPostScanCodeMapping = require("../../utils/ZipyPostScanCodeMapping");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const createOrderZipypost = async (
   serviceDetails,
   orderId,
@@ -300,9 +301,16 @@ const createOrderZipypost = async (
 
       await currentOrder.save();
 
+      // ── Auto-assign pickup manifest ──
+      // try {
+      //   await assignPickupManifest(currentOrder);
+      // } catch (pErr) {
+      //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      // }
+
       // Deduct wallet balance
       await Wallet.findOneAndUpdate(
-        { _id: walletId},
+        { _id: walletId },
         {
           $inc: { balance: -parseFloat(charges) },
           $push: {

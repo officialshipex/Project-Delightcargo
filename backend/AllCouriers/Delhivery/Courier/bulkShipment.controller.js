@@ -11,6 +11,7 @@ const Wallet = require("../../../models/wallet");
 const { createClientWarehouse } = require("./couriers.controller");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const createShipmentFunctionDelhivery = async (
   selectedServiceDetails,
   id,
@@ -160,6 +161,13 @@ const createShipmentFunctionDelhivery = async (
           Instructions: "Order booked successfully",
         });
         await currentOrder.save(); // Save the updated order
+
+        // ── Auto-assign pickup manifest ──
+        // try {
+        //   await assignPickupManifest(currentOrder);
+        // } catch (pErr) {
+        //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+        // }
 
         const transaction = {
           channelOrderId: currentOrder.orderId,

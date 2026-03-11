@@ -120,7 +120,7 @@ const bookOrder = async (req, res) => {
 
     // ✅ Calculate rates
     const finalChargesArray = await calculateRateForService(payload);
-    console.log("final", finalChargesArray);
+    // console.log("final", finalChargesArray);
     // ✅ Validate courier service
     const matchedChargeObj = finalChargesArray.find(
       (item) =>

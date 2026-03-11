@@ -12,6 +12,7 @@ const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 const {
   markWooOrderAsShipped,
 } = require("../../../Channels/WooCommerce/woocommerce.controller");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 // const router = express.Router();
 
 // DTDC API Configuration from environment variables
@@ -216,7 +217,7 @@ const createOrder = async (req, res) => {
     }
 
     const result = response?.data?.data?.[0];
-    console.log("reslt",result)
+    console.log("reslt", result)
     if (!result?.success) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
@@ -261,12 +262,20 @@ const createOrder = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    // ── Auto-assign pickup manifest ──
+    // try {
+    //   const freshOrder = await Order.findById(id);
+    //   if (freshOrder) await assignPickupManifest(freshOrder);
+    // } catch (pErr) {
+    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    // }
+
     // --- Early response ---
     res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
       awb_number: result.reference_number,
-      orderId:currentOrder.orderId
+      orderId: currentOrder.orderId
     });
 
     // --- Wallet update (background, safe) ---
