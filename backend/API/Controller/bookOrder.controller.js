@@ -113,7 +113,7 @@ const bookOrder = async (req, res) => {
       breadth: order.packageDetails?.volumetricWeight?.breadth,
       height: order.packageDetails?.volumetricWeight?.height,
       weight: order.packageDetails?.applicableWeight,
-      cod: order.paymentDetails?.paymentType === "COD" ? "Yes" : "No",
+      cod: order.paymentDetails?.method === "COD" ? "Yes" : "No",
       valueInINR: order.paymentDetails?.amount,
       userID: userId,
     };
