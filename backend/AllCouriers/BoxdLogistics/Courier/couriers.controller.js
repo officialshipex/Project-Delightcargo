@@ -439,7 +439,7 @@ const createBoxdLogisticsOrder = async (req, res) => {
                     cancelledAtStage: null,
                     awb_number: awb,
                     shipment_id: String(boxdOrderId),
-                    provider,
+                    provider:"Bluedart",
                     partner: "BoxdLogistics",
                     totalFreightCharges: balanceToDeduct,
                     courierServiceName,
@@ -464,12 +464,12 @@ const createBoxdLogisticsOrder = async (req, res) => {
         session.endSession();
 
         // ── Auto-assign pickup manifest ──
-        // try {
-        //     const freshOrder = await Order.findById(id);
-        //     if (freshOrder) await assignPickupManifest(freshOrder);
-        // } catch (pErr) {
-        //     console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-        // }
+        try {
+            const freshOrder = await Order.findById(id);
+            if (freshOrder) await assignPickupManifest(freshOrder);
+        } catch (pErr) {
+            console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+        }
 
         // Send response immediately
         res.status(200).json({

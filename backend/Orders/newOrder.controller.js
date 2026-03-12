@@ -61,6 +61,9 @@ const {
 const {
   cancelOrderBoxdLogistics,
 } = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller");
+const {
+  removeFromPickupManifest,
+} = require("./scheduledPickup.controller");
 // Create a shipment
 const newOrder = async (req, res) => {
   try {
@@ -1655,6 +1658,13 @@ const cancelOrdersAtBooked = async (req, res) => {
       };
     }
 
+    // Remove from pickup manifest if exists
+    try {
+      await removeFromPickupManifest(currentOrder);
+    } catch (err) {
+      console.error("[Pickup] Failed to remove order from manifest during cancellation:", err.message);
+    }
+
     // currentOrder.status = "Not-Shipped";
     // currentOrder.cancelledAtStage = "Booked";
     currentOrder.status = "Cancelled";
@@ -2075,6 +2085,13 @@ const bulkCancelOrder = async (req, res) => {
           await orderSession.abortTransaction();
           orderSession.endSession();
           continue;
+        }
+
+        // Remove from pickup manifest if exists
+        try {
+          await removeFromPickupManifest(currentOrder);
+        } catch (err) {
+          console.error("[Pickup] Failed to remove order from manifest during bulk cancellation:", err.message);
         }
 
         // --- Refund wallet balance safely ---

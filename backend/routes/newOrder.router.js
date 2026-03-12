@@ -32,7 +32,7 @@ const {
   updateProductDetails,
   masterSearch
 } = require("../Orders/newOrder.controller");
-const { schedulePickup, getPickupManifests, getManifestOrders } = require("../Orders/scheduledPickup.controller");
+const { getPickupManifests, getManifestOrders } = require("../Orders/scheduledPickup.controller");
 const router = express.Router();
 
 // Route to create a shipment
@@ -69,7 +69,7 @@ router.put("/updateProductDetails/:orderId", updateProductDetails);
 router.get("/masterSearch", masterSearch);
 
 
-router.post("/schedulePickup", schedulePickup);
+// router.post("/schedulePickup", schedulePickup);
 router.get("/pickupManifests", getPickupManifests);
 router.get("/pickupManifest/:manifestId", getManifestOrders);
 router.get("/manifestOrders/:manifestId", getManifestOrders);

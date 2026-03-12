@@ -8,7 +8,7 @@ const pickupManifestCounterSchema = new mongoose.Schema({
   },
   seq: {
     type: Number,
-    default: 111111,
+    default: 111110,
   },
 });
 
