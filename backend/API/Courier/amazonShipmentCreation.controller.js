@@ -197,6 +197,7 @@ const createAmazonShipment = async ({
       awb_number: currentOrder.awb_number,
       description: "Freight Charges Applied",
       balanceAfterTransaction: currentWallet.balance - charges,
+      priceBreakup
     };
 
     await Wallet.findOneAndUpdate(

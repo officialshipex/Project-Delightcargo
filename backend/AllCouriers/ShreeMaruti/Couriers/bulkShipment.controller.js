@@ -250,6 +250,7 @@ const createShipmentFunctionShreeMaruti = async (
               date: new Date(),
               awb_number: result.awbNumber,
               description: "Freight Charges Applied",
+              priceBreakup
             },
           },
         }, // Deduct the charges

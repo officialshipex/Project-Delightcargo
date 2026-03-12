@@ -226,6 +226,7 @@ const createShreeMarutiShipment = async ({
               date: new Date(),
               awb_number: result.awbNumber || "",
               description: `Freight Charges Applied`,
+              priceBreakup
             },
           },
         },

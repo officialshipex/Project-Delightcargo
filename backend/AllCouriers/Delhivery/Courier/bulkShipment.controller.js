@@ -177,6 +177,7 @@ const createShipmentFunctionDelhivery = async (
           awb_number: result.waybill,
           description: "Freight Charges Applied",
           balanceAfterTransaction: null, // temporary placeholder
+          priceBreakup
         };
 
         const updatedWallet = await Wallet.findOneAndUpdate(

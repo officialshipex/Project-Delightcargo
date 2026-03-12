@@ -235,6 +235,10 @@ const rtoCharges = async () => {
                 date: rtoDate,
                 awb_number: awb,
                 description: rtoDescription,
+                priceBreakup: {
+                  freight: charges,
+                  gst: gstAmount,
+                },
               },
             },
           },
@@ -244,7 +248,13 @@ const rtoCharges = async () => {
         // 7️⃣ Save RTO charges on order
         await Order.updateOne(
           { _id: item._id },
-          { $set: { RTOCharges: totalChargesReverse } },
+          {
+            $set: {
+              RTOCharges: totalChargesReverse,
+              "priceBreakup.rto.freight": charges,
+              "priceBreakup.rto.gst": gstAmount,
+            },
+          },
           { session }
         );
 

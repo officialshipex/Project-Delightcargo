@@ -202,6 +202,7 @@ const createShipmentAmazon = async (
       awb_number: result.packageDocumentDetails[0].trackingId,
       description: "Freight Charges Applied",
       balanceAfterTransaction: null, // temporary placeholder
+      priceBreakup,
     };
 
     const updatedWallet = await Wallet.findOneAndUpdate(

@@ -9,7 +9,8 @@ const transactionSchema = new mongoose.Schema(
     date: { type: Date, default: Date.now },
     awb_number: { type: String },
     description: { type: String },
-  },  
+    priceBreakup: { type: Object },
+  },
   { timestamps: true }
 );
 

@@ -218,6 +218,10 @@ const uploadDispreancy = async (req, res) => {
           pendingAmount:
             additionalCharges[0].forward.charges +
             additionalCharges[0].forward.gst,
+          priceBreakup: {
+            freight: additionalCharges[0].forward.charges,
+            gst: additionalCharges[0].forward.gst,
+          },
         },
         status: "new",
         adminStatus: "pending",
@@ -684,6 +688,7 @@ const AcceptDiscrepancy = async (req, res) => {
       balanceAfterTransaction: wallet.balance,
       awb_number: awb_number,
       description: `Weight Dispute Charges Applied`,
+      priceBreakup: discrepancies.excessWeightCharges?.priceBreakup,
     };
     wallet.transactions.push(newTransaction);
 
@@ -797,6 +802,7 @@ const AcceptAllDiscrepancies = async (req, res) => {
         balanceAfterTransaction: wallet.balance, // ✅ updated per order
         awb_number: discrepancy.awbNumber,
         description: "Weight Dispute Charges Applied",
+        priceBreakup: discrepancy.excessWeightCharges?.priceBreakup,
         createdAt: new Date(),
       };
 
@@ -888,6 +894,7 @@ const autoAcceptDiscrepancies = async () => {
         balanceAfterTransaction: wallet.balance,
         awb_number: discrepancy.awbNumber,
         description: `Auto-accepted Weight Dispute charge`,
+        priceBreakup: discrepancy.excessWeightCharges?.priceBreakup,
         createdAt: new Date(),
       };
 

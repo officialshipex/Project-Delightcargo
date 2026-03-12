@@ -329,6 +329,7 @@ const createOrder = async (req, res) => {
               date: new Date(),
               awb_number: result.awbNumber || "",
               description: `Freight Charges Applied`,
+              priceBreakup
             },
           },
         },
