@@ -26,6 +26,9 @@ const { cancelShipmentEkart } = require("../../AllCouriers/Ekart/Couriers/courie
 const {
   cancelOrderBoxdLogistics,
 } = require("../../AllCouriers/BoxdLogistics/Courier/couriers.controller");
+const {
+  removeFromPickupManifest,
+} = require("../../Orders/scheduledPickup.controller");
 
 const cancelOrdersAtBooked = async (req, res) => {
   const MAX_RETRIES = 1;
@@ -114,6 +117,13 @@ const cancelOrdersAtBooked = async (req, res) => {
           message:
             result.message || "Failed to cancel order with courier provider",
         });
+      }
+
+      // Remove from pickup manifest if exists
+      try {
+        await removeFromPickupManifest(currentOrder);
+      } catch (err) {
+        console.error("[Pickup] Failed to remove order from manifest during API cancellation:", err.message);
       }
 
       // Update order
