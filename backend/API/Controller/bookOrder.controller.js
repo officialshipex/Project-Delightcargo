@@ -178,6 +178,13 @@ const bookOrder = async (req, res) => {
       });
     }
 
+    if (courierService.status === "Disable") {
+      return res.status(400).json({
+        status: "failure",
+        message: `Courier service '${courierServiceName}' and courier ID '${courierId}' mismatch or not supported.`,
+      });
+    }
+
     if (!provider) {
       return res.status(400).json({
         status: "failure",
