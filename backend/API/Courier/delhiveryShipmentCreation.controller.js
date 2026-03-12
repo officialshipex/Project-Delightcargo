@@ -245,6 +245,7 @@ const createDelhiveryShipment = async ({
               date: new Date(),
               awb_number: result.waybill || "",
               description: "Freight Charges Applied",
+              priceBreakup
             },
           },
         },

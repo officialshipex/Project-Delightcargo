@@ -271,11 +271,11 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         pickupPincode: pickupPincode,
         shippingPincode: deliveryPincode,
         paymentMode: paymentMethod === "COD" ? "cod" : "prepaid",
-        codAmount: currentOrder.paymentDetails?.amount || 0,
+        codAmount: paymentMethod === "COD" ? (currentOrder.paymentDetails?.amount || 0) : 0,
         weight: weight,
-        length: currentOrder.packageDetails.volumetricWeight?.length || 0,
-        breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
-        height: currentOrder.packageDetails.volumetricWeight?.height || 0,
+        length: currentOrder.packageDetails.volumetricWeight?.length || 10,
+        breadth: currentOrder.packageDetails.volumetricWeight?.width || 10,
+        height: currentOrder.packageDetails.volumetricWeight?.height || 10,
       };
       const res = await checkServiceabilityBoxdLogistics(payload);
 

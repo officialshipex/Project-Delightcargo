@@ -250,6 +250,7 @@ const createSmartshipShipment = async ({
             date: new Date(),
             awb_number: result.awb_number,
             description: `Freight Charges Applied`,
+            priceBreakup
           },
         },
       },

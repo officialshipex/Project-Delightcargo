@@ -293,6 +293,7 @@ const createZipypostShipment = async ({
       date: new Date(),
       awb_number: result.awb,
       description: "Freight Charges Applied",
+      priceBreakup
     });
 
     await Promise.all([

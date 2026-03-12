@@ -178,7 +178,10 @@ const getAllPassbookTransactions = async (req, res) => {
                   $ifNull: [{ $arrayElemAt: ["$orderInfo.provider", 0] }, null],
                 },
                 priceBreakup: {
-                  $ifNull: [{ $arrayElemAt: ["$orderInfo.priceBreakup", 0] }, null],
+                  $ifNull: [
+                    "$transactions.priceBreakup",
+                    { $arrayElemAt: ["$orderInfo.priceBreakup", 0] },
+                  ],
                 },
                 rateBreakup: {
                   $ifNull: [{ $arrayElemAt: ["$orderInfo.rateBreakup", 0] }, null],
@@ -290,7 +293,12 @@ const exportPassbook = async (req, res) => {
             $arrayElemAt: ["$orderInfo.courierServiceName", 0],
           },
           provider: { $arrayElemAt: ["$orderInfo.provider", 0] },
-          priceBreakup: { $arrayElemAt: ["$orderInfo.priceBreakup", 0] },
+          priceBreakup: {
+            $ifNull: [
+              "$wallet.transactions.priceBreakup",
+              { $arrayElemAt: ["$orderInfo.priceBreakup", 0] },
+            ],
+          },
           rateBreakup: { $arrayElemAt: ["$orderInfo.rateBreakup", 0] },
           orderType: { $arrayElemAt: ["$orderInfo.orderType", 0] },
         },

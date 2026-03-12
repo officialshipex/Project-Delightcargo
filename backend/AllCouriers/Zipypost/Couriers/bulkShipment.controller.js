@@ -322,6 +322,7 @@ const createOrderZipypost = async (
               date: new Date(),
               awb_number: awb,
               description: "Freight Charges Applied",
+              priceBreakup
             },
           },
         }

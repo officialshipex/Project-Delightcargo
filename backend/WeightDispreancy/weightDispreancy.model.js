@@ -41,6 +41,7 @@ const weightDiscrepancySchema = new mongoose.Schema(
       excessWeight: { type: String, required: true },
       excessCharges: { type: String, required: true },
       pendingAmount: { type: String, required: true },
+      priceBreakup: { type: Object },
     }, // Weight from Uploaded File
     status: { type: String, required: true },
     clientStatus: { type: String },

@@ -20,16 +20,26 @@ const createBoxdWarehouse = async (userId, pickup) => {
             return boxdWarehouseCache.get(cacheKey);
         }
 
-        // Find the actual registered hub record
-        const actualPickupRecord = await PickupAddress.findOne({
+        let actualPickupRecord = await PickupAddress.findOne({
             userId,
             "pickupAddress.pinCode": String(pickup.pinCode),
             "pickupAddress.contactName": pickup.contactName
         });
 
         if (!actualPickupRecord) {
-            console.warn("No matching pickup address found for BoxdLogistics warehouse reg.");
-            throw new Error("pickup warehouse is not registered please add pickup address");
+            actualPickupRecord = new PickupAddress({
+                userId,
+                pickupAddress: {
+                    contactName: pickup.contactName,
+                    email: pickup.email || "info@shipex.in",
+                    phoneNumber: pickup.phoneNumber,
+                    address: pickup.address,
+                    pinCode: pickup.pinCode,
+                    city: pickup.city,
+                    state: pickup.state,
+                }
+            });
+            await actualPickupRecord.save();
         }
 
         if (actualPickupRecord.boxdLogisticsWarehouseId) {
@@ -239,7 +249,7 @@ const checkServiceabilityBoxdLogistics = async ({
         });
 
         const couriers = response.data || [];
-
+        // console.log("couriers",couriers)
         const matchedCouriers = couriers
             .filter((c) => c.courier_id === 4 || c.courier_id === 6)
             .map((c) => c.courier_id);
@@ -299,22 +309,32 @@ const createBoxdLogisticsOrder = async (req, res) => {
             });
         }
 
-        // Parallel: zone + user + pickup address check
-        const [zone, user, actualPickupRecord] = await Promise.all([
+        // Parallel: zone + user
+        const [zone, user] = await Promise.all([
             getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode),
             User.findById(currentOrder.userId).session(session),
-            PickupAddress.findOne({
-                userId: currentOrder.userId,
-                "pickupAddress.pinCode": String(currentOrder.pickupAddress.pinCode),
-                "pickupAddress.contactName": currentOrder.pickupAddress.contactName
-            }).session(session)
         ]);
 
+        let actualPickupRecord = await PickupAddress.findOne({
+            userId: currentOrder.userId,
+            "pickupAddress.pinCode": String(currentOrder.pickupAddress.pinCode),
+            "pickupAddress.contactName": currentOrder.pickupAddress.contactName
+        });
+
         if (!actualPickupRecord) {
-            await Order.findByIdAndUpdate(id, { status: "new" });
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({ success: false, message: "pickup warehouse is not registered please add pickup address" });
+            actualPickupRecord = new PickupAddress({
+                userId: currentOrder.userId,
+                pickupAddress: {
+                    contactName: currentOrder.pickupAddress.contactName,
+                    email: currentOrder.pickupAddress.email || user?.email || "info@shipex.in",
+                    phoneNumber: currentOrder.pickupAddress.phoneNumber,
+                    address: currentOrder.pickupAddress.address,
+                    pinCode: currentOrder.pickupAddress.pinCode,
+                    city: currentOrder.pickupAddress.city,
+                    state: currentOrder.pickupAddress.state,
+                }
+            });
+            await actualPickupRecord.save();
         }
 
         if (!zone) {
@@ -475,6 +495,7 @@ const createBoxdLogisticsOrder = async (req, res) => {
                                 date: new Date(),
                                 awb_number: awb,
                                 description: "Freight Charges Applied",
+                                priceBreakup,
                             },
                         },
                     }

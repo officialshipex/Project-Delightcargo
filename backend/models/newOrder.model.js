@@ -151,6 +151,10 @@ const orderSchema = new mongoose.Schema(
       freight: { type: Number },
       cod: { type: Number },
       gst: { type: Number },
+      rto: {
+        freight: { type: Number },
+        gst: { type: Number },
+      },
       total: { type: Number },
     },
     label: { type: String },

@@ -214,6 +214,7 @@ const createOneClickShipment = async (req, res) => {
               date: new Date(),
               awb_number: trackingId,
               description: "Freight Charges Applied",
+              priceBreakup,
             },
           },
         },

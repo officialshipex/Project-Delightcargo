@@ -336,6 +336,7 @@ const createEkartShipment = async ({
               date: new Date(),
               awb_number: response.data.tracking_id,
               description: "Freight Charges Applied",
+              priceBreakup
             },
           },
         },

@@ -1812,7 +1812,7 @@ const passbook = async (req, res) => {
                 orderId: "$wallet.transactions.channelOrderId",
                 description: "$wallet.transactions.description",
                 courierServiceName: { $arrayElemAt: ["$orderInfo.courierServiceName", 0] },
-                priceBreakup: { $arrayElemAt: ["$orderInfo.priceBreakup", 0] },
+                priceBreakup: { $ifNull: ["$wallet.transactions.priceBreakup", { $arrayElemAt: ["$orderInfo.priceBreakup", 0] }] },
                 rateBreakup: { $arrayElemAt: ["$orderInfo.rateBreakup", 0] },
                 orderType: { $arrayElemAt: ["$orderInfo.orderType", 0] }
               }
