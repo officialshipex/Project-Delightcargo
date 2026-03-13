@@ -565,14 +565,14 @@ const trackOrderBoxdLogistics = async (AWBNo) => {
         );
 
         // console.log("BoxdLogistics tracking data:", sorted);
-        return { success: true, data: sorted };
+        return { success: true, data: sorted.reverse() };
     } catch (error) {
         console.error("BoxdLogistics tracking error:", error.response?.data || error.message);
         return { success: false, error: error.response?.data || error.message, status: 500 };
     }
 };
 
-// trackOrderBoxdLogistics("77716553165");
+// trackOrderBoxdLogistics("76876592236");
 
 module.exports = {
     checkServiceabilityBoxdLogistics,

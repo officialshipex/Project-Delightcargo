@@ -1059,7 +1059,7 @@ const trackSingleOrder = async (order) => {
       // normalizedData.Instructions = the raw `status` field from the API (snake_case)
       // e.g. 'shipped', 'pickup_scheduled', 'out_for_delivery', 'delivered', 'undelivered', 'rto', 'rto_delivered', 'cancelled'
       const statusCode = normalizedData.Instructions?.toLowerCase(); // e.g. "shipped"
-
+// console.log("status",normalizedData)
       // --- Pickup Scheduled / Ready To Ship ---
       if (
         statusCode === "pickup_scheduled" ||
@@ -1298,7 +1298,8 @@ const trackOrders = async () => {
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
       // provider: "Dtdc",
-      // awb_number: "77716626503",
+      // awb_number: "76876592236",
+      partner:"BoxdLogistics"
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1411,7 +1412,8 @@ const mapTrackingResponse = (data, provider, remark) => {
     };
 
     const scanArray = data || [];
-    const latestScan = scanArray?.[0];
+    // console.log("scan",scanArray)
+    const latestScan = scanArray?.[scanArray.length-1];
     return {
       Status: latestScan?.status || "N/A",          // e.g. 'shipped', 'pickup_scheduled'
       Description: latestScan?.description || "N/A", // human-readable description
