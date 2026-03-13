@@ -2755,6 +2755,53 @@ const transferCOD = async (req, res) => {
   }
 };
 
+const checkOrderDuplicates = async () => {
+  try {
+    const allRemittances = await codRemittance.find({});
+    const orderMap = {}; // { orderId: [userId1, userId2, ...] }
+
+    allRemittances.forEach((doc) => {
+      const userId = doc.userId;
+      if (doc.remittanceData && Array.isArray(doc.remittanceData)) {
+        doc.remittanceData.forEach((remittance) => {
+          if (
+            remittance.orderDetails &&
+            remittance.orderDetails.orders &&
+            Array.isArray(remittance.orderDetails.orders)
+          ) {
+            remittance.orderDetails.orders.forEach((orderId) => {
+              const orderIdStr = orderId.toString();
+              if (!orderMap[orderIdStr]) {
+                orderMap[orderIdStr] = [];
+              }
+              orderMap[orderIdStr].push(userId);
+            });
+          }
+        });
+      }
+    });
+
+    let duplicatesFound = false;
+    for (const orderId in orderMap) {
+      if (orderMap[orderId].length > 1) {
+        duplicatesFound = true;
+        const uniqueUserIds = [...new Set(orderMap[orderId].map(id => id.toString()))];
+        console.log(`Duplicate Order ID: ${orderId}, User IDs: ${uniqueUserIds.join(", ")}`);
+      }
+    }
+
+    if (!duplicatesFound) {
+      console.log("No duplicate orders found.");
+    }
+    console.log("complete duplicate found")
+  } catch (error) {
+    console.error("Error in checkOrderDuplicates:", error);
+  }
+};
+
+// To run this function manually, you can call it here:
+// checkOrderDuplicates();
+
 module.exports = {
   codPlanUpdate,
   codToBeRemitteds,
