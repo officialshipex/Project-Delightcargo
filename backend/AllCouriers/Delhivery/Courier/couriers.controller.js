@@ -274,13 +274,13 @@ const createOrder = async (req, res) => {
       },
       timeout: 8000,
     });
-    // console.log("delhiver",response.data)
+    // console.log("delhiver", response)
     const result = response.data?.packages?.[0];
     if (!response.data.success || !result) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
-      console.log("error delhivery", response.data)
+      console.log("error delhivery", response.data.packages[0].remarks)
       return res.status(400).json({
         success: false,
         message: "Failed to create shipment",

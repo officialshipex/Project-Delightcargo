@@ -1304,8 +1304,8 @@ const trackOrders = async () => {
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
       // provider: "Dtdc",
-      // awb_number: "76876592236",
-      partner:"BoxdLogistics"
+      // awb_number: "77719296001",
+      // partner:"BoxdLogistics"
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
