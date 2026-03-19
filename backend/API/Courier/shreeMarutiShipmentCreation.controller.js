@@ -237,12 +237,12 @@ const createShreeMarutiShipment = async ({
       session.endSession();
 
       // ── Auto-assign pickup manifest (groups by date + address + courier) ──
-      // try {
-      //   const freshOrder = await Order.findById(currentOrder._id);
-      //   if (freshOrder) await assignPickupManifest(freshOrder);
-      // } catch (pErr) {
-      //   console.error("[Pickup] assignPickupManifest failed (non-blocking):", pErr.message);
-      // }
+      try {
+        const freshOrder = await Order.findById(currentOrder._id);
+        if (freshOrder) await assignPickupManifest(freshOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed (non-blocking):", pErr.message);
+      }
 
       // --- Call Manifest API (outside transaction) ---
       try {

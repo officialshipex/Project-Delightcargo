@@ -163,11 +163,11 @@ const createShipmentFunctionDelhivery = async (
         await currentOrder.save(); // Save the updated order
 
         // ── Auto-assign pickup manifest ──
-        // try {
-        //   await assignPickupManifest(currentOrder);
-        // } catch (pErr) {
-        //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-        // }
+        try {
+          await assignPickupManifest(currentOrder);
+        } catch (pErr) {
+          console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+        }
 
         const transaction = {
           channelOrderId: currentOrder.orderId,

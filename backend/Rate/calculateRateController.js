@@ -29,6 +29,7 @@ const {
 } = require("../AllCouriers/Zipypost/Couriers/couriers.controller.js");
 const { checkEkartServiceability } = require("../AllCouriers/Ekart/Couriers/couriers.controller.js");
 const { checkServiceabilityBoxdLogistics } = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller.js");
+const { checkProshipServiceability } = require("../AllCouriers/Proship/Courier/couriers.controller.js");
 
 const calculateRate = async (req, res) => {
   try {
@@ -97,7 +98,8 @@ const calculateRate = async (req, res) => {
           "EcomExpress",
           "Zipypost",
           "Ekart",
-          "BoxdLogistics"
+          "BoxdLogistics",
+          "Proship"
         ].includes(provider)
       ) {
         continue;
@@ -130,6 +132,14 @@ const calculateRate = async (req, res) => {
         }
         if (!boxdServiceable) continue;
         // ✅ Mark serviceable so the outer check below passes
+        serviceable = { success: true };
+      } else if (provider === "Proship") {
+        const payload = {
+          pickUpPincode: pickUpPincode,
+          deliveryPincode: deliveryPincode,
+        };
+        const proshipResult = await checkProshipServiceability(payload);
+        if (!proshipResult || proshipResult.success === false) continue;
         serviceable = { success: true };
       } else {
 

@@ -36,6 +36,8 @@ const {
 } = require("../AllCouriers/Zipypost/Couriers/bulkShipment.controller");
 const { createOrderEkart } = require("../AllCouriers/Ekart/Couriers/bulkShipment.controller");
 const { createOrderBoxdLogistics } = require("../AllCouriers/BoxdLogistics/Courier/bulkShipmentcontroller");
+const { createProshipOrder } = require("../AllCouriers/Proship/Courier/couriers.controller");
+const createProshipShipment = require("../API/Courier/proshipShipmentCreation.controller");
 
 const updatePickup = async (req, res) => {
   try {
@@ -186,6 +188,15 @@ const callProviderWithRetry = async (
             charges,
             priceBreakup
           );
+          break;
+        case "Proship":
+          result = await createProshipShipment({
+            id: order._id,
+            provider: serviceDetails.provider,
+            finalCharges: charges,
+            courierServiceName: serviceDetails.name,
+            priceBreakup: priceBreakup
+          });
           break;
         default:
           console.error(

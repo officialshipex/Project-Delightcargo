@@ -200,11 +200,11 @@ const createOrderDTDC = async (
       let savedOrder = await currentOrder.save();
 
       // ── Auto-assign pickup manifest ──
-      // try {
-      //   await assignPickupManifest(currentOrder);
-      // } catch (pErr) {
-      //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-      // }
+      try {
+        await assignPickupManifest(currentOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      }
 
       // console.log("sjakjska",balanceToBeDeducted)
       // Deduct wallet balance using atomic operation and update transaction

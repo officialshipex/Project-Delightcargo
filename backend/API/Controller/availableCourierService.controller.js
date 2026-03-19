@@ -30,6 +30,9 @@ const {
 const {
   checkServiceabilityBoxdLogistics,
 } = require("../../AllCouriers/BoxdLogistics/Courier/couriers.controller.js");
+const {
+  checkProshipServiceability,
+} = require("../../AllCouriers/Proship/Courier/couriers.controller.js");
 
 // Define courier IDs for each provider
 const courierIds = {
@@ -42,6 +45,7 @@ const courierIds = {
   ZipyPost: "07",
   Ekart: "08",
   BoxdLogistics: "09",
+  Proship: "10",
 };
 
 // Input Validation Schema
@@ -204,6 +208,12 @@ const availableCourierService = async (req, res) => {
           height: 10,
         };
         serviceable = await checkServiceabilityBoxdLogistics(payload);
+      } else if (provider === "Proship") {
+        const payload = {
+          pickUpPincode: pickUpPincode,
+          deliveryPincode: deliveryPincode,
+        };
+        serviceable = await checkProshipServiceability(payload);
       }
 
       let isServiceable = serviceable && serviceable.success !== false;

@@ -47,6 +47,24 @@ const ShreeMarutiWebhook = async (req, res) => {
 
     console.log("Normalized Webhook Data:", normalizedData);
 
+    // ------------------------------------------------
+    // DUPLICATE TRACKING CHECK
+    // ------------------------------------------------
+    const lastTracking = order.tracking[order.tracking.length - 1];
+    if (
+      lastTracking &&
+      lastTracking.Instructions === normalizedData.Instructions &&
+      lastTracking.StatusLocation === (data.location || "Unknown") &&
+      new Date(lastTracking.StatusDateTime).getTime() ===
+      new Date(normalizedData.StatusDateTime).getTime()
+    ) {
+      console.log(`Duplicate tracking entry for AWB ${awb}. Skipping update.`);
+      return res.status(200).json({
+        success: true,
+        message: "Duplicate tracking entry, update skipped",
+      });
+    }
+
     const status = normalizedData.Status;
 
     /* ────────────────────────────────────────────────

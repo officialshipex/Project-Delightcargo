@@ -41,6 +41,9 @@ const {
 const {
   checkServiceabilityBoxdLogistics,
 } = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller");
+const {
+  checkProshipServiceability,
+} = require("../AllCouriers/Proship/Courier/couriers.controller");
 const checkServiceabilityAll = async (service, id, pincode) => {
   try {
     const currentOrder = await Order.findById(id);
@@ -288,6 +291,17 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         }
       }
       return res;
+    }
+    if (service.provider.toLowerCase() === "proship") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
+      const payload = {
+        pickUpPincode: pickupPincode,
+        deliveryPincode: deliveryPincode,
+      };
+      const result = await checkProshipServiceability(payload);
+      return result;
     }
 
     // Default

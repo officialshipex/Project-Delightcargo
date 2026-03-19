@@ -27,6 +27,9 @@ const {
   cancelOrderBoxdLogistics,
 } = require("../../AllCouriers/BoxdLogistics/Courier/couriers.controller");
 const {
+  cancelProshipOrder,
+} = require("../../AllCouriers/Proship/Courier/couriers.controller");
+const {
   removeFromPickupManifest,
 } = require("../../Orders/scheduledPickup.controller");
 
@@ -76,6 +79,8 @@ const cancelOrdersAtBooked = async (req, res) => {
         provider = "ZipyPost";
       } else if (currentOrder.partner === "BoxdLogistics") {
         provider = "BoxdLogistics";
+      } else if (currentOrder.partner === "Proship") {
+        provider = "Proship";
       } else {
         provider = currentOrder.provider;
       }
@@ -106,9 +111,11 @@ const cancelOrdersAtBooked = async (req, res) => {
         case "BoxdLogistics":
           result = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
           break;
+        case "Proship":
+          result = await cancelProshipOrder(currentOrder.awb_number);
+          break;
         default:
           throw new Error("Unsupported courier provider");
-
       }
 
       if (result?.error || result.success === false) {

@@ -280,14 +280,6 @@ const orderCreationEkart = async (req, res) => {
       pickup_location: { name: ekartAlias },
       return_location: { name: ekartAlias },
 
-      qc_details: {
-        qc_shipment: true,
-        product_name: firstProduct._doc?.name,
-        product_desc: firstProduct._doc?.name,
-        product_sku: firstProduct._doc?.sku,
-        product_images: firstProduct._doc?.images || [],
-      },
-
       items,
       what3words_address: "",
     };
@@ -295,7 +287,7 @@ const orderCreationEkart = async (req, res) => {
     // =====================================================
     // ⭐ 8. EKART API CALL
     // =====================================================
-    // console.log("Ekart Shipment Payload:", payload);
+    console.log("Ekart Shipment Payload:", payload);
     let response;
 
     try {
@@ -401,12 +393,12 @@ const orderCreationEkart = async (req, res) => {
     session.endSession();
 
     // ── Auto-assign pickup manifest ──
-    // try {
-    //   const freshOrder = await Order.findById(id);
-    //   if (freshOrder) await assignPickupManifest(freshOrder);
-    // } catch (pErr) {
-    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-    // }
+    try {
+      const freshOrder = await Order.findById(id);
+      if (freshOrder) await assignPickupManifest(freshOrder);
+    } catch (pErr) {
+      console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    }
 
     res.status(200).json({
       success: true,
@@ -606,71 +598,53 @@ const checkEkartServiceability = async (payload) => {
 
     const headers = {
       Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
     };
 
-    const pickup = Number(payload.pickUpPincode);
-    const receiver = Number(payload.deliveryPincode);
-    const paymentMethod = payload.paymentMethod; // COD or Prepaid
-    const codAmount = Number(payload.codAmount || 0);
+    const serviceabilityPayload = {
+      pickupPincode: String(payload.pickUpPincode),
+      dropPincode: String(payload.deliveryPincode),
+      length: String(payload.length || "10"),
+      height: String(payload.height || "10"),
+      width: String(payload.width || "10"),
+      weight: String(payload.weight || "0.5"),
+      paymentType: payload.paymentMethod === "COD" ? "COD" : "Prepaid",
+      serviceType: payload.serviceType || "SURFACE",
+      codAmount: String(payload.codAmount || "0"),
+      invoiceAmount: String(payload.codAmount || "0"),
+    };
 
-    const [pickupResponse, receiverResponse] = await Promise.all([
-      axios.get(
-        `https://app.elite.ekartlogistics.in/api/v2/serviceability/${pickup}`,
-        { headers }
-      ),
-      axios.get(
-        `https://app.elite.ekartlogistics.in/api/v2/serviceability/${receiver}`,
-        { headers }
-      ),
-    ]);
+    const response = await axios.post(
+      "https://app.elite.ekartlogistics.in/data/v3/serviceability",
+      serviceabilityPayload,
+      { headers }
+    );
+    // console.log("service", response.data);
 
-    const pickupData = pickupResponse.data;
-    const receiverData = receiverResponse.data;
-
-    // console.log("Ekart Serviceability Pickup Data:", pickupData);
-    // console.log("Ekart Serviceability Receiver Data:", receiverData);
-
-    const pickupServiceable = pickupData?.status === true;
-    const receiverServiceable = receiverData?.status === true;
-
-    if (!pickupServiceable || !receiverServiceable) {
+    if (Array.isArray(response.data) && response.data.length > 0) {
+      return {
+        success: true,
+        data: response.data[0],
+      };
+    } else if (response.data && response.data.status === true) {
+      return {
+        success: true,
+        data: response.data.details || response.data,
+      };
+    } else {
       return {
         success: false,
-        message: "Pickup or Delivery pincode is not serviceable",
+        message:
+          response.data?.message ||
+          response.data?.description ||
+          "Not serviceable",
+        error: response.data,
       };
     }
-
-    // ✅ COD Validation
-    if (paymentMethod === "COD") {
-      const receiverCOD = receiverData?.details?.cod === true;
-      const maxCOD = receiverData?.details?.max_cod_amount || 0;
-
-      if (!receiverCOD) {
-        return {
-          success: false,
-          message: "COD is not available at delivery location",
-        };
-      }
-
-      if (codAmount > maxCOD) {
-        return {
-          success: false,
-          message: `COD amount exceeds limit. Max allowed: ${maxCOD}`,
-        };
-      }
-    }
-
-    return {
-      success: true,
-      data: {
-        pickup: pickupData?.details || {},
-        receiver: receiverData?.details || {},
-      },
-    };
   } catch (error) {
     console.error(
       "Ekart Serviceability Error:",
-      error.response?.data || error.message
+      error.response?.data || error.message,
     );
 
     return {
