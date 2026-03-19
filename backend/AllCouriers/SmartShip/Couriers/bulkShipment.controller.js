@@ -200,11 +200,11 @@ const orderRegistrationOneStep = async (
       await currentOrder.save();
 
       // ── Auto-assign pickup manifest ──
-      // try {
-      //   await assignPickupManifest(currentOrder);
-      // } catch (pErr) {
-      //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-      // }
+      try {
+        await assignPickupManifest(currentOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      }
 
       const updatedWallet = await Wallet.findOneAndUpdate(
         { _id: walletId, balance: { $gte: parseFloat(charges) } },

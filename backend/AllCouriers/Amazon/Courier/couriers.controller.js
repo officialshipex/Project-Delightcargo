@@ -234,12 +234,12 @@ const createOneClickShipment = async (req, res) => {
     session.endSession();
 
     // ── Auto-assign pickup manifest ──
-    // try {
-    //   const freshOrder = await Order.findById(id);
-    //   if (freshOrder) await assignPickupManifest(freshOrder);
-    // } catch (pErr) {
-    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-    // }
+    try {
+      const freshOrder = await Order.findById(id);
+      if (freshOrder) await assignPickupManifest(freshOrder);
+    } catch (pErr) {
+      console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    }
 
     // ✅ Final response
     return res.status(200).json({

@@ -62,6 +62,10 @@ const {
   cancelOrderBoxdLogistics,
 } = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller");
 const {
+  cancelProshipOrder,
+  trackProshipOrder,
+} = require("../AllCouriers/Proship/Courier/couriers.controller");
+const {
   removeFromPickupManifest,
 } = require("./scheduledPickup.controller");
 // Create a shipment
@@ -1650,6 +1654,11 @@ const cancelOrdersAtBooked = async (req, res) => {
       if (result.error) {
         return res.status(400).send({ error: result.error });
       }
+    } else if (currentOrder.partner === "Proship") {
+      const result = await cancelProshipOrder(currentOrder.awb_number);
+      if (result.error) {
+        return res.status(400).send({ error: result.error });
+      }
     }
     else {
       return {
@@ -2031,7 +2040,9 @@ const bulkCancelOrder = async (req, res) => {
             ? "ZipyPost"
             : currentOrder.partner === "BoxdLogistics"
               ? "BoxdLogistics"
-              : currentOrder.provider;
+              : currentOrder.partner === "Proship"
+                ? "Proship"
+                : currentOrder.provider;
 
         // --- Cancel order by provider ---
         let cancelResponse;
@@ -2058,6 +2069,9 @@ const bulkCancelOrder = async (req, res) => {
             break;
           case "BoxdLogistics":
             cancelResponse = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
+            break;
+          case "Proship":
+            cancelResponse = await cancelProshipOrder(currentOrder.awb_number);
             break;
           default:
             failedCount++;

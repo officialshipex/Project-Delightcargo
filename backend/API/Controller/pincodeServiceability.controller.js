@@ -31,6 +31,9 @@ const {
 const {
   checkServiceabilityBoxdLogistics,
 } = require("../../AllCouriers/BoxdLogistics/Courier/couriers.controller.js");
+const {
+  checkProshipServiceability,
+} = require("../../AllCouriers/Proship/Courier/couriers.controller.js");
 
 // ✅ Input Validation Schema
 const serviceabilitySchema = Joi.object({
@@ -60,6 +63,7 @@ const courierIds = {
   ZipyPost: "07",
   Ekart: "08",
   BoxdLogistics: "09",
+  Proship: "10",
 };
 
 const pincodeServiceability = async (req, res) => {
@@ -217,6 +221,14 @@ const pincodeServiceability = async (req, res) => {
             length,
             breadth: width,
             height,
+          }),
+      },
+      {
+        name: "Proship",
+        check: async () =>
+          checkProshipServiceability({
+            pickUpPincode: pickUpPincode,
+            deliveryPincode: deliveryPincode,
           }),
       },
     ].filter((p) =>

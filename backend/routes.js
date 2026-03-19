@@ -55,6 +55,7 @@ const statusMap = require("./statusMap/StatusMap.router")
 const EDDMap = require("./routes/EDDMap.router")
 const ZipyPostRouter = require("./AllCouriersRoutes/zipypost.router")
 const BoxdLogisticsRouter = require("./AllCouriersRoutes/boxdlogistics.router")
+const ProshipRouter = require("./AllCouriersRoutes/proship.router")
 const CourierRouter = require("./routes/courier.router")
 const referralRoute = require("./Referral/referal.router")
 const Notification = require("./notification/notification.router")
@@ -142,6 +143,7 @@ router.use("/Ekart", Ekart)
 router.use("/Vamaship", Vamaship)
 router.use("/ZipyPost", ZipyPostRouter)
 router.use("/BoxdLogistics", BoxdLogisticsRouter)
+router.use("/Proship", ProshipRouter)
 
 router.use("/label", LabelRouter);
 router.use("/user", userRouter);

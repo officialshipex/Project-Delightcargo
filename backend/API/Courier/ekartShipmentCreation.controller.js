@@ -236,13 +236,13 @@ const createEkartShipment = async ({
       pickup_location: { name: ekartAlias },
       return_location: { name: ekartAlias },
 
-      qc_details: {
-        qc_shipment: true,
-        product_name: firstProduct._doc?.name,
-        product_desc: firstProduct._doc?.name,
-        product_sku: firstProduct._doc?.sku,
-        product_images: firstProduct._doc?.images || [],
-      },
+      // qc_details: {
+      //   qc_shipment: true,
+      //   product_name: firstProduct._doc?.name,
+      //   product_desc: firstProduct._doc?.name,
+      //   product_sku: firstProduct._doc?.sku,
+      //   product_images: firstProduct._doc?.images || [],
+      // },
 
       items,
       what3words_address: "",
@@ -314,12 +314,12 @@ const createEkartShipment = async ({
     session.endSession();
 
     // ── Auto-assign pickup manifest ──
-    // try {
-    //   const freshOrder = await Order.findById(currentOrder._id);
-    //   if (freshOrder) await assignPickupManifest(freshOrder);
-    // } catch (pErr) {
-    //   console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-    // }
+    try {
+      const freshOrder = await Order.findById(currentOrder._id);
+      if (freshOrder) await assignPickupManifest(freshOrder);
+    } catch (pErr) {
+      console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+    }
 
     // 🔟 Wallet update (post-commit)
     try {

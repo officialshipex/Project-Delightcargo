@@ -36,6 +36,9 @@ const {
 const {
   trackOrderBoxdLogistics,
 } = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller");
+const {
+  trackProshipOrder,
+} = require("../AllCouriers/Proship/Courier/couriers.controller");
 const Bottleneck = require("bottleneck");
 
 const statusMap = require("../statusMap/StatusMap.model");
@@ -72,6 +75,7 @@ const trackSingleOrder = async (order) => {
       Smartship: trackOrderSmartShip,
       ZipyPost: trackOrderZipypost,
       BoxdLogistics: trackOrderBoxdLogistics,
+      Proship: trackProshipOrder,
     };
 
     // if (!trackingFunctions[provider]) {
@@ -84,6 +88,8 @@ const trackSingleOrder = async (order) => {
       result = await trackingFunctions["ZipyPost"](awb_number, shipment_id);
     } else if (partner && partner === "BoxdLogistics") {
       result = await trackingFunctions["BoxdLogistics"](awb_number, shipment_id);
+    } else if (partner && partner === "Proship") {
+      result = await trackingFunctions["Proship"](awb_number, shipment_id);
     } else if (provider && trackingFunctions[provider]) {
       result = await trackingFunctions[provider](awb_number, shipment_id);
     } else {
@@ -100,7 +106,7 @@ const trackSingleOrder = async (order) => {
     // Normalize only the latest one
     const normalizedData = mapTrackingResponse(
       [latestTrackingEvent],
-      (partner === "ZipyPost" || partner === "BoxdLogistics") ? partner : provider,
+      (partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship") ? partner : provider,
     );
     // console.log("normalized", normalizedData);
 
@@ -1424,6 +1430,19 @@ const mapTrackingResponse = (data, provider, remark) => {
       Remarks: latestScan?.remarks || null,
     };
   }
+
+  if (provider === "Proship") {
+    const scanArray = data || [];
+    const latestScan = scanArray?.[scanArray.length - 1];
+    return {
+      Status: latestScan?.status || "N/A",
+      StatusLocation: latestScan?.location || "Unknown",
+      StatusDateTime: latestScan?.datetime || null,
+      Instructions: latestScan?.status || "N/A",
+      Remarks: latestScan?.remarks || null,
+    };
+  }
+
   // console.log(data, provider);
   const providerMappings = {
     EcomExpress: {

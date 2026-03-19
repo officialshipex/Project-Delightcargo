@@ -1,8 +1,21 @@
 const Order = require("../models/newOrder.model");
 const statusMap = require("../statusMap/StatusMap.model");
 const { isReAttemptEligible } = require("../Orders/tracking.controller");
+const cron = require("node-cron");
+const { trackShipmentDelhivery } = require("../AllCouriers/Delhivery/Courier/couriers.controller");
 
 const DELHIVERY_WEBHOOK_TOKEN = process.env.DELHIVERY_WEBHOOK_TOKEN;
+
+const eligibleNSLCodes = [
+  "EOD-74",
+  "EOD-15",
+  "EOD-104",
+  "EOD-43",
+  "EOD-86",
+  "EOD-11",
+  "EOD-69",
+  "EOD-6",
+];
 
 const DelhiveryWebhook = async (req, res) => {
   try {
@@ -105,16 +118,6 @@ const DelhiveryWebhook = async (req, res) => {
     // --------------------------------
     // 3️⃣ NDR ELIGIBILITY BASED ON NSL
     // --------------------------------
-    const eligibleNSLCodes = [
-      "EOD-74",
-      "EOD-15",
-      "EOD-104",
-      "EOD-43",
-      "EOD-86",
-      "EOD-11",
-      "EOD-69",
-      "EOD-6",
-    ];
 
     const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
     const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
@@ -164,10 +167,6 @@ const DelhiveryWebhook = async (req, res) => {
       Instructions: normalizedData.Instructions,
     });
 
-    // ------------------------
-    // 4️⃣ SET REATTEMPT FLA G
-    // ------------------------
-    order.reattempt = isReAttemptEligible(order, normalizedData);
 
     await order.save();
 
@@ -178,7 +177,74 @@ const DelhiveryWebhook = async (req, res) => {
   }
 };
 
-module.exports = { DelhiveryWebhook };
+const processDelhiveryNdrReattempt = async () => {
+  try {
+    const orders = await Order.find({
+      provider: "Delhivery",
+      ndrStatus: "Undelivered",
+      // awb_number: "35973710080695"
+    });
+
+    if (!orders || orders.length === 0) {
+      console.log("No Delhivery Undelivered orders found for reattempt check.");
+      return;
+    }
+
+    console.log(
+      `Checking reattempt eligibility for ${orders.length} Delhivery Undelivered orders...`,
+    );
+
+    for (const order of orders) {
+      try {
+        const trackingResult = await trackShipmentDelhivery(order.awb_number);
+        if (
+          trackingResult.success &&
+          Array.isArray(trackingResult.data) &&
+          trackingResult.data.length > 0
+        ) {
+          // Latest scan is generally at the end of the array from trackShipmentDelhivery
+          const scans = trackingResult.data;
+          const latestScan = scans[scans.length - 1];
+          const statusCode = latestScan.StatusCode;
+
+          if (statusCode && eligibleNSLCodes.includes(statusCode)) {
+            order.reattempt = true;
+            await order.save();
+            console.log(
+              `AWB ${order.awb_number}: Reattempt set to true (StatusCode: ${statusCode})`,
+            );
+          }
+        }
+      } catch (err) {
+        console.error(`Error tracking AWB ${order.awb_number}:`, err.message);
+      }
+    }
+    console.log("Delhivery NDR reattempt check completed.");
+  } catch (error) {
+    console.error("Error in processDelhiveryNdrReattempt cron task:", error);
+  }
+};
+
+// Run every day at 9:05 PM IST
+if (process.env.NODE_ENV === "production") {
+  cron.schedule(
+    "5 21 * * *",
+    () => {
+      console.log(
+        "⏰ Running scheduled Delhivery reattempt task at 9:05 PM IST",
+      );
+      processDelhiveryNdrReattempt();
+    },
+    {
+      scheduled: true,
+      timezone: "Asia/Kolkata",
+    },
+  );
+}
+
+// processDelhiveryNdrReattempt()
+
+module.exports = { DelhiveryWebhook, processDelhiveryNdrReattempt };
 
 //  Webhook Scan Received from Delhivery: {
 //    Shipment: {
