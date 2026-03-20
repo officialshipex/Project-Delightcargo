@@ -47,9 +47,7 @@ const ProshipWebhook = async (req, res) => {
     for (const event of events) {
       const awb = event.waybill;
       const statusCode = event.orderStatusCode;
-      const statusDescription = event.orderStatusDescription || "";
       const location = event.currentLocation || "Unknown";
-      const remark = event.remark || statusDescription;
       // Proship timestamps are UTC — shift to IST (+5h30m) before storing
       const toIST = (utcStr) => {
         if (!utcStr) return new Date(Date.now() + 5.5 * 60 * 60 * 1000);
@@ -58,6 +56,22 @@ const ProshipWebhook = async (req, res) => {
         return d;
       };
       const timestamp = toIST(event.timestamp);
+
+      // Remove the word "proship" from anywhere in the text (case-insensitive)
+      const cleanProshipText = (str) => {
+        if (!str) return str;
+        return str
+          .replace(/\s*[-\u2013]\s*proship/gi, "")  // " - proship"
+          .replace(/proship\s*[-\u2013]\s*/gi, "")  // "proship - "
+          .replace(/\bon\s+proship\b/gi, "")         // "on proship"
+          .replace(/\bproship\b/gi, "")              // any remaining word
+          .replace(/\s{2,}/g, " ")                   // collapse extra spaces
+          .replace(/[\s\-\u2013]+$/, "")             // trailing separators
+          .trim();
+      };
+
+      const statusDescription = cleanProshipText(event.orderStatusDescription || "");
+      const remark = cleanProshipText(event.remark || event.orderStatusDescription || "");
 
       if (!awb) {
         console.warn("Proship Webhook: Missing waybill, skipping event.");
