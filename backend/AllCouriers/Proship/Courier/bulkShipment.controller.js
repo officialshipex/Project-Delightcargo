@@ -70,9 +70,9 @@ const createOrderProship = async (
       reverse: false,
       order_type: "Forward Shipment",
       item_list: currentOrder.productDetails.map((item) => ({
-        units: item.quantity || 1,
+        units: Number(item.quantity) || 1,
         tax: parseFloat(item.tax) || 0,
-        hsn: item.hsn || "711719905",
+        hsn: (item.hsn && !isNaN(item.hsn)) ? item.hsn : "711719905",
         item_name: item.name,
         sku_id: item.sku || String(item.id),
         item_url: "NA",

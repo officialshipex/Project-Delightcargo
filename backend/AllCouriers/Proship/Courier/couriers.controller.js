@@ -23,9 +23,9 @@ const checkProshipServiceability = async (payload) => {
       }],
       { headers: { Authorization: `Bearer ${token}` } }
     );
-// console.log("service",response.data)
+    // console.log("service",response.data)
     const results = response.data.result || [];
-    console.log("results", results)
+    // console.log("results", results)
     // Filter only Shadowfax as requested
     const shadowfax = results.find(c => c.name.toLowerCase().includes("shadowfax") || c.account_code.toLowerCase().includes("shadowfax"));
 
@@ -111,9 +111,9 @@ const createProshipOrder = async (req, res) => {
       reverse: false,
       order_type: "Forward Shipment",
       item_list: currentOrder.productDetails.map((item) => ({
-        units: item.quantity || 1,
+        units: Number(item.quantity) || 1,
         tax: parseFloat(item.tax) || 0,
-        hsn: item.hsn || "711719905",
+        hsn: (item.hsn && !isNaN(item.hsn)) ? item.hsn : "711719905",
         item_name: item.name,
         sku_id: item.sku || String(item.id),
         item_url: "NA",
@@ -191,7 +191,7 @@ const createProshipOrder = async (req, res) => {
       throw new Error(response.data?.meta?.message || "Proship order creation failed");
     }
 
-    const { awb_number} = response.data.result;
+    const { awb_number } = response.data.result;
 
     // 8. Update Order inside transaction
     currentOrder.status = "Booked";
@@ -274,18 +274,28 @@ const trackProshipOrder = async (awb) => {
     const token = await getProshipAccessToken();
     if (!token) return { success: false, message: "Auth failed" };
 
-    // Placeholder for Proship Tracking API
-    // const response = await axios.get(`${PROSHIP_BASE_URL}/tracking/${awb}`, {
-    //   headers: { Authorization: `Bearer ${token}` }
-    // });
-    // return response.data;
+    const response = await axios.get(
+      `${PROSHIP_BASE_URL}/order/track_waybill`,
+      {
+        params: {
+          waybills: awb // can be single or comma-separated string
+        },
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
 
-    return { success: true, status: "In Transit", awb }; 
+    console.log("proship tracking", response.data);
+
+    return { success: true, data: response.data };
+
   } catch (error) {
-    console.error("Proship Tracking Error:", error.message);
-    return { success: false, error: error.message };
+    console.error("Proship Tracking Error:", error.response?.data || error.message);
+    return { success: false, error: error.response?.data || error.message };
   }
 };
+// trackProshipOrder("SF3166239830PRZ")
 
 const cancelProshipOrder = async (awb) => {
   try {

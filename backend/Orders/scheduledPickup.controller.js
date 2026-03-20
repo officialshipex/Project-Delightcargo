@@ -225,6 +225,8 @@ const filterPickupManifestsForAdmin = async (req, res) => {
       startDate,
       endDate,
       searchQuery,
+      orderId,
+      awbNumber,
       pickupContactName,
       courierServiceName,
       orderType,
@@ -232,6 +234,7 @@ const filterPickupManifestsForAdmin = async (req, res) => {
     } = req.query;
 
     let query = {};
+    const isSpecificSearch = searchQuery || orderId || awbNumber;
 
     // For Admin/Employee, allow filtering by userId
     if (userId) {
@@ -272,30 +275,73 @@ const filterPickupManifestsForAdmin = async (req, res) => {
     }
 
     if (startDate || endDate) {
-      query.pickupDate = {};
-      if (startDate) query.pickupDate.$gte = new Date(new Date(startDate).setHours(0, 0, 0, 0));
-      if (endDate) query.pickupDate.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+      // If a specific ID/Search is used, we bypass the date filter to find existing manifests
+      if (!isSpecificSearch || (searchQuery && searchQuery.length < 3)) {
+        query.pickupDate = {};
+        if (startDate) query.pickupDate.$gte = new Date(new Date(startDate).setHours(0, 0, 0, 0));
+        if (endDate) query.pickupDate.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+      }
     }
 
     if (orderType) {
       query.orderType = orderType;
     }
 
-    if (searchQuery) {
-      const users = await User.find({
-        $or: [
-          { fullname: { $regex: searchQuery, $options: "i" } },
-          { userId: { $regex: searchQuery, $options: "i" } },
-          { email: { $regex: searchQuery, $options: "i" } },
-        ],
-      }).select("_id");
-      const userIds = users.map((u) => u._id);
+    if (isSpecificSearch) {
+      const orConditions = [];
 
-      query.$or = [
-        { pickupId: { $regex: searchQuery, $options: "i" } },
-        { awb_numbers: { $in: [new RegExp(searchQuery, "i")] } },
-        { userId: { $in: userIds } },
-      ];
+      // Global search for pickupId, AWB or User details (Admin Global Search)
+      if (searchQuery && typeof searchQuery === "string") {
+        const trimmedSearch = searchQuery.trim();
+        orConditions.push({ pickupId: { $regex: trimmedSearch, $options: "i" } });
+        orConditions.push({ awb_numbers: { $regex: trimmedSearch, $options: "i" } });
+        
+        // 1. Build User Search (Only strings for regex, numbers for exact match)
+        const userSearchConditions = [
+          { fullname: { $regex: trimmedSearch, $options: "i" } },
+          { email: { $regex: trimmedSearch, $options: "i" } },
+        ];
+
+        // Only search by numeric userId if the string is purely digits
+        if (/^\d+$/.test(trimmedSearch)) {
+          userSearchConditions.push({ userId: Number(trimmedSearch) });
+        }
+
+        const matchedUsers = await User.find({ $or: userSearchConditions }).select("_id");
+        if (matchedUsers.length > 0) {
+          orConditions.push({ userId: { $in: matchedUsers.map(u => u._id) } });
+        }
+
+        // 2. Build Order Search for global query (numerical orderId)
+        if (/^\d+$/.test(trimmedSearch)) {
+          const matchingOrders = await Order.find({ orderId: Number(trimmedSearch) }).select("_id");
+          if (matchingOrders.length > 0) {
+            orConditions.push({ orderIds: { $in: matchingOrders.map(o => o._id) } });
+          }
+        }
+      }
+
+      // 3. Explicit Order ID search (from filter box)
+      if (orderId && !isNaN(Number(orderId))) {
+        const explicitOrders = await Order.find({ orderId: Number(orderId) }).select("_id");
+        if (explicitOrders.length > 0) {
+          orConditions.push({ orderIds: { $in: explicitOrders.map(o => o._id) } });
+        }
+      }
+
+      // 4. Explicit AWB Search (from filter box)
+      if (awbNumber) {
+        const explicitAwb = awbNumber.trim();
+        orConditions.push({ awb_numbers: { $regex: explicitAwb, $options: "i" } });
+        const ordersByAwb = await Order.find({ awb_number: { $regex: explicitAwb, $options: "i" } }).select("_id");
+        if (ordersByAwb.length > 0) {
+          orConditions.push({ orderIds: { $in: ordersByAwb.map(o => o._id) } });
+        }
+      }
+
+      if (orConditions.length > 0) {
+        query.$or = orConditions;
+      }
     }
 
     if (pickupContactName || courierServiceName) {
