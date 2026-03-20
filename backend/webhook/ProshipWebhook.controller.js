@@ -50,7 +50,14 @@ const ProshipWebhook = async (req, res) => {
       const statusDescription = event.orderStatusDescription || "";
       const location = event.currentLocation || "Unknown";
       const remark = event.remark || statusDescription;
-      const timestamp = event.timestamp ? new Date(event.timestamp) : new Date();
+      // Proship timestamps are UTC — shift to IST (+5h30m) before storing
+      const toIST = (utcStr) => {
+        if (!utcStr) return new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+        const d = new Date(utcStr);
+        d.setTime(d.getTime() + 5.5 * 60 * 60 * 1000);
+        return d;
+      };
+      const timestamp = toIST(event.timestamp);
 
       if (!awb) {
         console.warn("Proship Webhook: Missing waybill, skipping event.");
@@ -150,7 +157,7 @@ const ProshipWebhook = async (req, res) => {
 
         if (statusCode === 2 || statusCode === 25) {
           // PICKUP_PENDING / OUT_FOR_PICKUP
-          order.status = "Booked";
+          order.status = "Ready To Ship";
         }
 
         if (statusCode === 3) {
@@ -219,8 +226,7 @@ const ProshipWebhook = async (req, res) => {
                   (t) =>
                     t.awb_number === order.awb_number &&
                     t.category === "credit" &&
-                    (t.description === "Freight Charges Received" ||
-                      t.description === "Freight Charges Refunded")
+                    (t.description === "Freight Charges Received")
                 );
 
                 if (!alreadyRefunded) {

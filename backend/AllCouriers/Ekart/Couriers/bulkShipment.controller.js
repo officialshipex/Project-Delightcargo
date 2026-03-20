@@ -16,8 +16,8 @@ const createOrderEkart = async (
   wh,
   walletId,
   charges,
+  priceBreakup,
   estimatedDeliveryDate = null,
-  priceBreakup
 ) => {
   try {
     /* --------------------------------------------------

@@ -1038,22 +1038,11 @@ const trackSingleOrder = async (order) => {
 
       // --- Cancelled Case ---
       if (normalizedData.scanCode === 6) {
-        await Wallet.updateOne(
-          { _id: currentWallet._id },
-          {
-            $push: {
-              transactions: {
-                channelOrderId: order.orderId || null,
-                category: "credit",
-                amount: balanceTobeAdded,
-                balanceAfterTransaction: updatedWallet.balance,
-                date: new Date().toISOString().slice(0, 16).replace("T", " "),
-                awb_number: order.awb_number || "",
-                description: "Freight Charges Received",
-              },
-            },
-          },
-        );
+        balanceTobeAdded =
+          order.totalFreightCharges === "N/A"
+            ? 0
+            : parseFloat(order.totalFreightCharges);
+        shouldUpdateWallet = true;
         order.ndrStatus = "Cancelled";
         order.status = "Cancelled";
       }
@@ -1189,12 +1178,101 @@ const trackSingleOrder = async (order) => {
       }
     }
 
+    if (partner === "Proship") {
+      console.log("pro tracking", normalizedData);
+      const statusCode = normalizedData.statusCode;
+      const statusDescription = normalizedData.Status || "";
+      const remark = normalizedData.Instructions || statusDescription;
+      const timestamp = normalizedData.StatusDateTime;
+
+      const RTO_STATUS_CODES = [11, 12, 13, 14, 15, 21, 26, 27, 101];
+      const isRTO = RTO_STATUS_CODES.includes(statusCode);
+
+      if (isRTO) {
+        order.reattempt = false;
+        if (statusCode === 11 || statusCode === 101 || statusCode === 12) {
+          order.status = "RTO";
+          order.ndrStatus = "RTO";
+        } else if (statusCode === 14) {
+          order.status = "RTO Delivered";
+          order.ndrStatus = "RTO Delivered";
+        } else {
+          order.status = "RTO In-transit";
+          order.ndrStatus = "RTO In-transit";
+        }
+      } else {
+        if ([1, 28, 33].includes(statusCode)) {
+          order.status = "Booked";
+        } else if ([25,2].includes(statusCode)){
+          order.status="Ready To Ship";
+          order.ndrStatus="Ready To Ship";
+        }
+         else if (statusCode === 3) {
+          order.status = "Not Picked";
+        } else if (statusCode === 4) {
+          order.status = "In-transit";
+          order.ndrStatus = "In-transit";
+          order.reattempt = false;
+          if (!order.invoiceDate) order.invoiceDate = timestamp;
+        } else if ([5, 18, 20, 19].includes(statusCode)) {
+          order.status = "In-transit";
+          order.ndrStatus = "In-transit";
+          order.reattempt = false;
+        } else if (statusCode === 6) {
+          order.status = "Out for Delivery";
+          order.ndrStatus = "Out for Delivery";
+          order.reattempt = false;
+        } else if (statusCode === 7) {
+          order.status = "Undelivered";
+          order.ndrStatus = "Undelivered";
+        } else if (statusCode === 8) {
+          order.status = "Delivered";
+          order.ndrStatus = order.ndrHistory.length > 0 ? "Delivered" : "";
+          order.reattempt = order.ndrHistory.length > 0;
+        } else if (statusCode === 10) {
+          order.status = "Cancelled";
+          order.ndrStatus = "Cancelled";
+          balanceTobeAdded = order.totalFreightCharges === "N/A" ? 0 : parseFloat(order.totalFreightCharges);
+          shouldUpdateWallet = true;
+        } else if (statusCode === 16) {
+          order.status = "Lost";
+        } else if (statusCode === 9) {
+          order.status = "Undelivered";
+          order.ndrStatus = "Undelivered";
+          const currentDate = new Date(timestamp).getTime();
+          let lastNdrDate = null;
+          if (order.ndrHistory.length > 0) {
+            const lastHistory = order.ndrHistory[order.ndrHistory.length - 1];
+            const lastAction = lastHistory.actions[lastHistory.actions.length - 1];
+            lastNdrDate = new Date(lastAction.date).getTime();
+          }
+          const attemptCount = order.ndrHistory.length + 1;
+          order.ndrReason = { date: timestamp, reason: remark };
+
+          if (!(order.ndrStatus === "Action_Requested" && lastNdrDate && currentDate <= lastNdrDate)) {
+            if (!lastNdrDate || currentDate > lastNdrDate) {
+              order.reattempt = true;
+              order.ndrHistory.push({
+                actions: [{
+                  action: `NDR ${attemptCount} Raised`,
+                  actionBy: order.provider || "Shadowfax",
+                  remark: remark,
+                  source: order.provider || "Shadowfax",
+                  date: timestamp,
+                }],
+              });
+            }
+          }
+        }
+      }
+    }
+
 
     if (Array.isArray(result.data) && result.data.length > 0) {
       // If API returned a full list of tracking events
       const newTrackingArray = result.data.map((item) => {
         const mapped =
-          partner === "ZipyPost" || partner === "BoxdLogistics"
+          partner === "ZipyPost" || partner === "BoxdLogistics" || partner==="Proship"
             ? mapTrackingResponse([item], partner)
             : mapTrackingResponse([item], provider, result?.remark);
 
@@ -1230,9 +1308,10 @@ const trackSingleOrder = async (order) => {
       await order.save();
       console.log(`Tracking history replaced for ${order.awb_number}`);
       console.log("saved");
+    }
 
-      // Wallet update logic (unchanged)
-      if (shouldUpdateWallet && balanceTobeAdded > 0) {
+    // Wallet update logic (moved outside array check to handle single object responses)
+    if (shouldUpdateWallet && balanceTobeAdded > 0) {
         // Step 0: Check if same awb_number already exists twice
         const awbCount = await Wallet.aggregate([
           { $match: { _id: currentWallet._id } },
@@ -1284,8 +1363,7 @@ const trackSingleOrder = async (order) => {
           balanceTobeAdded,
         );
       }
-    }
-  } catch (error) {
+    } catch (error) {
     console.error(
       `Error tracking order ID: ${order._id}, AWB: ${order.awb_number} ${error}`,
     );
@@ -1301,11 +1379,12 @@ const trackOrders = async () => {
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery","Ekart"] },
+      // partner:{$nin:["Proship"]}
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
       // provider: "Dtdc",
       // awb_number: "77719296001",
-      // partner:"BoxdLogistics"
+      partner:"Proship"
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1434,12 +1513,21 @@ const mapTrackingResponse = (data, provider, remark) => {
   if (provider === "Proship") {
     const scanArray = data || [];
     const latestScan = scanArray?.[scanArray.length - 1];
+
+    // Proship timestamps are UTC — shift to IST (+5:30) before saving
+    const toIST = (utcStr) => {
+      if (!utcStr) return null;
+      const d = new Date(utcStr);
+      d.setTime(d.getTime() + 5.5 * 60 * 60 * 1000); // +5h 30m
+      return d;
+    };
+
     return {
-      Status: latestScan?.status || "N/A",
-      StatusLocation: latestScan?.location || "Unknown",
-      StatusDateTime: latestScan?.datetime || null,
-      Instructions: latestScan?.status || "N/A",
-      Remarks: latestScan?.remarks || null,
+      Status: latestScan?.orderStatusDescription || String(latestScan?.orderStatusCode) || "N/A",
+      StatusLocation: latestScan?.currentLocation || "Unknown",
+      StatusDateTime: toIST(latestScan?.timestamp),
+      Instructions: latestScan?.remark || latestScan?.orderStatusDescription || "N/A",
+      statusCode: latestScan?.orderStatusCode || null,
     };
   }
 

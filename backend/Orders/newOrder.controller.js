@@ -1692,32 +1692,45 @@ const cancelOrdersAtBooked = async (req, res) => {
     session.startTransaction();
 
     try {
-      const updatedWallet = await Wallet.findOneAndUpdate(
-        { _id: currentWallet._id },
-        { $inc: { balance: balanceTobeAdded } },
-        { new: true, session },
+      // ✅ Guard: Check if this AWB was already refunded (credit exists)
+      const alreadyRefunded = currentWallet.transactions.some(
+        (t) =>
+          t.awb_number === currentOrder.awb_number &&
+          t.category === "credit" &&
+          t.description === "Freight Charges Received"
       );
 
-      await Wallet.updateOne(
-        { _id: updatedWallet._id },
-        {
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId || null,
-              category: "credit",
-              amount: balanceTobeAdded,
-              balanceAfterTransaction: updatedWallet.balance,
-              date: new Date(),
-              awb_number: allOrders.awb_number || "",
-              description: `Freight Charges Received`,
+      if (balanceTobeAdded > 0 && !alreadyRefunded) {
+        const updatedWallet = await Wallet.findOneAndUpdate(
+          { _id: currentWallet._id },
+          { $inc: { balance: balanceTobeAdded } },
+          { new: true, session },
+        );
+
+        await Wallet.updateOne(
+          { _id: updatedWallet._id },
+          {
+            $push: {
+              transactions: {
+                channelOrderId: currentOrder.orderId || null,
+                category: "credit",
+                amount: balanceTobeAdded,
+                balanceAfterTransaction: updatedWallet.balance,
+                date: new Date(),
+                awb_number: allOrders.awb_number || "",
+                description: `Freight Charges Received`,
+              },
             },
           },
-        },
-        { session },
-      );
+          { session },
+        );
+      } else if (balanceTobeAdded > 0 && alreadyRefunded) {
+        console.log(`[Cancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
+      }
+
       await currentOrder.save({ session });
       await session.commitTransaction();
-      await currentOrder.save({ session }); // ✅ Save order with updated tracking
+      await currentOrder.save({ session });
       session.endSession();
     } catch (err) {
       await session.abortTransaction();
@@ -2115,29 +2128,41 @@ const bulkCancelOrder = async (req, res) => {
             : parseFloat(currentOrder.totalFreightCharges) || 0;
 
         if (balanceToAdd > 0) {
-          const updatedWallet = await Wallet.findOneAndUpdate(
-            { _id: walletId },
-            { $inc: { balance: balanceToAdd } },
-            { new: true, session: orderSession },
+          // ✅ Guard: Check if this AWB was already refunded (credit exists)
+          const alreadyRefunded = walletDoc.transactions.some(
+            (t) =>
+              t.awb_number === currentOrder.awb_number &&
+              t.category === "credit" &&
+              t.description === "Freight Charges Received"
           );
 
-          await Wallet.updateOne(
-            { _id: walletId },
-            {
-              $push: {
-                transactions: {
-                  channelOrderId: currentOrder.orderId || null,
-                  category: "credit",
-                  amount: balanceToAdd,
-                  balanceAfterTransaction: updatedWallet.balance,
-                  date: new Date(),
-                  awb_number: currentOrder.awb_number || "",
-                  description: "Freight Charges Received",
+          if (!alreadyRefunded) {
+            const updatedWallet = await Wallet.findOneAndUpdate(
+              { _id: walletId },
+              { $inc: { balance: balanceToAdd } },
+              { new: true, session: orderSession },
+            );
+
+            await Wallet.updateOne(
+              { _id: walletId },
+              {
+                $push: {
+                  transactions: {
+                    channelOrderId: currentOrder.orderId || null,
+                    category: "credit",
+                    amount: balanceToAdd,
+                    balanceAfterTransaction: updatedWallet.balance,
+                    date: new Date(),
+                    awb_number: currentOrder.awb_number || "",
+                    description: "Freight Charges Received",
+                  },
                 },
               },
-            },
-            { session: orderSession },
-          );
+              { session: orderSession },
+            );
+          } else {
+            console.log(`[BulkCancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
+          }
         }
 
         // --- Update order details ---

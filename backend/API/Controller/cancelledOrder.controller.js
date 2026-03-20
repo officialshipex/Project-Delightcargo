@@ -134,7 +134,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       }
 
       // Update order
-      currentOrder.status = "new";
+      currentOrder.status = "Cancelled";
       currentOrder.tracking.push({
         status: "Cancelled",
         StatusLocation: "",

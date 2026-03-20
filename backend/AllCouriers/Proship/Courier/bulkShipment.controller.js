@@ -13,10 +13,11 @@ const createOrderProship = async (
   wh,
   walletId,
   charges,
+  priceBreakup,
   estimatedDeliveryDate = null,
-  priceBreakup
 ) => {
   try {
+    // console.log("order",orderId)
     /* --------------------------------------------------
        1️⃣ FETCH ORDER
     -------------------------------------------------- */
@@ -24,7 +25,7 @@ const createOrderProship = async (
     if (!currentOrder) {
       return { success: false, message: "Order not found" };
     }
-
+// console.log("proship data",serviceDetails)
     /* --------------------------------------------------
        2️⃣ ZONE CHECK
     -------------------------------------------------- */
