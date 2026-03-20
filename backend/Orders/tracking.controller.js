@@ -1384,7 +1384,7 @@ const trackOrders = async () => {
       // status:"Out for Delivery",
       // provider: "Dtdc",
       // awb_number: "77719296001",
-      partner:"Proship"
+      // partner:"Proship"
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
