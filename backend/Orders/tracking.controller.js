@@ -1383,7 +1383,7 @@ const trackOrders = async () => {
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
       // provider: "Dtdc",
-      // awb_number: "77719296001",
+      // awb_number: "SF3166240415PRZ",
       // partner:"Proship"
     });
 
@@ -1522,11 +1522,24 @@ const mapTrackingResponse = (data, provider, remark) => {
       return d;
     };
 
+    // Remove the word "proship" from anywhere in the text (case-insensitive)
+    const cleanProshipText = (str) => {
+      if (!str) return str;
+      return str
+        .replace(/\s*[-\u2013]\s*proship/gi, "")  // " - proship"
+        .replace(/proship\s*[-\u2013]\s*/gi, "")  // "proship - "
+        .replace(/\bon\s+proship\b/gi, "")         // "on proship"
+        .replace(/\bproship\b/gi, "")              // any remaining word
+        .replace(/\s{2,}/g, " ")                   // collapse extra spaces
+        .replace(/[\s\-\u2013]+$/, "")             // trailing separators
+        .trim();
+    };
+
     return {
-      Status: latestScan?.orderStatusDescription || String(latestScan?.orderStatusCode) || "N/A",
+      Status: cleanProshipText(latestScan?.orderStatusDescription || String(latestScan?.orderStatusCode) || "N/A"),
       StatusLocation: latestScan?.currentLocation || "Unknown",
       StatusDateTime: toIST(latestScan?.timestamp),
-      Instructions: latestScan?.remark || latestScan?.orderStatusDescription || "N/A",
+      Instructions: cleanProshipText(latestScan?.remark || latestScan?.orderStatusDescription || "N/A"),
       statusCode: latestScan?.orderStatusCode || null,
     };
   }
