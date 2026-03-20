@@ -8,7 +8,7 @@ const { getProshipAccessToken } = require("../../AllCouriers/Proship/Authorize/p
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
-const PROSHIP_BASE_URL = "https://proshipdev.prozo.com/api";
+const PROSHIP_BASE_URL = "https://proship.prozo.com/api";
 
 const createProshipShipment = async ({
   id,
@@ -100,6 +100,7 @@ const createProshipShipment = async ({
 
     // Step 6️⃣ Authenticate with Proship
     const token = await getProshipAccessToken();
+    // console.log("token",token)
     if (!token) {
         await Order.findByIdAndUpdate(id, { status: "new" });
         await session.abortTransaction();

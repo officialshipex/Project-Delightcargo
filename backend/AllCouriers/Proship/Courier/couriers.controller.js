@@ -286,9 +286,10 @@ const trackProshipOrder = async (awb) => {
       }
     );
 
-    console.log("proship tracking", response.data);
+    console.log("proship tracking", response.data?.waybillDetails?.[0]?.order_history);
 
-    return { success: true, data: response.data };
+    const waybillData = response.data?.waybillDetails?.[0];
+    return { success: true, data: waybillData?.order_history || [] };
 
   } catch (error) {
     console.error("Proship Tracking Error:", error.response?.data || error.message);
@@ -303,11 +304,11 @@ const cancelProshipOrder = async (awb) => {
     if (!token) return { success: false, message: "Auth failed" };
 
     // Placeholder for Proship Cancellation API
-    // const response = await axios.post(`${PROSHIP_BASE_URL}/shipment/cancel`, { awb }, {
-    //   headers: { Authorization: `Bearer ${token}` }
-    // });
+    const response = await axios.post(`${PROSHIP_BASE_URL}/order/cancel_order`, { waybill: awb }, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
     // return response.data;
-
+    console.log("cancel response", response.data)
     return { success: true, message: "Cancelled successfully" };
   } catch (error) {
     console.error("Proship Cancellation Error:", error.message);

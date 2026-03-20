@@ -36,8 +36,7 @@ const {
 } = require("../AllCouriers/Zipypost/Couriers/bulkShipment.controller");
 const { createOrderEkart } = require("../AllCouriers/Ekart/Couriers/bulkShipment.controller");
 const { createOrderBoxdLogistics } = require("../AllCouriers/BoxdLogistics/Courier/bulkShipmentcontroller");
-const { createProshipOrder } = require("../AllCouriers/Proship/Courier/couriers.controller");
-const createProshipShipment = require("../API/Courier/proshipShipmentCreation.controller");
+const { createOrderProship } = require("../AllCouriers/Proship/Courier/bulkShipment.controller");
 
 const updatePickup = async (req, res) => {
   try {
@@ -190,13 +189,14 @@ const callProviderWithRetry = async (
           );
           break;
         case "Proship":
-          result = await createProshipShipment({
-            id: order._id,
-            provider: serviceDetails.provider,
-            finalCharges: charges,
-            courierServiceName: serviceDetails.name,
-            priceBreakup: priceBreakup
-          });
+          result = await createOrderProship(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges,
+            priceBreakup
+          );
           break;
         default:
           console.error(
@@ -474,6 +474,7 @@ const createBulkOrder = async (req, res) => {
             provider: courier.courierProviderName,
             name: courier.courierServiceName,
           };
+          // console.log("courier",courierDetails)
           const priceBreakup = {
             freight: rates?.[0]?.forward?.charges,
             cod: rates?.[0]?.cod,
