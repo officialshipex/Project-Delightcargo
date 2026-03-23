@@ -286,7 +286,7 @@ const trackProshipOrder = async (awb) => {
       }
     );
 
-    console.log("proship tracking", response.data?.waybillDetails?.[0]?.order_history);
+    // console.log("proship tracking", response.data?.waybillDetails?.[0]?.order_history);
 
     const waybillData = response.data?.waybillDetails?.[0];
     return { success: true, data: waybillData?.order_history || [] };

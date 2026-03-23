@@ -478,8 +478,12 @@ const filterNdrOrdersForEmployee = async (req, res) => {
     if (tab === "Action_Required") {
       filter.reattempt = true; // Shipment eligible for RE-ATTEMPT
       filter.ndrStatus = "Undelivered"; // Must be Undelivered
-    } else if (tab === "") {
-      filter.reattempt = false;
+    } else if (tab === "Action_Requested") {
+      filter.ndrStatus = "Action_Requested";
+    } else if (tab === "Delivered") {
+      filter.status = "Delivered";
+    } else if (tab === "RTO") {
+      filter.status = "RTO";
     }
 
     // Order ID
@@ -506,10 +510,10 @@ const filterNdrOrdersForEmployee = async (req, res) => {
       filter.ndrStatus = ndrStatus;
     }
 
-    // // Order Status
-    // if (status && status !== "All") {
-    //   filter.status = status;
-    // }
+    // Order Status
+    if (status && status !== "All") {
+      filter.status = status;
+    }
 
     // Courier
     if (courierServiceName && courierServiceName.length > 0) {
@@ -534,12 +538,20 @@ const filterNdrOrdersForEmployee = async (req, res) => {
     }
 
 
-    // Date Range
+    // Date Range (Filter based on when NDR happened)
     if (startDate && endDate) {
       const start = new Date(startDate);
       const endDateObj = new Date(endDate);
       endDateObj.setHours(23, 59, 59, 999);
-      filter.createdAt = { $gte: start, $lte: endDateObj };
+      filter.$or = [
+        { "ndrReason.date": { $gte: start, $lte: endDateObj } },
+        {
+          $and: [
+            { "ndrReason.date": { $exists: false } },
+            { createdAt: { $gte: start, $lte: endDateObj } },
+          ],
+        },
+      ];
     }
 
     // Employee Allocated Users
