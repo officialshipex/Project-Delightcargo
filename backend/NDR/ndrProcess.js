@@ -38,6 +38,7 @@ const ndrProcessController = async (req, res) => {
     updated_city,
     updated_state,
     action_date,
+    links,
   } = req.body;
 
   // console.log("awb",awb_number)
@@ -110,6 +111,8 @@ const ndrProcessController = async (req, res) => {
         customer_name,
         new_phone,
         new_pincode,
+        scheduled_delivery_date,
+        links,
       });
     } else if (orderDetails.partner === "ZipyPost") {
       const payload = {

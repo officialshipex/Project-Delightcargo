@@ -460,7 +460,7 @@ const trackShipmentDelhivery = async (waybill) => {
 
     // Extract scans and remove the ScanDetail key
     const scans = shipmentData.Scans?.map((item) => item.ScanDetail) || [];
-    console.log("ship", scans);
+    // console.log("ship", scans);
     return {
       success: true,
       id: shipmentData.ReferenceNo,
@@ -475,7 +475,7 @@ const trackShipmentDelhivery = async (waybill) => {
   }
 };
 
-// trackShipmentDelhivery("35973710080695")
+// trackShipmentDelhivery("35973710085724")
 
 const generateShippingLabel = async (req, res) => {
   const { waybill } = req.params;

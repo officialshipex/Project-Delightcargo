@@ -100,6 +100,29 @@ const EkartWebhook = async (req, res) => {
     }
 
     /* ========================================================
+         RTO LOGIC
+    ======================================================== */
+    if (currentStatus === "RTO" || currentStatus === "RTO Requested") {
+      order.status = "RTO";
+      order.ndrStatus = "RTO";
+      order.reattempt = false;
+    }
+
+
+    if (currentStatus === "RTO In Transit") {
+      order.status = "RTO In-transit";
+      order.ndrStatus = "RTO In-transit";
+      order.reattempt = false;
+    }
+
+    if (currentStatus === "RTO Delivered") {
+      order.status = "RTO Delivered";
+      order.ndrStatus = "RTO Delivered";
+      order.reattempt = false;
+    }
+
+
+    /* ========================================================
          UNDELIVERED → NDR LOGIC
     ======================================================== */
     if (currentStatus === "Undelivered") {

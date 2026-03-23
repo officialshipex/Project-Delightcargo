@@ -372,23 +372,35 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
 
     // --- handle RTO (manual) ---
     if (action.toUpperCase() === "RTO") {
-      const remark =
-        order.tracking.length > 0
-          ? order.tracking[order.tracking.length - 1].Instructions
-          : "Manual RTO Requested";
+      const freshOrder = await Order.findOne({ awb_number });
+      if (!freshOrder) return { success: false, error: "Order not found" };
 
-      pushToNdrHistory(buildActionEntry(remark));
+      const actionEntry = buildActionEntry(
+        freshOrder.tracking.length > 0
+          ? freshOrder.tracking[freshOrder.tracking.length - 1].Instructions
+          : "Manual RTO Requested"
+      );
 
-      order.manualRTOStatus = "Action_Requested";
-      order.ndrStatus = "Action_Requested";
-      order.status = "Undelivered";
-      order.reattempt = false;
-      await order.save();
+      if (!Array.isArray(freshOrder.ndrHistory)) {
+        freshOrder.ndrHistory = [];
+      }
+      if (freshOrder.ndrHistory.length > 0) {
+        const latest = freshOrder.ndrHistory[freshOrder.ndrHistory.length - 1];
+        if (latest.actions.length < 2) {
+          latest.actions.push(actionEntry);
+        }
+      }
+
+      freshOrder.manualRTOStatus = "Action_Requested";
+      freshOrder.ndrStatus = "Action_Requested";
+      freshOrder.status = "Undelivered";
+      freshOrder.reattempt = false;
+      await freshOrder.save();
 
       return {
         success: true,
         manualRTO: true,
-        updated_order: order,
+        updated_order: freshOrder,
       };
     }
 
@@ -438,27 +450,42 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
 
     const { remark } = ndrStatusResponse.data;
 
-    pushToNdrHistory(
-      buildActionEntry(
-        order.tracking.length > 0
-          ? order.tracking[order.tracking.length - 1].Instructions
-          : remark
-      )
+    // --- Step 4: Re-fetch fresh order to avoid VersionError ---
+    const freshOrder = await Order.findOne({ awb_number });
+    if (!freshOrder) {
+      return { success: false, error: "Order not found after NDR processing" };
+    }
+
+    const actionEntry = buildActionEntry(
+      freshOrder.tracking.length > 0
+        ? freshOrder.tracking[freshOrder.tracking.length - 1].Instructions
+        : remark
     );
 
-    order.ndrStatus = "Action_Requested";
-    order.status = "Undelivered";
+    if (!Array.isArray(freshOrder.ndrHistory)) {
+      freshOrder.ndrHistory = [];
+    }
 
-    await order.save();
+    if (freshOrder.ndrHistory.length > 0) {
+      const latest = freshOrder.ndrHistory[freshOrder.ndrHistory.length - 1];
+      if (latest.actions.length < 2) {
+        latest.actions.push(actionEntry);
+      }
+    }
+
+    freshOrder.ndrStatus = "Action_Requested";
+    freshOrder.status = "Undelivered";
+
+    await freshOrder.save();
 
     return {
       success: true,
       request_id,
       ndr_status: ndrStatusResponse.data,
-      updated_order: order,
+      updated_order: freshOrder,
     };
   } catch (error) {
-    console.error("Error:", error.response);
+    console.error("Error:", error);
     return {
       success: false,
       error: "Failed to request NDR action",
@@ -1082,6 +1109,8 @@ const submitNdrToEkart = async ({
   customer_name,
   new_phone,
   new_pincode,
+  scheduled_delivery_date,
+  links,
 }) => {
   try {
     if (!awb_number || !action) {
@@ -1096,83 +1125,112 @@ const submitNdrToEkart = async ({
       return { success: false, error: "Order not found in DB" };
     }
 
-    // For RTO → call Ekart cancel API
-    if (action.toUpperCase() === "RTO") {
-      const token = await getEkartAccessToken();
-      if (!token) {
-        return { success: false, error: "Failed to get Ekart access token" };
-      }
-
-      try {
-        const cancelUrl = `https://app.elite.ekartlogistics.in/api/v1/package/cancel?tracking_id=${encodeURIComponent(awb_number)}`;
-        const cancelRes = await axios.delete(cancelUrl, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        });
-        console.log("Ekart NDR RTO Response:", cancelRes.data);
-        if (!(cancelRes.status === 200 && cancelRes.data?.status === true)) {
-          return {
-            success: false,
-            error: cancelRes.data?.message || "Ekart RTO request failed",
-          };
-        }
-      } catch (cancelErr) {
-        console.error("Ekart RTO Error:", cancelErr.response?.data || cancelErr.message);
-        return {
-          success: false,
-          error: cancelErr.response?.data?.message || "Ekart RTO API error",
-        };
-      }
+    const token = await getEkartAccessToken();
+    if (!token) {
+      return { success: false, error: "Failed to get Ekart access token" };
     }
 
-    // For RE-ATTEMPT / CHANGE_ADDRESS → log in ndrHistory & update address if provided
-    const resolvedAction = action.toUpperCase() === "CHANGE_ADDRESS" ? "RE-ATTEMPT" : action.toUpperCase();
+    // Map action to latest Ekart API enum: "Re-Attempt", "RTO"
+    const ekartAction = action.toUpperCase() === "RTO" ? "RTO" : "Re-Attempt";
 
-    const entry = {
-      action: resolvedAction,
-      actionBy: "ShipexIndia",
-      remark: comments || "NDR Action Requested",
-      source: "ShipexIndia",
-      date: new Date(),
+    // Format payload based on latest API details
+    const payload = {
+      action: ekartAction,
+      wbn: String(awb_number).trim(),
+      instructions: comments || "NDR action requested",
+      links: Array.isArray(links) ? links : [],
     };
 
-    if (!Array.isArray(orderInDb.ndrHistory)) {
-      orderInDb.ndrHistory = [];
+    // date (Re-Attempt date in milliseconds since Unix Epoch)
+    if (ekartAction === "Re-Attempt") {
+      const d = scheduled_delivery_date
+        ? new Date(scheduled_delivery_date)
+        : new Date(Date.now() + 24 * 60 * 60 * 1000); // Default to tomorrow
+      payload.date = d.getTime();
     }
 
-    const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
-    if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
-      latest.actions.push(entry);
+    // phone (Updated 10-digit phone number)
+    if (new_phone) {
+      payload.phone = String(new_phone).trim();
+    } else if (ekartAction === "Re-Attempt") {
+      payload.phone = String(orderInDb.receiverAddress.phoneNumber).trim();
+    }
+
+    // address (Updated address)
+    if (new_address) {
+      payload.address = String(new_address).trim();
+    } else if (ekartAction === "Re-Attempt") {
+      payload.address = String(orderInDb.receiverAddress.address).trim();
+    }
+
+    console.log("Ekart NDR Payload:", payload);
+
+    const response = await axios.post(
+      "https://app.elite.ekartlogistics.in/api/v1/package/ndr",
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("Ekart NDR API Response:", response.data);
+
+    if (response.data && response.data.status) {
+      // SUCCESS → Record in History & Update Order
+      const entry = {
+        action: ekartAction.toUpperCase(),
+        actionBy: "ShipexIndia",
+        remark: comments || "NDR Action Requested",
+        source: "ShipexIndia",
+        date: new Date(),
+      };
+
+      if (!Array.isArray(orderInDb.ndrHistory)) {
+        orderInDb.ndrHistory = [];
+      }
+
+      const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
+      if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
+        latest.actions.push(entry);
+      } else {
+        orderInDb.ndrHistory.push({ actions: [entry] });
+      }
+
+      // If change address or phone provided, update receiver address record
+      if (new_address || customer_name || new_phone) {
+        if (new_address) orderInDb.receiverAddress.address = new_address;
+        if (new_address2) orderInDb.receiverAddress.address2 = new_address2;
+        if (customer_name) orderInDb.receiverAddress.contactName = customer_name;
+        if (new_phone) orderInDb.receiverAddress.phoneNumber = new_phone;
+        if (new_pincode) orderInDb.receiverAddress.pinCode = new_pincode;
+      }
+
+      orderInDb.ndrStatus = ekartAction === "RTO" ? "RTO" : "Action_Requested";
+      orderInDb.status = ekartAction === "RTO" ? "RTO" : "Action_Requested"; // Keeping "Action_Requested" as per user context
+      orderInDb.reattempt = false;
+      await orderInDb.save();
+
+      return {
+        success: true,
+        message: `Ekart NDR action (${ekartAction}) processed successfully`,
+        data: response.data,
+      };
     } else {
-      orderInDb.ndrHistory.push({ actions: [entry] });
+      return {
+        success: false,
+        error: response.data?.remark || "Ekart NDR request failed",
+        details: response.data,
+      };
     }
-
-    // If change address, update receiver address
-    if (new_address || customer_name) {
-      if (new_address) orderInDb.receiverAddress.address = new_address;
-      if (new_address2) orderInDb.receiverAddress.address2 = new_address2;
-      if (customer_name) orderInDb.receiverAddress.contactName = customer_name;
-      if (new_phone) orderInDb.receiverAddress.phoneNumber = new_phone;
-      if (new_pincode) orderInDb.receiverAddress.pinCode = new_pincode;
-    }
-
-    orderInDb.ndrStatus = resolvedAction === "RTO" ? "RTO" : "Action_Requested";
-    orderInDb.status = "Undelivered";
-    orderInDb.reattempt = false;
-    await orderInDb.save();
-
-    return {
-      success: true,
-      message: `Ekart NDR action (${resolvedAction}) recorded successfully`,
-    };
   } catch (error) {
-    console.error("Ekart NDR Error:", error?.message);
+    console.error("Ekart NDR Error:", error.response?.data || error.message);
     return {
       success: false,
-      error: "Error occurred while processing Ekart NDR",
-      details: error.message,
+      error: error.response?.data?.remark || "Error occurred while processing Ekart NDR",
+      details: error.response?.data || error.message,
     };
   }
 };
