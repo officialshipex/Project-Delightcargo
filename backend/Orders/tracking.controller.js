@@ -1176,7 +1176,9 @@ const trackSingleOrder = async (order) => {
             : parseFloat(order.totalFreightCharges);
         shouldUpdateWallet = true;
       }
+
     }
+
 
     if (partner === "Proship") {
       console.log("pro tracking", normalizedData);
@@ -1383,8 +1385,8 @@ const trackOrders = async () => {
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
       // provider: "Dtdc",
-      // awb_number: "SF3166240415PRZ",
-      // partner:"Proship"
+      // awb_number: "76890137936",
+      // partner:"BoxdLogistics"
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
@@ -1504,7 +1506,7 @@ const mapTrackingResponse = (data, provider, remark) => {
       Description: latestScan?.description || "N/A", // human-readable description
       scanCode: latestScan?.status ?? null,           // use status string as code
       StatusLocation: latestScan?.location || "Unknown",
-      StatusDateTime: formatBoxdDateTime(latestScan?.created_at),
+      StatusDateTime: formatBoxdDateTime(latestScan?.datetime || latestScan?.created_at),
       Instructions: latestScan?.status || "N/A",     // used for status-matching logic
       Remarks: latestScan?.remarks || null,
     };

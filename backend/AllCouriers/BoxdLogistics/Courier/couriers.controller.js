@@ -561,7 +561,7 @@ const trackOrderBoxdLogistics = async (AWBNo) => {
 
         // Sort newest first (reverse chronological) so result.data[0] = latest
         const sorted = [...trackingHistory].sort(
-            (a, b) => new Date(b.created_at) - new Date(a.created_at)
+            (a, b) => new Date(b.datetime || b.created_at) - new Date(a.datetime || a.created_at)
         );
 
         // console.log("BoxdLogistics tracking data:", sorted);
@@ -572,7 +572,7 @@ const trackOrderBoxdLogistics = async (AWBNo) => {
     }
 };
 
-// trackOrderBoxdLogistics("76876592236");
+// trackOrderBoxdLogistics("76890137936");
 
 module.exports = {
     checkServiceabilityBoxdLogistics,

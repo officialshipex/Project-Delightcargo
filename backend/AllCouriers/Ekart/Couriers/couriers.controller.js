@@ -287,7 +287,7 @@ const orderCreationEkart = async (req, res) => {
     // =====================================================
     // ⭐ 8. EKART API CALL
     // =====================================================
-    console.log("Ekart Shipment Payload:", payload);
+    // console.log("Ekart Shipment Payload:", payload);
     let response;
 
     try {
@@ -613,6 +613,8 @@ const checkEkartServiceability = async (payload) => {
       codAmount: String(payload.codAmount || "0"),
       invoiceAmount: String(payload.codAmount || "0"),
     };
+
+    // console.log("serviceability payload", serviceabilityPayload)
 
     const response = await axios.post(
       "https://app.elite.ekartlogistics.in/data/v3/serviceability",
