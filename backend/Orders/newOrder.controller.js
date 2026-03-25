@@ -9,6 +9,7 @@ const Wallet = require("../models/wallet");
 const Bottleneck = require("bottleneck");
 const cron = require("node-cron");
 const EDDMap = require("../models/EDDMap.model");
+const EPDMap = require("../models/EPDMap.model");
 const { getZone } = require("../Rate/zoneManagementController");
 const path = require("path");
 const { codToBeRemitted } = require("../COD/cod.controller");
@@ -1311,8 +1312,9 @@ const ShipeNowOrder = async (req, res) => {
     const users = await user.findOne({ _id: order.userId });
     const userWallet = await Wallet.findOne({ _id: users.Wallet });
 
-    // ✅ fetch EDDMap
+    // ✅ fetch EDDMap & EPDMap
     const EDDRates = await EDDMap.find();
+    const EPDRates = await EPDMap.find();
 
     // ✅ fetch enabled + active courier services
     const services = await CourierService.find({ status: "Enable" });
@@ -1432,6 +1434,24 @@ const ShipeNowOrder = async (req, res) => {
           }
         }
 
+        // ✅ Calculate Pickup Date based on Cutoff Time (EPDMap)
+        const matchedEPD = EPDRates.find(
+          (epd) => normalize(epd.serviceName) === normalize(service.item.name)
+        );
+
+        let pickupDate = null;
+        if (matchedEPD && matchedEPD.cutoffTime) {
+          pickupDate = new Date();
+          const [cutoffHour, cutoffMinute] = matchedEPD.cutoffTime.split(":").map(Number);
+          const now = new Date();
+          const cutoff = new Date();
+          cutoff.setHours(cutoffHour, cutoffMinute, 0, 0);
+
+          if (now > cutoff) {
+            pickupDate.setDate(now.getDate() + 1);
+          }
+        }
+
         return {
           ...matchedRate,
           provider: service.item.provider,
@@ -1439,6 +1459,7 @@ const ShipeNowOrder = async (req, res) => {
           courier: service.courierId || service.item?.courier,
           serviceName: service.virtualName || service.item.name,
           estimatedDeliveryDate,
+          pickupDate,
         };
       })
       .filter(Boolean);

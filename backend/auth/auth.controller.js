@@ -431,6 +431,72 @@ const forgetPassword = async (req, res) => {
   }
 };
 
+const changePassword = async (email, newPassword) => {
+  try {
+    if (!email || !newPassword) {
+      console.error("Email and new password are required");
+      return false;
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      console.error("User not found");
+      return false;
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await user.save();
+
+    console.log("Password changed successfully for:", email);
+    return true;
+  } catch (error) {
+    console.error("Change password error:", error);
+    return false;
+  }
+};
+
+const changePasswordController = async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    // console.log("email",email)
+
+    if (!email || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and new password are required",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters long",
+      });
+    }
+
+    const success = await changePassword(email, newPassword);
+
+    if (success) {
+      return res.status(200).json({
+        success: true,
+        message: "Password changed successfully",
+      });
+    } else {
+      return res.status(404).json({
+        success: false,
+        message: "User not found or error updating password",
+      });
+    }
+  } catch (error) {
+    console.error("Change password controller error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+// changePassword("umax935@gmail.com","umax@935")
 const generateReferralCodes = async () => {
   try {
     const users = await User.find({});
@@ -473,4 +539,6 @@ module.exports = {
   googleLoginFail,
   verifySession,
   forgetPassword,
+  changePassword,
+  changePasswordController,
 };

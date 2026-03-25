@@ -53,6 +53,7 @@ const trackSingleOrder = require("./Orders/tracking.controller");
 const LabelSettings = require("./label/label.router");
 const statusMap = require("./statusMap/StatusMap.router")
 const EDDMap = require("./routes/EDDMap.router")
+const EPDMap = require("./routes/EPDMap.router")
 const ZipyPostRouter = require("./AllCouriersRoutes/zipypost.router")
 const BoxdLogisticsRouter = require("./AllCouriersRoutes/boxdlogistics.router")
 const ProshipRouter = require("./AllCouriersRoutes/proship.router")
@@ -70,6 +71,7 @@ router.use("/referral", referralRoute);
 router.use("/courier", CourierRouter);
 router.use("/statusMap", statusMap);
 router.use("/EDD", EDDMap)
+router.use("/EPD", EPDMap)
 router.use("/webhook", webhook)
 router.use("/invoice", Invoice);
 

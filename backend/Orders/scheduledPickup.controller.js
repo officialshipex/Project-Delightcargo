@@ -11,17 +11,36 @@ const User = require("../models/User.model");
    ================================================================ */
 const assignPickupManifest = async (order) => {
   try {
-    // ── 10 AM Cutoff Logic (IST) ────────────────────────────────────────────
+    // ── Dynamic Cutoff Logic (IST) ────────────────────────────────────────────
+    const EPDMap = require("../models/EPDMap.model");
     const now = new Date();
     const istOffset = 5.5 * 60 * 60 * 1000;
     const istTime = new Date(now.getTime() + istOffset);
     const currentISTHour = istTime.getUTCHours();
+    const currentISTMinute = istTime.getUTCMinutes();
+
+    // Fetch EPD mapping for this courier service
+    const epdMapping = await EPDMap.findOne({
+      courier: order.partner || order.provider,
+      serviceName: order.courierServiceName,
+    });
+
+    let cutoffHour = 10;
+    let cutoffMinute = 0;
+
+    if (epdMapping && epdMapping.cutoffTime) {
+      const [h, m] = epdMapping.cutoffTime.split(":").map(Number);
+      cutoffHour = h;
+      cutoffMinute = m;
+    }
 
     let targetDate = new Date(now.getTime() + istOffset);
-    if (currentISTHour >= 10) {
-      // After 10 AM IST → Next day pickup
+    
+    // Check if current time is past cutoff
+    if (currentISTHour > cutoffHour || (currentISTHour === cutoffHour && currentISTMinute >= cutoffMinute)) {
       targetDate.setDate(targetDate.getDate() + 1);
     }
+
     // Set to IST midnight (represented as UTC timestamp for DB consistency)
     targetDate.setUTCHours(0, 0, 0, 0);
 
