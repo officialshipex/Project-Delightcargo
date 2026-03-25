@@ -19,7 +19,7 @@ const PasswordResetModel = mongoose.model("PasswordReset", PasswordResetSchema);
 // Endpoint to request password reset, send email with valid link for 60 minutes
 resetPassword.post("/resetPassword", async (req, res) => {
   const { email } = req.body;
-
+// console.log("Using Email Key:", process.env.NOTIFICATION_PASS ? "Key Loaded" : "Key MISSING");
   if (!email) {
     return res
       .status(400)

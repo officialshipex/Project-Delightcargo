@@ -176,8 +176,8 @@ const orderSchema = new mongoose.Schema(
     walletDeducted: { type: Boolean, default: false },
     walletRefunded: { type: Boolean, default: false },
     manifestJobId: { type: String },
-    invoiceDate: { type: Date },
-    pickupDate: { type: Date },
+    invoiceDate: { type: Date },//exact pickup date
+    pickupDate: { type: Date },//estimated pickup date
     pickupId: { type: String, default: null },  // auto-assigned pickup manifest ID
 
     tracking: [

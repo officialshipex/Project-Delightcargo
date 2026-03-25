@@ -1,25 +1,25 @@
 const express = require("express");
 const router = express.Router();
-const {uploads}=require("../config/s3")
+const { uploads } = require("../config/s3")
 
-const userController=require("../Users/usersController");
+const userController = require("../Users/usersController");
 const { getAllUsers } = require("../Users/usersController");
 
 const { isAuthorized } = require("../middleware/auth.middleware")
 
-router.get('/getUserDetails',isAuthorized,userController.getUserDetails);
-router.post('/getUserDetails',isAuthorized,userController.changeUser);
-router.get('/getUsers',isAuthorized,userController.getUsers);
-router.get('/getAllPlans',isAuthorized,userController.getAllPlans);
-router.get('/getAllUsers',isAuthorized, getAllUsers);
-router.get("/getUserById",isAuthorized,userController.getUserById)
-router.post('/updateBlockStatus',isAuthorized,userController.updateBlockStatus);
-router.post('/apiAccess',isAuthorized,userController.updateApiAccess)
-router.get('/AssignPlan/:userId/:planId',isAuthorized,userController.assignPlan);
-router.post('/update-profile',isAuthorized,uploads.single("profileImage"),userController.updateProfile);
-router.post('/updateReferralCommission',isAuthorized,userController.updateReferralCommission);
-router.put("/updateCreditLimit",isAuthorized,userController.updateCreditLimit);
-router.get("/getKamDetails/:id",isAuthorized,userController.getKamDetails);
-router.put("/updateKamDetails/:id",isAuthorized,userController.updateKamDetails);
+router.get('/getUserDetails', isAuthorized, userController.getUserDetails);
+router.post('/getUserDetails', isAuthorized, userController.changeUser);
+router.get('/getUsers', isAuthorized, userController.getUsers);
+router.get('/getAllPlans', isAuthorized, userController.getAllPlans);
+router.get('/getAllUsers', isAuthorized, getAllUsers);
+router.get("/getUserById", isAuthorized, userController.getUserById)
+router.post('/updateBlockStatus', isAuthorized, userController.updateBlockStatus);
+router.post('/apiAccess', isAuthorized, userController.updateApiAccess)
+router.get('/AssignPlan/:userId/:planId', isAuthorized, userController.assignPlan);
+router.post('/update-profile', isAuthorized, uploads.single("profileImage"), userController.updateProfile);
+router.post('/updateReferralCommission', isAuthorized, userController.updateReferralCommission);
+router.put("/updateCreditLimit", isAuthorized, userController.updateCreditLimit);
+router.get("/getKamDetails/:id", isAuthorized, userController.getKamDetails);
+router.put("/updateKamDetails/:id", isAuthorized, userController.updateKamDetails);
 
-module.exports=router;
+module.exports = router;

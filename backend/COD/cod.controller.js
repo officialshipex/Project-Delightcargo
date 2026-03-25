@@ -2758,42 +2758,83 @@ const transferCOD = async (req, res) => {
 const checkOrderDuplicates = async () => {
   try {
     const allRemittances = await codRemittance.find({});
-    const orderMap = {}; // { orderId: [userId1, userId2, ...] }
+    const orderInstancesMap = {}; // { mongoOrderId: [{ userId, remittanceId }, ...] }
+    const mongoIds = new Set();
 
     allRemittances.forEach((doc) => {
       const userId = doc.userId;
       if (doc.remittanceData && Array.isArray(doc.remittanceData)) {
         doc.remittanceData.forEach((remittance) => {
+          const remittanceId = remittance.remittanceId;
           if (
             remittance.orderDetails &&
             remittance.orderDetails.orders &&
             Array.isArray(remittance.orderDetails.orders)
           ) {
-            remittance.orderDetails.orders.forEach((orderId) => {
-              const orderIdStr = orderId.toString();
-              if (!orderMap[orderIdStr]) {
-                orderMap[orderIdStr] = [];
+            remittance.orderDetails.orders.forEach((mId) => {
+              const mIdStr = mId.toString();
+              if (!orderInstancesMap[mIdStr]) {
+                orderInstancesMap[mIdStr] = [];
               }
-              orderMap[orderIdStr].push(userId);
+              orderInstancesMap[mIdStr].push({ userId, remittanceId });
+              mongoIds.add(mIdStr);
             });
           }
         });
       }
     });
 
+    // Fetch order details for status/method validation
+    const orders = await Order.find(
+      { _id: { $in: Array.from(mongoIds) } },
+      { orderId: 1, awb_number: 1, status: 1, "paymentDetails.method": 1, userId: 1 }
+    ).lean();
+
+    const orderDetailsMap = {};
+    orders.forEach((o) => {
+      orderDetailsMap[o._id.toString()] = o;
+    });
+
     let duplicatesFound = false;
-    for (const orderId in orderMap) {
-      if (orderMap[orderId].length > 1) {
+    let mismatchesFound = false;
+
+    for (const mIdStr in orderInstancesMap) {
+      const instances = orderInstancesMap[mIdStr];
+      const orderData = orderDetailsMap[mIdStr];
+
+      if (!orderData) {
+        // console.log(`Order not found in DB: ${mIdStr}`);
+        continue;
+      }
+
+      const isCOD = orderData.paymentDetails?.method === "COD";
+      const isDelivered = orderData.status === "Delivered";
+
+      if (!isCOD || !isDelivered) {
+        mismatchesFound = true;
+        instances.forEach((inst) => {
+          console.log(
+            `Mismatch Found - OrderId: ${orderData.orderId}, AWB: ${orderData.awb_number}, User: ${inst.userId}, RemittanceId: ${inst.remittanceId}, Status: ${orderData.status}, Method: ${orderData.paymentDetails?.method}`
+          );
+        });
+      }
+
+      if (instances.length > 1) {
         duplicatesFound = true;
-        const uniqueUserIds = [...new Set(orderMap[orderId].map(id => id.toString()))];
-        console.log(`Duplicate Order ID: ${orderId}, User IDs: ${uniqueUserIds.join(", ")}`);
+        const details = instances.map(
+          (item) => `(User: ${item.userId}, Remittance: ${item.remittanceId})`
+        );
+        console.log(`Duplicate Order ID: ${orderData.orderId}, Details: ${details.join(", ")}`);
       }
     }
 
     if (!duplicatesFound) {
       console.log("No duplicate orders found.");
     }
-    console.log("complete duplicate found")
+    if (!mismatchesFound) {
+      console.log("No status/method mismatches found.");
+    }
+    console.log("complete check finished");
   } catch (error) {
     console.error("Error in checkOrderDuplicates:", error);
   }
