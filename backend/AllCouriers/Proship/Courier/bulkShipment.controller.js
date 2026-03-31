@@ -25,7 +25,7 @@ const createOrderProship = async (
     if (!currentOrder) {
       return { success: false, message: "Order not found" };
     }
-// console.log("proship data",serviceDetails)
+    // console.log("proship data",serviceDetails)
     /* --------------------------------------------------
        2️⃣ ZONE CHECK
     -------------------------------------------------- */
@@ -126,7 +126,11 @@ const createOrderProship = async (
       giftwrap_charge: 0.0,
       payment_mode: isCOD ? "COD" : "PREPAID",
       reference: `ORD-${currentOrder.orderId}`,
-      channel_name: "WMS",
+      channel_name: serviceDetails?.name?.toLowerCase().includes("dtdc")
+        ? "dtdc-surface"
+        : serviceDetails?.name?.toLowerCase().includes("shadowfax")
+          ? "shadowfax-surface"
+          : "WMS",
     };
 
     /* --------------------------------------------------
@@ -163,7 +167,7 @@ const createOrderProship = async (
     currentOrder.cancelledAtStage = null;
     currentOrder.awb_number = awb;
     currentOrder.shipment_id = response.data.result.id || String(currentOrder.orderId);
-    currentOrder.provider = "Shadowfax";
+    currentOrder.provider = serviceDetails?.name?.toLowerCase().includes("dtdc") ? "Dtdc" : "Shadowfax";
     currentOrder.partner = "Proship";
     currentOrder.totalFreightCharges = parseFloat(charges);
     currentOrder.courierServiceName = serviceDetails.name;

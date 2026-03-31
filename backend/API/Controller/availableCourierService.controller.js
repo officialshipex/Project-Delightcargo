@@ -227,6 +227,15 @@ const availableCourierService = async (req, res) => {
         }
       }
 
+      if (provider === "Proship" && isServiceable && serviceable.couriers) {
+        const sName = rc.courierServiceName.toLowerCase();
+        if (sName.includes("shadowfax")) {
+          isServiceable = !!serviceable.couriers.shadowfax;
+        } else if (sName.includes("dtdc")) {
+          isServiceable = !!serviceable.couriers.dtdc;
+        }
+      }
+
       if (!isServiceable) continue;
 
       // ✅ Charges calculation

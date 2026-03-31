@@ -168,7 +168,11 @@ const createProshipShipment = async ({
       giftwrap_charge: 0.0,
       payment_mode: currentOrder.paymentDetails.method === "COD" ? "COD" : "PREPAID",
       reference: `ORD-${currentOrder.orderId}`,
-      channel_name: "WMS",
+      channel_name: courierServiceName?.toLowerCase().includes("dtdc")
+        ? "dtdc-surface"
+        : courierServiceName?.toLowerCase().includes("shadowfax")
+        ? "shadowfax-surface"
+        : "WMS",
     };
 
     // Step 8️⃣ Call Proship API
@@ -208,7 +212,7 @@ const createProshipShipment = async ({
             cancelledAtStage: null,
             awb_number: awb_number,
             shipment_id: response.data.result.id || String(currentOrder.orderId),
-            provider: "Shadowfax",
+            provider: courierServiceName?.toLowerCase().includes("dtdc") ? "DTDC" : "Shadowfax",
             partner: "Proship",
             totalFreightCharges: balanceToBeDeducted,
             courierServiceName,

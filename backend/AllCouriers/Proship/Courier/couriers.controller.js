@@ -14,7 +14,8 @@ const checkProshipServiceability = async (payload) => {
   try {
     const token = await getProshipAccessToken();
     if (!token) return { success: false, message: "Auth failed" };
-
+    // console.log("pickup pincode",payload.pickUpPincode)
+    // console.log("drop pincode",payload.deliveryPincode)
     const response = await axios.post(
       `${PROSHIP_BASE_URL}/tools/serviceability`,
       [{
@@ -23,21 +24,30 @@ const checkProshipServiceability = async (payload) => {
       }],
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    // console.log("service",response.data)
+    // console.log("service", response.data)
     const results = response.data.result || [];
     // console.log("results", results)
-    // Filter only Shadowfax as requested
+    // Filter Shadowfax & DTDC as requested
     const shadowfax = results.find(c => c.name.toLowerCase().includes("shadowfax") || c.account_code.toLowerCase().includes("shadowfax"));
+    const dtdc = results.find(c => c.name.toLowerCase().includes("dtdc") || c.account_code.toLowerCase().includes("dtdc"));
 
-    if (shadowfax) {
+    if (shadowfax || dtdc) {
+      const courier_ids = [];
+      if (shadowfax) courier_ids.push(shadowfax.cp_id);
+      if (dtdc) courier_ids.push(dtdc.cp_id);
+
       return {
         success: true,
-        courier_ids: [shadowfax.cp_id],
-        account_id: shadowfax.account_id
+        courier_ids: courier_ids,
+        couriers: {
+          shadowfax: shadowfax ? shadowfax.cp_id : null,
+          dtdc: dtdc ? dtdc.cp_id : null
+        },
+        account_id: (shadowfax || dtdc).account_id
       };
     }
 
-    return { success: false, message: "Shadowfax not available" };
+    return { success: false, message: "Shadowfax or DTDC not available" };
   } catch (error) {
     console.error("Proship Serviceability Error:", error.response?.data || error.message);
     return { success: false, error: error.message };
@@ -166,7 +176,11 @@ const createProshipOrder = async (req, res) => {
       giftwrap_charge: 0.0,
       payment_mode: currentOrder.paymentDetails.method === "COD" ? "COD" : "PREPAID",
       reference: `ORD-${currentOrder.orderId}`,
-      channel_name: "WMS",
+      channel_name: courierServiceName?.toLowerCase().includes("dtdc") 
+        ? "dtdc-surface" 
+        : courierServiceName?.toLowerCase().includes("shadowfax") 
+        ? "shadowfax-surface" 
+        : "WMS",
     };
 
     console.log("Proship Create Order Payload:", JSON.stringify(proshipPayload, null, 2));
@@ -196,7 +210,8 @@ const createProshipOrder = async (req, res) => {
     // 8. Update Order inside transaction
     currentOrder.status = "Booked";
     currentOrder.awb_number = awb_number;
-    currentOrder.provider = "Shadowfax";
+    const sNameForProv = courierServiceName?.toLowerCase() || "";
+    currentOrder.provider = sNameForProv.includes("dtdc") ? "DTDC" : "Shadowfax";
     currentOrder.partner = "Proship";
     currentOrder.shipment_id = response.data.result.id || String(currentOrder.orderId);
     currentOrder.totalFreightCharges = parseFloat(finalCharges) || 0;
