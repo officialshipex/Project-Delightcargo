@@ -439,7 +439,7 @@ const createBoxdLogisticsOrder = async (req, res) => {
                     cancelledAtStage: null,
                     awb_number: awb,
                     shipment_id: String(boxdOrderId),
-                    provider:"Bluedart",
+                    provider: "Bluedart",
                     partner: "BoxdLogistics",
                     totalFreightCharges: balanceToDeduct,
                     courierServiceName,

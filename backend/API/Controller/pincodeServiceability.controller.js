@@ -267,6 +267,15 @@ const pincodeServiceability = async (req, res) => {
         }
       }
 
+      if (provider.toLowerCase() === "proship" && isServiceable && serviceable.couriers) {
+        const sName = rc.courierServiceName.toLowerCase();
+        if (sName.includes("shadowfax")) {
+          isServiceable = !!serviceable.couriers.shadowfax;
+        } else if (sName.includes("dtdc")) {
+          isServiceable = !!serviceable.couriers.dtdc;
+        }
+      }
+
       if (!isServiceable) continue;
 
       // ✅ Charges calculation

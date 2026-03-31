@@ -301,6 +301,15 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         deliveryPincode: deliveryPincode,
       };
       const result = await checkProshipServiceability(payload);
+
+      if (result && result.success && result.couriers) {
+        const sName = service.name.toLowerCase();
+        if (sName.includes("shadowfax")) {
+          return { ...result, success: !!result.couriers.shadowfax };
+        } else if (sName.includes("dtdc")) {
+          return { ...result, success: !!result.couriers.dtdc };
+        }
+      }
       return result;
     }
 

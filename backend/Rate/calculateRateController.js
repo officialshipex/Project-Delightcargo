@@ -140,6 +140,18 @@ const calculateRate = async (req, res) => {
         };
         const proshipResult = await checkProshipServiceability(payload);
         if (!proshipResult || proshipResult.success === false) continue;
+
+        let proshipServiceable = true;
+        if (proshipResult.couriers) {
+          const sName = rc.courierServiceName.toLowerCase();
+          if (sName.includes("shadowfax")) {
+            proshipServiceable = !!proshipResult.couriers.shadowfax;
+          } else if (sName.includes("dtdc")) {
+            proshipServiceable = !!proshipResult.couriers.dtdc;
+          }
+        }
+
+        if (!proshipServiceable) continue;
         serviceable = { success: true };
       } else {
 

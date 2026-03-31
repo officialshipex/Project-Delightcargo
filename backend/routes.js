@@ -127,6 +127,8 @@ router.use("/calculateRate", calculateRouter);
 // router.use("/getServices", servicesController);
 
 router.use("/saveRate", saveRateRouter);
+const costingRateRouter = require("./routes/costingRate.router");
+router.use("/costingRate", costingRateRouter);
 router.use("/getBaseRate", getBaseRateController);
 router.use("/saveBaseRate", saveBaseRateController);
 router.use("/saveCustomRate", customRateController);
