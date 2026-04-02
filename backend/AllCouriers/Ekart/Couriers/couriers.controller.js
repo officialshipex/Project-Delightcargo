@@ -304,47 +304,122 @@ const orderCreationEkart = async (req, res) => {
     } catch (err) {
       console.log("Ekart Shipment Error:", err.response?.data || err.message);
 
-      // ✅ If pickup_location 404, unset alias so it re-registers next time
       const ekartErr = err.response?.data;
+
+      // ✅ If address not registered with Ekart → re-create address, update DB, retry
       if (
         err.response?.status === 404 &&
-        ekartErr?.message === "SWIFT_RESOURCE_NOT_FOUND_EXCEPTION" &&
-        ekartErr?.description?.includes("pickup_location")
+        ekartErr?.message === "SWIFT_RESOURCE_NOT_FOUND_EXCEPTION"
       ) {
-        console.log(`Clearing invalid ekartAlias for pickup address: ${pickup?._id}`);
-        // We set to empty string to ensure it enters the registration block next time
-        await pickupAddress.updateMany(
-          {
-            "pickupAddress.contactName": currentOrder?.pickupAddress?.contactName,
-            "pickupAddress.address": currentOrder?.pickupAddress?.address,
-            "pickupAddress.pinCode": currentOrder?.pickupAddress?.pinCode,
-          },
-          { $set: { ekartAlias: "" } }
-        );
-      }
+        console.log(`[Ekart] Address not found on Ekart. Re-registering for pickup: ${pickup?._id}`);
 
-      // ✅ SEND RESPONSE IMMEDIATELY
-      res.status(500).json({
-        success: false,
-        message:
-          err.code === "ECONNABORTED"
-            ? "Ekart timeout"
-            : err.response?.data?.description || "Ekart Shipment Failed",
-        error: err.response?.data || err.message,
-      });
+        const newAddressPayload = {
+          alias: `WAREHOUSE_${Date.now()}`,
+          phone: pickup.pickupAddress.phoneNumber,
+          address_line1: pickup.pickupAddress.address,
+          address_line2: "",
+          pincode: pickup.pickupAddress.pinCode,
+          city: pickup.pickupAddress.city,
+          state: pickup.pickupAddress.state,
+          country: "IN",
+          geo: { lat: 0, lon: 0 },
+        };
 
-      // ✅ CLEANUP ASYNC (do NOT block response)
-      process.nextTick(async () => {
-        try {
-          await Order.findByIdAndUpdate(id, { status: "new" });
-          await session.abortTransaction();
-          session.endSession();
-        } catch (e) {
-          console.error("Cleanup error:", e);
+        const reRegResult = await addEkartAddress(newAddressPayload, accessToken);
+
+        if (reRegResult.success) {
+          const newAlias = reRegResult.alias;
+          console.log(`[Ekart] Re-registered address with alias: ${newAlias}`);
+
+          // Update alias in DB
+          await pickupAddress.updateOne(
+            { _id: pickup._id },
+            { $set: { ekartAlias: newAlias } }
+          );
+
+          // Update payload with new alias and retry
+          payload.pickup_location = { name: newAlias };
+          payload.return_location = { name: newAlias };
+
+          try {
+            response = await axios.put(
+              "https://app.elite.ekartlogistics.in/api/v1/package/create",
+              payload,
+              {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                timeout: 15000,
+              },
+            );
+            console.log("[Ekart] Retry Shipment Response:", response.data);
+          } catch (retryErr) {
+            console.log("[Ekart] Retry Shipment Error:", retryErr.response?.data || retryErr.message);
+
+            res.status(500).json({
+              success: false,
+              message:
+                retryErr.code === "ECONNABORTED"
+                  ? "Ekart timeout"
+                  : retryErr.response?.data?.description || "Ekart Shipment Failed after address re-registration",
+              error: retryErr.response?.data || retryErr.message,
+            });
+
+            process.nextTick(async () => {
+              try {
+                await Order.findByIdAndUpdate(id, { status: "new" });
+                await session.abortTransaction();
+                session.endSession();
+              } catch (e) {
+                console.error("Cleanup error:", e);
+              }
+            });
+
+            return;
+          }
+        } else {
+          console.log("[Ekart] Failed to re-register address:", reRegResult.error);
+
+          res.status(500).json({
+            success: false,
+            message: "Ekart address not registered. Re-registration also failed.",
+            error: reRegResult.error,
+          });
+
+          process.nextTick(async () => {
+            try {
+              await Order.findByIdAndUpdate(id, { status: "new" });
+              await session.abortTransaction();
+              session.endSession();
+            } catch (e) {
+              console.error("Cleanup error:", e);
+            }
+          });
+
+          return;
         }
-      });
+      } else {
+        // ✅ Other errors → send response immediately
+        res.status(500).json({
+          success: false,
+          message:
+            err.code === "ECONNABORTED"
+              ? "Ekart timeout"
+              : err.response?.data?.description || "Ekart Shipment Failed",
+          error: err.response?.data || err.message,
+        });
 
-      return;
+        // ✅ CLEANUP ASYNC (do NOT block response)
+        process.nextTick(async () => {
+          try {
+            await Order.findByIdAndUpdate(id, { status: "new" });
+            await session.abortTransaction();
+            session.endSession();
+          } catch (e) {
+            console.error("Cleanup error:", e);
+          }
+        });
+
+        return;
+      }
     }
 
     if (!response?.data?.status) {
@@ -436,6 +511,7 @@ const orderCreationEkart = async (req, res) => {
       }
     });
   } catch (err) {
+    console.log("error ekart", err.response?.data || err.message)
     await Order.findByIdAndUpdate(req.body.id, { status: "new" });
     await session.abortTransaction();
     session.endSession();

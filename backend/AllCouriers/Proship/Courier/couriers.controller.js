@@ -211,7 +211,7 @@ const createProshipOrder = async (req, res) => {
     currentOrder.status = "Booked";
     currentOrder.awb_number = awb_number;
     const sNameForProv = courierServiceName?.toLowerCase() || "";
-    currentOrder.provider = sNameForProv.includes("dtdc") ? "DTDC" : "Shadowfax";
+    currentOrder.provider = sNameForProv.includes("dtdc") ? "Dtdc" : "Shadowfax";
     currentOrder.partner = "Proship";
     currentOrder.shipment_id = response.data.result.id || String(currentOrder.orderId);
     currentOrder.totalFreightCharges = parseFloat(finalCharges) || 0;

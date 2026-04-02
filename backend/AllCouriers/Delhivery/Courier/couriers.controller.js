@@ -274,7 +274,7 @@ const createOrder = async (req, res) => {
       },
       timeout: 8000,
     });
-    // console.log("delhiver", response)
+    console.log("delhiver", response)
     const result = response.data?.packages?.[0];
     if (!response.data.success || !result) {
       await Order.findByIdAndUpdate(id, { status: "new" });

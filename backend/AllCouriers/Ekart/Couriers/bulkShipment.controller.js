@@ -190,14 +190,92 @@ const createOrderEkart = async (
     /* --------------------------------------------------
        7️⃣ EKART API CALL
     -------------------------------------------------- */
-    const response = await axios.put(
-      "https://app.elite.ekartlogistics.in/api/v1/package/create",
-      payload,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        timeout: 15000,
-      },
-    );
+    let response;
+
+    try {
+      response = await axios.put(
+        "https://app.elite.ekartlogistics.in/api/v1/package/create",
+        payload,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 15000,
+        },
+      );
+    } catch (apiErr) {
+      const ekartErr = apiErr.response?.data;
+      console.log("[Ekart Bulk] Shipment Error:", ekartErr || apiErr.message);
+
+      // ✅ If address not registered → re-create, update DB alias, retry
+      if (
+        apiErr.response?.status === 404 &&
+        ekartErr?.message === "SWIFT_RESOURCE_NOT_FOUND_EXCEPTION"
+      ) {
+        console.log(`[Ekart Bulk] Re-registering address for pickup: ${pickup?._id}`);
+
+        const newAddressPayload = {
+          alias: `WAREHOUSE_${Date.now()}`,
+          phone: pickup.pickupAddress.phoneNumber,
+          address_line1: pickup.pickupAddress.address,
+          address_line2: "",
+          pincode: pickup.pickupAddress.pinCode,
+          city: pickup.pickupAddress.city,
+          state: pickup.pickupAddress.state,
+          country: "IN",
+          geo: { lat: 0, lon: 0 },
+        };
+
+        const reRegResult = await addEkartAddress(newAddressPayload, accessToken);
+
+        if (!reRegResult.success) {
+          return {
+            success: false,
+            message: "Ekart address not registered. Re-registration also failed.",
+            error: reRegResult.error,
+          };
+        }
+
+        const newAlias = reRegResult.alias;
+        console.log(`[Ekart Bulk] Re-registered address with alias: ${newAlias}`);
+
+        // Update alias in DB
+        await pickupAddress.updateOne(
+          { _id: pickup._id },
+          { $set: { ekartAlias: newAlias } }
+        );
+
+        // Update payload and retry
+        payload.pickup_location = { name: newAlias };
+        payload.return_location = { name: newAlias };
+
+        try {
+          response = await axios.put(
+            "https://app.elite.ekartlogistics.in/api/v1/package/create",
+            payload,
+            {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              timeout: 15000,
+            },
+          );
+          console.log("[Ekart Bulk] Retry Shipment Response:", response.data);
+        } catch (retryErr) {
+          return {
+            success: false,
+            message:
+              retryErr.response?.data?.description || "Ekart Shipment Failed after address re-registration",
+            error: retryErr.response?.data || retryErr.message,
+          };
+        }
+      } else {
+        return {
+          success: false,
+          message:
+            apiErr.code === "ECONNABORTED"
+              ? "Ekart timeout"
+              : ekartErr?.description || "Ekart Shipment Failed",
+          error: ekartErr || apiErr.message,
+        };
+      }
+    }
 
     if (!response?.data?.status) {
       return {
