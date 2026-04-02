@@ -212,7 +212,7 @@ const createProshipShipment = async ({
             cancelledAtStage: null,
             awb_number: awb_number,
             shipment_id: response.data.result.id || String(currentOrder.orderId),
-            provider: courierServiceName?.toLowerCase().includes("dtdc") ? "DTDC" : "Shadowfax",
+            provider: courierServiceName?.toLowerCase().includes("dtdc") ? "Dtdc" : "Shadowfax",
             partner: "Proship",
             totalFreightCharges: balanceToBeDeducted,
             courierServiceName,
