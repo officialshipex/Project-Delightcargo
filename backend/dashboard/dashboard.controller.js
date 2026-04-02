@@ -262,31 +262,24 @@ const getBusinessInsights = async (req, res) => {
   try {
     let userId = req.user._id;
     let searchId = req.query.userId;
-    let today = new Date(req.query.date);
 
     const userData = await User.findById(userId);
     const isAdminView = userData?.isAdmin && userData?.adminTab;
 
-    // Dates
-    // const today = new Date();
-    const startOfToday = new Date(today.setHours(0, 0, 0, 0));
-    const last30Days = moment().subtract(30, "days").toDate();
-    const prev30Days = moment().subtract(60, "days").toDate();
-    const startOfWeek = moment().startOf("week").toDate();
-    const startOfLastWeek = moment()
-      .subtract(1, "weeks")
-      .startOf("week")
-      .toDate();
-    const startOfMonth = moment().startOf("month").toDate();
-    const startOfLastMonth = moment()
-      .subtract(1, "months")
-      .startOf("month")
-      .toDate();
-    const startOfQuarter = moment().startOf("quarter").toDate();
-    const startOfLastQuarter = moment()
-      .subtract(1, "quarters")
-      .startOf("quarter")
-      .toDate();
+    // ✅ All date boundaries computed in IST (UTC+5:30)
+    // This ensures production (UTC server) and localhost (IST) behave identically.
+    // moment().utcOffset('+05:30') anchors calculations to IST regardless of server TZ.
+    const IST = '+05:30';
+
+    const startOfToday      = moment().utcOffset(IST).startOf('day').utc().toDate();
+    const last30Days        = moment().utcOffset(IST).subtract(30, 'days').startOf('day').utc().toDate();
+    const prev30Days        = moment().utcOffset(IST).subtract(60, 'days').startOf('day').utc().toDate();
+    const startOfWeek       = moment().utcOffset(IST).startOf('week').utc().toDate();
+    const startOfLastWeek   = moment().utcOffset(IST).subtract(1, 'weeks').startOf('week').utc().toDate();
+    const startOfMonth      = moment().utcOffset(IST).startOf('month').utc().toDate();
+    const startOfLastMonth  = moment().utcOffset(IST).subtract(1, 'months').startOf('month').utc().toDate();
+    const startOfQuarter    = moment().utcOffset(IST).startOf('quarter').utc().toDate();
+    const startOfLastQuarter = moment().utcOffset(IST).subtract(1, 'quarters').startOf('quarter').utc().toDate();
 
     let baseMatch = {};
     if (!isAdminView) {
@@ -568,11 +561,8 @@ const getBusinessInsights = async (req, res) => {
           ).toFixed(2)
         : "0.00";
 
-    const startOfYesterday = moment()
-      .subtract(1, "days")
-      .startOf("day")
-      .toDate();
-    const endOfYesterday = moment().subtract(1, "days").endOf("day").toDate();
+    const startOfYesterday = moment().utcOffset(IST).subtract(1, 'days').startOf('day').utc().toDate();
+    const endOfYesterday   = moment().utcOffset(IST).subtract(1, 'days').endOf('day').utc().toDate();
 
     const [yesterdayOrders] = await Order.aggregate([
       {
@@ -657,14 +647,16 @@ const getDashboardOverview = async (req, res) => {
     const userId = req.user._id;
     const searchId = req.query.userId;
     let { startDate, endDate } = req.query;
-    // If not provided, take today's date
+    const IST = '+05:30';
+    // If not provided, take today's date in IST
     if (!startDate || !endDate) {
-      const today = new Date();
-      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
-      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+      startDate = moment().utcOffset(IST).startOf('day').utc().toDate();
+      endDate   = moment().utcOffset(IST).endOf('day').utc().toDate();
     }
 
-    // console.log("startDate,endDate", startDate, endDate);
+    // ✅ Define yesterday range for comparison
+    const yesterdayStart = moment(startDate).subtract(1, 'days').toDate();
+    const yesterdayEnd   = moment(endDate).subtract(1, 'days').toDate();
 
     const userData = await User.findById(userId);
     const isAdminView = userData?.isAdmin && userData?.adminTab;
@@ -715,8 +707,8 @@ const getDashboardOverview = async (req, res) => {
             {
               $match: {
                 createdAt: {
-                  $gte: new Date(startDate),
-                  $lte: new Date(endDate),
+                  $gte: new Date(yesterdayStart),
+                  $lte: new Date(yesterdayEnd),
                 },
               },
             },
@@ -743,8 +735,8 @@ const getDashboardOverview = async (req, res) => {
             {
               $match: {
                 shipmentCreatedAt: {
-                  $gte: new Date(startDate),
-                  $lte: new Date(endDate),
+                  $gte: new Date(yesterdayStart),
+                  $lte: new Date(yesterdayEnd),
                 },
                 totalFreightCharges: { $gt: 0 },
               },
