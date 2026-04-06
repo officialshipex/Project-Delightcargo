@@ -872,10 +872,7 @@ const assignPlan = async (req, res) => {
       userName,
       planName,
       rateCards = [],
-      // B2BRateCard = [],
     } = req.body;
-
-    // console.log("Assign Plan Payload:", req.body);
 
     if (!planName) {
       return res.status(400).json({
@@ -889,14 +886,20 @@ const assignPlan = async (req, res) => {
       });
     }
 
+    // ✅ Disable DTDC by default for all users
+    const processedRateCards = rateCards.map(rc => {
+      if (rc.courierProviderName?.toLowerCase().includes("dtdc")) {
+        return { ...rc, status: "Inactive" };
+      }
+      return rc;
+    });
+
     // Check if there is an existing plan for the user
     let existingPlan = await Plan.findOne({ userId });
 
     if (existingPlan) {
-      // ✅ Update existing plan
       existingPlan.planName = planName;
-      existingPlan.rateCard = rateCards;
-      // existingPlan.B2BRateCard = B2BRateCard; // 🔥 NEW
+      existingPlan.rateCard = processedRateCards;
       existingPlan.assignedAt = new Date();
 
       await existingPlan.save();
@@ -907,13 +910,11 @@ const assignPlan = async (req, res) => {
       });
     }
 
-    // ✅ Create new plan
     const newPlan = new Plan({
       userId,
       userName,
       planName,
-      rateCard: rateCards,
-      // B2BRateCard, // 🔥 NEW
+      rateCard: processedRateCards,
       assignedAt: new Date(),
     });
 
@@ -932,17 +933,15 @@ const assignPlan = async (req, res) => {
 };
 
 
+
 const B2BassignPlan = async (req, res) => {
   try {
     const {
       userId,
       userName,
       planName,
-      // rateCards = [],
       B2BRateCard = [],
     } = req.body;
-
-    // console.log("Assign Plan Payload:", req.body);
 
     if (!planName) {
       return res.status(400).json({
@@ -956,14 +955,20 @@ const B2BassignPlan = async (req, res) => {
       });
     }
 
+    // ✅ Disable DTDC by default for all users
+    const processedB2BRateCards = B2BRateCard.map(rc => {
+      if (rc.courierProviderName?.toLowerCase().includes("dtdc")) {
+        return { ...rc, status: "Inactive" };
+      }
+      return rc;
+    });
+
     // Check if there is an existing plan for the user
     let existingPlan = await B2BPlan.findOne({ userId });
 
     if (existingPlan) {
-      // ✅ Update existing plan
       existingPlan.planName = planName;
-      // existingPlan.rateCard = rateCards;
-      existingPlan.B2BRateCard = B2BRateCard; // 🔥 NEW
+      existingPlan.B2BRateCard = processedB2BRateCards;
       existingPlan.assignedAt = new Date();
 
       await existingPlan.save();
@@ -974,13 +979,11 @@ const B2BassignPlan = async (req, res) => {
       });
     }
 
-    // ✅ Create new plan
     const newPlan = new B2BPlan({
       userId,
       userName,
       planName,
-      // rateCard: rateCards,
-      B2BRateCard, // 🔥 NEW
+      B2BRateCard: processedB2BRateCards,
       assignedAt: new Date(),
     });
 
@@ -997,6 +1000,7 @@ const B2BassignPlan = async (req, res) => {
     });
   }
 };
+
 
 const makeAdmin = async () => {
   try {
@@ -1201,6 +1205,96 @@ const updateKamDetails = async (req, res) => {
   }
 };
 
+const getUserServices = async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+
+    const plan = await Plan.findOne({ userId });
+    res.status(200).json({
+      success: true,
+      services: plan ? plan.rateCard : []
+    });
+  } catch (error) {
+    console.error("Error fetching user services:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+const toggleProviderStatus = async (req, res) => {
+  try {
+    const { userId, provider, status } = req.body;
+    const plan = await Plan.findOne({ userId });
+    if (!plan) return res.status(404).json({ message: "Plan not found" });
+
+    plan.rateCard = plan.rateCard.map(rc => {
+      if (rc.courierProviderName === provider) {
+        return { ...rc, status: status ? "Active" : "Inactive" };
+      }
+      return rc;
+    });
+
+    await Plan.updateOne({ userId }, { $set: { rateCard: plan.rateCard } });
+
+    res.status(200).json({ success: true, message: `${provider} services ${status ? "enabled" : "disabled"} successfully` });
+  } catch (error) {
+    console.error("Error toggling provider status:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+const toggleServiceStatus = async (req, res) => {
+  try {
+    const { userId, courierServiceName, status } = req.body;
+    const plan = await Plan.findOne({ userId });
+    if (!plan) return res.status(404).json({ message: "Plan not found" });
+
+    plan.rateCard = plan.rateCard.map(rc => {
+      if (rc.courierServiceName === courierServiceName) {
+        return { ...rc, status: status ? "Active" : "Inactive" };
+      }
+      return rc;
+    });
+
+    await Plan.updateOne({ userId }, { $set: { rateCard: plan.rateCard } });
+
+    res.status(200).json({ success: true, message: `Service ${status ? "enabled" : "disabled"} successfully` });
+  } catch (error) {
+    console.error("Error toggling service status:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+const updateServiceRate = async (req, res) => {
+  try {
+    const { userId, courierServiceName, weightPriceBasic, weightPriceAdditional, codCharge, codPercent } = req.body;
+    const plan = await Plan.findOne({ userId });
+    if (!plan) return res.status(404).json({ message: "Plan not found" });
+
+    plan.rateCard = plan.rateCard.map(rc => {
+      if (rc.courierServiceName === courierServiceName) {
+        return {
+          ...rc,
+          weightPriceBasic,
+          weightPriceAdditional,
+          codCharge,
+          codPercent,
+          isCustomRate: true
+        };
+      }
+      return rc;
+    });
+
+    await Plan.updateOne({ userId }, { $set: { rateCard: plan.rateCard } });
+
+    res.status(200).json({ success: true, message: "Rate updated successfully" });
+  } catch (error) {
+    console.error("Error updating service rate:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
 module.exports = {
   getUsers,
   getUserDetails,
@@ -1218,4 +1312,9 @@ module.exports = {
   updateCreditLimit,
   getKamDetails,
   updateKamDetails,
+  getUserServices,
+  toggleProviderStatus,
+  toggleServiceStatus,
+  updateServiceRate
 };
+

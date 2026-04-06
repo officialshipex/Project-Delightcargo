@@ -11,5 +11,10 @@ router.put("/assignPlan", userController.assignPlan);
 router.put("/assign/plan", userController.B2BassignPlan);
 
 router.post("/getRateCard",userController.getRatecards);
+router.get("/getUserServices", isAuthorized, userController.getUserServices);
+router.post("/toggleProviderStatus", isAuthorized, userController.toggleProviderStatus);
+router.post("/toggleServiceStatus", isAuthorized, userController.toggleServiceStatus);
+router.post("/updateServiceRate", isAuthorized, userController.updateServiceRate);
+
 
 module.exports=router;
