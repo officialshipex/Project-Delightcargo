@@ -1,3 +1,4 @@
+const jwt = require("jsonwebtoken");
 const User = require("../models/User.model");
 const Plan = require("../models/Plan.model");
 const B2BPlan = require("../B2B/models/plan.model");
@@ -1295,6 +1296,100 @@ const updateServiceRate = async (req, res) => {
 };
 
 
+// ─── Admin: search users by name/email/phone for suggestions ───────────────
+const searchUsers = async (req, res) => {
+  try {
+    // Only allow admins (User or Staff/Employee)
+    const isAdmin = req.user?.isAdmin || req.employee?.isAdmin;
+
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const { q = "" } = req.query;
+    if (!q.trim()) {
+      return res.status(200).json({ success: true, users: [] });
+    }
+
+    const trimmed = q.trim();
+    const users = await User.find(
+      {
+        $or: [
+          { fullname: { $regex: trimmed, $options: "i" } },
+          { email: { $regex: trimmed, $options: "i" } },
+          { phoneNumber: { $regex: trimmed, $options: "i" } },
+          { company: { $regex: trimmed, $options: "i" } },
+        ],
+      },
+      { _id: 1, fullname: 1, email: 1, company: 1, userId: 1 }
+    )
+      .limit(10)
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      users: users.map((u) => ({
+        id: u._id,
+        userId: u.userId,
+        fullname: u.fullname,
+        email: u.email,
+        company: u.company,
+      })),
+    });
+  } catch (error) {
+    console.error("searchUsers error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ─── Admin: generate a login token for any user (no password required) ───────
+const adminLoginAsUser = async (req, res) => {
+  try {
+    // Only allow admins (User or Staff/Employee)
+    const isAdmin = req.user?.isAdmin || req.employee?.isAdmin;
+
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const { userId } = req.body; // mongo _id of the target user
+    if (!userId) {
+      return res.status(400).json({ success: false, message: "userId is required" });
+    }
+
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (targetUser.isBlocked) {
+      return res.status(400).json({ success: false, message: "User is blocked" });
+    }
+
+    const payload = {
+      user: {
+        id: targetUser._id,
+        email: targetUser.email,
+        fullname: targetUser.fullname,
+        kyc: targetUser.kycDone,
+        isAdmin: targetUser.isAdmin,
+        isEmployee: false,
+      },
+    };
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1d" });
+
+    return res.status(200).json({
+      success: true,
+      message: `Logged in as ${targetUser.fullname}`,
+      token,
+    });
+  } catch (error) {
+    console.error("adminLoginAsUser error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 module.exports = {
   getUsers,
   getUserDetails,
@@ -1315,6 +1410,8 @@ module.exports = {
   getUserServices,
   toggleProviderStatus,
   toggleServiceStatus,
-  updateServiceRate
+  updateServiceRate,
+  searchUsers,
+  adminLoginAsUser,
 };
 

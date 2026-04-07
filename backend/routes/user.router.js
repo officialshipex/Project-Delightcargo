@@ -3,7 +3,7 @@ const router = express.Router();
 const { uploads } = require("../config/s3")
 
 const userController = require("../Users/usersController");
-const { getAllUsers } = require("../Users/usersController");
+const { getAllUsers, searchUsers, adminLoginAsUser } = require("../Users/usersController");
 
 const { isAuthorized } = require("../middleware/auth.middleware")
 
@@ -21,5 +21,9 @@ router.post('/updateReferralCommission', isAuthorized, userController.updateRefe
 router.put("/updateCreditLimit", isAuthorized, userController.updateCreditLimit);
 router.get("/getKamDetails/:id", isAuthorized, userController.getKamDetails);
 router.put("/updateKamDetails/:id", isAuthorized, userController.updateKamDetails);
+
+// Admin-only: search users for impersonation
+router.get("/searchUsers", isAuthorized, searchUsers);
+router.post("/adminLoginAsUser", isAuthorized, adminLoginAsUser);
 
 module.exports = router;
