@@ -1344,13 +1344,20 @@ const ShipeNowOrder = async (req, res) => {
       }
     }
 
+    const serviceabilityCache = {};
     const availableServicesResults = await Promise.all(
       enabledServices.map(async (item) => {
-        let result = await checkServiceabilityAll(
-          item,
-          order._id,
-          order.pickupAddress.pinCode,
-        );
+        const provider = item.provider;
+        // Optimization: Cache serviceability results per provider during this request
+        // We cache the PROMISE to handle concurrent requests correctly in Promise.all
+        if (!serviceabilityCache[provider]) {
+          serviceabilityCache[provider] = checkServiceabilityAll(
+            item,
+            order._id,
+            order.pickupAddress.pinCode,
+          );
+        }
+        let result = await serviceabilityCache[provider];
         // console.log("result",result)
         if (result && result.success) {
           if (item.provider?.toLowerCase() === "boxdlogistics" && Array.isArray(result.courier_ids)) {

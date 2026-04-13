@@ -3,6 +3,8 @@ const dayjs = require("dayjs");
 const User = require("../models/User.model.js");
 const Order = require("../models/newOrder.model.js");
 const ReferralMonthlyStat = require("./referal.model.js");
+const ReferralWithdrawal = require("./referalWithdrawal.model.js");
+const Wallet = require("../models/wallet");
 const cron = require("node-cron");
 /**
  * Generate monthly referral reports for all users that have subUserId populated.
@@ -15,9 +17,12 @@ const cron = require("node-cron");
 // console.log("Referral controller loaded");
 const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
   const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
     const ref = dayjs(referenceDate);
+    const month = ref.month() + 1;
+    const year = ref.year();
     const fromDate = ref.startOf("month").toDate();
     const toDate = ref.endOf("month").toDate();
 
@@ -30,9 +35,36 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
     // Fetch all parent users who have referred sub-users
     const parentUsers = await User.find({
       subUserId: { $exists: true, $ne: [], $not: { $size: 0 } },
-    }).lean();
+    }).session(session).lean();
+
+    // ─── STAGE 1: GLOBAL DEDUPLICATION PREP ──────────────────────────────────
+    // Fetch ALL orderIds that have ever been included in ANY referral report
+    // This is the strongest security check to prevent double-counting.
+    const allCommissionedOrders = await ReferralMonthlyStat.aggregate([
+      { $unwind: "$perSubUser" },
+      { $unwind: "$perSubUser.orderIds" },
+      { $group: { _id: null, orderIds: { $addToSet: "$perSubUser.orderIds" } } }
+    ]).session(session);
+
+    const commissionedSet = new Set(
+      allCommissionedOrders.length > 0
+        ? allCommissionedOrders[0].orderIds.map(id => id.toString())
+        : []
+    );
 
     for (const user of parentUsers) {
+      // 1. Security Check: Skip if report already exists for this specific month/year/user
+      const existingReport = await ReferralMonthlyStat.findOne({
+        month,
+        year,
+        userId: user._id
+      }).session(session);
+
+      if (existingReport) {
+        console.log(`⚠️ Report for user ${user.userId} already exists for ${month}/${year}. Skipping.`);
+        continue;
+      }
+
       const subUserIds = (user.subUserId || []).map(
         (id) => new mongoose.Types.ObjectId(id)
       );
@@ -44,9 +76,9 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
         userId: { $in: subUserIds },
         status: "Delivered",
         "tracking.StatusDateTime": { $exists: true },
-      }).lean();
+      }).session(session).lean();
 
-      // Filter by tracking last date
+      // Filter by tracking last date manually
       const deliveredOrders = orders.filter((ord) => {
         const lastTracking = ord.tracking?.[ord.tracking.length - 1];
         if (!lastTracking?.StatusDateTime) return false;
@@ -59,18 +91,13 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
         continue;
       }
 
-      // Prevent duplication by checking previous recorded orderIds
-      const existingOrderIds = await ReferralMonthlyStat.find({
-        userId: user._id, // use userId instead of _id
-        "perSubUser.orderIds": { $exists: true, $ne: [] },
-      }).distinct("perSubUser.orderIds");
-
+      // 2. Security Check: Filter orders that are both in the date range AND haven't been processed yet
       const uniqueOrders = deliveredOrders.filter(
-        (ord) => !existingOrderIds.includes(ord._id.toString())
+        (ord) => !commissionedSet.has(ord._id.toString())
       );
 
       if (!uniqueOrders.length) {
-        console.log(`⚠️ All orders for user ${user._id} already counted.`);
+        console.log(`⚠️ All potential orders for user ${user._id} were already counted in previous runs.`);
         continue;
       }
 
@@ -97,11 +124,15 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
         entry.totalShipping += freight;
         entry.orderIds.push(ord._id);
         subUserMap.set(subId, entry);
+
+        // Mark as locally processed so we don't accidentally count it again if logic shifts
+        commissionedSet.add(ord._id.toString());
       }
 
       // Get sub-user details (name, email, mobile)
       const subUsers = await User.find({ _id: { $in: subUserIds } })
-        .select("name email mobile userId")
+        .select("name email phoneNumber userId") // use phoneNumber if that's the field name
+        .session(session)
         .lean();
 
       const commissionRate = Number(user.commission || 2);
@@ -109,7 +140,6 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
         ((totalShipping * commissionRate) / 100).toFixed(2)
       );
 
-      // Construct perSubUser array with additional info and date range
       const perSubUser = [];
       for (const [subId, val] of subUserMap.entries()) {
         const subUser = subUsers.find((su) => su._id.toString() === subId);
@@ -120,9 +150,9 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
         perSubUser.push({
           subUserId: subId,
           userId: subUser?.userId,
-          name: subUser?.name || "N/A",
+          name: subUser?.fullname || "N/A",
           email: subUser?.email || "N/A",
-          mobile: subUser?.mobile || "N/A",
+          mobile: subUser?.phoneNumber || "N/A", // matches mobile logic in other views
           fromDate,
           toDate,
           orderCount: val.orderCount,
@@ -134,25 +164,26 @@ const generateMonthlyReferralReport = async (referenceDate = new Date()) => {
 
       // Save final monthly stats
       const statDoc = new ReferralMonthlyStat({
-        month: ref.month() + 1,
-        year: ref.year(),
+        month,
+        year,
         userId: user._id,
-        referralCount: user.subUserId?.length || 0,
         totalOrderCount: uniqueOrders.length,
         totalShipping,
         totalCommission,
         perSubUser,
       });
 
-      await statDoc.save();
+      await statDoc.save({ session });
       console.log(
         `✅ Saved referral stat for user ${user.userId} (${uniqueOrders.length
         } orders, ₹${totalShipping.toFixed(2)})`
       );
     }
 
+    await session.commitTransaction();
     return { success: true, message: "Referral monthly reports generated." };
   } catch (err) {
+    await session.abortTransaction();
     console.error("❌ Error generating monthly referral report:", err);
     return { success: false, message: err.message || "Error" };
   } finally {
@@ -171,7 +202,7 @@ cron.schedule("59 23 * * *", async () => {
       "Today is last day of month. Generating monthly referral report..."
     );
     try {
-      //   await generateMonthlyReferralReport(now.toDate());
+      await generateMonthlyReferralReport(now.toDate());
       console.log("Referral monthly report job completed.");
     } catch (err) {
       console.error("Referral monthly report job failed:", err);
@@ -183,7 +214,12 @@ cron.schedule("59 23 * * *", async () => {
 
 const getReferralStats = async (req, res) => {
   try {
-    const userId = req.user._id; // added by auth middleware
+    let userId = req.user._id;
+
+    if (req.user.isAdmin && req.query.targetUserId) {
+      userId = req.query.targetUserId;
+    }
+
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -236,6 +272,11 @@ const getReferralStats = async (req, res) => {
       "subUserId referralCommissionPercentage"
     ).lean();
     stats.referredFriends = parentUser?.subUserId?.length || 0;
+
+    // Calculate total withdrawn
+    const withdrawals = await ReferralWithdrawal.find({ userId }).lean();
+    stats.withdrawn = withdrawals.reduce((sum, w) => sum + (w.amount || 0), 0);
+    stats.remaining = Math.max(0, stats.totalCommission - stats.withdrawn);
 
     // Prepare data for frontend
     const monthlyData = monthlyStats.map((month) => ({
@@ -367,6 +408,7 @@ const getAllReferralStats = async (req, res) => {
       return {
         ...r,
         userId: user?.userId || "-",
+        userIdMongo: user?._id, // Internal ID for wallet transfers
         userName: user?.fullname || "-",
         email: user?.email || "-",
         mobile: user?.phoneNumber || "-",
@@ -402,8 +444,95 @@ const updateAllReferralCommission = async () => {
 };
 // updateAllReferralCommission()
 
+// =========================================================================
+// MANUAL TRIGGER FOR TESTING
+// To run the report for the PREVIOUS month manually, uncomment the line below 
+// and save the file. Remember to comment it back once the report is generated!
+// -------------------------------------------------------------------------
+// generateMonthlyReferralReport(dayjs().subtract(1, "month").toDate());
+// =========================================================================
+
+const withdrawCommission = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    let userId = req.user._id;
+    const { amount, targetUserId } = req.body;
+
+    // Admin Override: If user is admin and targetUserId is provided, use that instead
+    if (req.user.isAdmin && targetUserId) {
+      if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+        return res.status(400).json({ message: "Invalid target user ID" });
+      }
+      userId = targetUserId;
+    }
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: "Invalid withdrawal amount" });
+    }
+
+    // 1. Calculate available balance
+    const allStats = await ReferralMonthlyStat.find({ userId }).session(session).lean();
+    const totalCommission = allStats.reduce((sum, m) => sum + (m.totalCommission || 0), 0);
+
+    const withdrawals = await ReferralWithdrawal.find({ userId }).session(session).lean();
+    const totalWithdrawn = withdrawals.reduce((sum, w) => sum + (w.amount || 0), 0);
+
+    const remaining = totalCommission - totalWithdrawn;
+
+    if (amount > remaining) {
+      return res.status(400).json({ message: "Insufficient referral commission balance" });
+    }
+
+    // 2. Find User and Wallet
+    const user = await User.findById(userId).session(session);
+    if (!user || !user.Wallet) {
+      return res.status(404).json({ message: "User or Wallet not found" });
+    }
+
+    const wallet = await Wallet.findById(user.Wallet).session(session);
+    if (!wallet) {
+      return res.status(404).json({ message: "Wallet not found" });
+    }
+
+    // 3. Update Wallet Balance and add transaction
+    const newBalance = wallet.balance + amount;
+    wallet.transactions.push({
+      category: "credit",
+      amount: amount,
+      balanceAfterTransaction: newBalance,
+      description: "Referral Commission Received",
+    });
+    wallet.balance = newBalance;
+    await wallet.save({ session });
+
+    // 4. Record the Withdrawal
+    const withdrawalDoc = new ReferralWithdrawal({
+      userId,
+      amount,
+      status: "Success",
+      description: "Transferred to Wallet",
+    });
+    await withdrawalDoc.save({ session });
+
+    await session.commitTransaction();
+    return res.status(200).json({
+      success: true,
+      message: `₹${amount.toFixed(2)} transferred to your wallet successfully!`,
+      updatedBalance: newBalance
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    console.error("❌ Error withdrawing commission:", err);
+    return res.status(500).json({ message: "Internal server error during withdrawal" });
+  } finally {
+    session.endSession();
+  }
+};
+
 module.exports = {
   generateMonthlyReferralReport,
   getReferralStats,
   getAllReferralStats,
+  withdrawCommission,
 };

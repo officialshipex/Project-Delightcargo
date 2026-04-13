@@ -22,13 +22,31 @@ const getCurrentDateTime = () => {
   const pickup_time = now.toTimeString().split(" ")[0];
   return { pickup_date, pickup_time };
 };
+
+// Helper function to generate a unique warehouse name for Delhivery
+const getUniqueWarehouseName = (payload) => {
+  if (!payload || !payload.address)
+    return payload?.contactName || "Default Warehouse";
+  const addressKey = `${payload.address}-${payload.pinCode}-${payload.phoneNumber}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  const hash = crypto
+    .createHash("md5")
+    .update(addressKey)
+    .digest("hex")
+    .substring(0, 6);
+  return `${payload.contactName.substring(0, 30)}-${hash}`.trim();
+};
+
 const createClientWarehouse = async (payload) => {
   if (!payload) {
     throw new Error("Payload is required to create a warehouse.");
   }
 
+  const uniqueName = getUniqueWarehouseName(payload);
+
   const warehouseDetails = {
-    name: payload.contactName,
+    name: uniqueName,
     email: payload.email,
     phone: payload.phoneNumber,
     address: payload.address,
@@ -59,6 +77,7 @@ const createClientWarehouse = async (payload) => {
       return {
         success: true,
         message: "Warehouse created successfully",
+        name: uniqueName,
         data: response.data,
       };
     } else {
@@ -68,6 +87,7 @@ const createClientWarehouse = async (payload) => {
         return {
           success: true,
           message: "Warehouse already exists, proceeding",
+          name: uniqueName,
           data: response.data.data,
         };
       } else {
@@ -88,6 +108,7 @@ const createClientWarehouse = async (payload) => {
       return {
         success: true,
         message: "Warehouse already exists, proceeding",
+        name: uniqueName,
         data: error.response?.data?.data,
       };
     } else {
@@ -195,8 +216,9 @@ const createOrder = async (req, res) => {
 
     // Step 5️⃣ Prepare payload (keep as-is)
     const pickupWarehouseName =
+      warehouseCreationResult.name ||
       warehouseCreationResult.data?.name ||
-      currentOrder.pickupAddress.contactName;
+      getUniqueWarehouseName(currentOrder.pickupAddress);
 
     const payment_type =
       currentOrder.paymentDetails.method === "COD" ? "COD" : "Pre-paid";
@@ -245,7 +267,7 @@ const createOrder = async (req, res) => {
       ],
     };
 
-    console.log("payloadData", payloadData.shipments);
+    // console.log("payloadData", payloadData.shipments);
 
     const payload = `format=json&data=${encodeURIComponent(
       JSON.stringify(payloadData),
@@ -274,7 +296,7 @@ const createOrder = async (req, res) => {
       },
       timeout: 8000,
     });
-    console.log("delhiver", response)
+    // console.log("delhiver", response)
     const result = response.data?.packages?.[0];
     if (!response.data.success || !result) {
       await Order.findByIdAndUpdate(id, { status: "new" });
@@ -390,6 +412,7 @@ const checkPincodeServiceabilityDelhivery = async (
         Authorization: `Token ${API_TOKEN}`,
       },
       params: { filter_codes: deliveryPincode },
+      timeout: 8000,
     });
     // console.log("delivery service", deliveryResponse.data.delivery_codes);
     const deliveryCodes = deliveryResponse.data.delivery_codes || [];
@@ -409,6 +432,7 @@ const checkPincodeServiceabilityDelhivery = async (
         Authorization: `Token ${API_TOKEN}`,
       },
       params: { filter_codes: pickUpPincode },
+      timeout: 5000,
     });
     // console.log("pickup servi", pickupResponse.data.delivery_codes);
     const pickupCodes = pickupResponse.data.delivery_codes || [];
@@ -510,13 +534,15 @@ const generateShippingLabel = async (req, res) => {
   }
 };
 
-const createPickupRequest = async (warehouse_name, awb) => {
+const createPickupRequest = async (warehouse_name, awb, pickupAddress = null) => {
   const result = getCurrentDateTime();
+
+  const finalWarehouseName = pickupAddress ? getUniqueWarehouseName(pickupAddress) : warehouse_name;
 
   const pickupDetails = {
     pickup_time: result.pickup_time,
     pickup_date: result.pickup_date,
-    pickup_location: warehouse_name,
+    pickup_location: finalWarehouseName,
     expected_package_count: 1,
     waybill: `${awb}`,
   };
@@ -693,4 +719,5 @@ module.exports = {
   createClientWarehouse,
   updateClientWarehouse,
   cancelOrderDelhivery,
+  getUniqueWarehouseName,
 };

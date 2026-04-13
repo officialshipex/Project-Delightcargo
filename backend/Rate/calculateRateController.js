@@ -71,143 +71,34 @@ const calculateRate = async (req, res) => {
     const chargedWeight = applicableWeight * 1000;
     const gst = 18;
     const ans = [];
+    const serviceabilityCache = {};
 
     for (let rc of rateCards) {
       const provider = rc.courierProviderName;
-      // console.log("provider:", provider);
       const mode = rc.mode;
       let serviceable = { success: false };
 
-      // ✅ Skip if courier is disabled in DB
       const activeCouriersLower = activeCourierNames.map(c => c.toLowerCase());
-
-      if (!activeCouriersLower.includes(provider.toLowerCase())) {
-        console.log(`SKIPPED (not in activeCouriers): "${provider}"`);
-        continue;
-      }
+      if (!activeCouriersLower.includes(provider.toLowerCase())) continue;
       if (rc.status !== "Active") continue;
 
-      // Only process supported providers
-      if (
-        ![
-          "Delhivery",
-          "Shree Maruti",
-          "Dtdc",
-          "Smartship",
-          "Amazon Shipping",
-          "EcomExpress",
-          "Zipypost",
-          "Ekart",
-          "BoxdLogistics",
-          "Proship"
-        ].includes(provider)
-      ) {
-        continue;
-      }
+      if (!["Delhivery", "Shree Maruti", "Dtdc", "Smartship", "Amazon Shipping", "EcomExpress", "Zipypost", "Ekart", "BoxdLogistics", "Proship"].includes(provider)) continue;
 
-      // Step 3: Check local serviceability first
-      let localServiceability = await checkPincodeServiceability(
-        pickUpPincode,
-        provider,
-        deliveryPincode,
-        paymentType,
-      );
-
-      // Step 4: Determine whether to call API fallback
-      if (localServiceability.success === true) {
-        serviceable = { success: true };
-      } else if (
-        ["courier_not_found", "error", "pincode_not_found"].includes(
-          localServiceability.reason,
-        )
-      ) {
-        // Local data missing → use API
-        if (provider === "EcomExpress") {
-          serviceable = await checkServiceabilityEcomExpress(
-            pickUpPincode,
-            deliveryPincode,
-          );
-        } else if (provider === "Shree Maruti") {
+      if (provider === "BoxdLogistics") {
+        if (!serviceabilityCache[provider]) {
           const payload = {
-            fromPincode: parseInt(pickUpPincode),
-            toPincode: parseInt(deliveryPincode),
-            isCodOrder: paymentType === "COD",
-            deliveryMode: "SURFACE",
+            pickupPincode: pickUpPincode,
+            shippingPincode: deliveryPincode,
+            paymentMode: paymentType === "COD" ? "cod" : "prepaid",
+            codAmount: paymentType === "COD" ? declaredValue : 0,
+            weight: chargedWeight,
+            length: dimensions?.length || 10,
+            breadth: dimensions?.width || 10,
+            height: dimensions?.height || 10,
           };
-          serviceable = await checkServiceabilityShreeMaruti(payload);
-        } else if (provider === "Delhivery") {
-          serviceable = await checkPincodeServiceabilityDelhivery(
-            pickUpPincode,
-            deliveryPincode,
-            orderType,
-          );
-        } else if (provider === "Dtdc") {
-          serviceable = await checkServiceabilityDTDC(
-            pickUpPincode,
-            deliveryPincode,
-            paymentType,
-          );
-        } else if (provider === "Smartship") {
-          const payload = {
-            source_pincode: pickUpPincode,
-            destination_pincode: deliveryPincode,
-            order_weight: applicableWeight,
-            order_value: declaredValue,
-          };
-          serviceable = await checkSmartshipHubServiceability(payload);
-        } else if (provider === "Amazon Shipping") {
-          serviceable = await checkAmazonServiceabilityWithoutOrder(
-            pickUpPincode,
-            deliveryPincode,
-            applicableWeight,
-            declaredValue,
-            paymentType,
-            dimensions,
-          );
-          // console.log("Amazon serviceability result:", serviceable.error.errors);
-        } else if (provider === "ZipyPost") {
-          const payload = {
-            source_pincode: pickUpPincode,
-            destination_pincode: deliveryPincode,
-            payment_type: paymentType,
-            order_value: declaredValue,
-            length: dimensions.length,
-            width: dimensions.width,
-            height: dimensions.height,
-            order_weight: applicableWeight,
-          };
-          serviceable = await checkZipypostServiceability(payload);
-        } else if (provider === "Ekart") {
-          const payload = {
-            pickUpPincode,
-            deliveryPincode,
-            paymentMethod:paymentType, 
-            codAmount:declaredValue,
-          };
-          serviceable = await checkEkartServiceability(payload);
+          serviceabilityCache[provider] = await checkServiceabilityBoxdLogistics(payload);
         }
-      } else if (provider === "Ekart") {
-        const payload = {
-          pickUpPincode: pickUpPincode,
-          deliveryPincode: deliveryPincode,
-          paymentMethod: paymentType,
-          codAmount: declaredValue,
-        };
-        serviceable = await checkEkartServiceability(payload);
-      } else if (provider === "BoxdLogistics") {
-        const payload = {
-          pickupPincode: pickUpPincode,
-          shippingPincode: deliveryPincode,
-          paymentMode: paymentType === "COD" ? "cod" : "prepaid",
-          codAmount: paymentType === "COD" ? declaredValue : 0,
-          weight: chargedWeight,
-          length: dimensions?.length || 10,
-          breadth: dimensions?.width || 10,
-          height: dimensions?.height || 10,
-        };
-        const boxdResult = await checkServiceabilityBoxdLogistics(payload);
-        // console.log("boxdlogistics serviceability:", boxdResult);
-
+        const boxdResult = serviceabilityCache[provider];
         let boxdServiceable = boxdResult && boxdResult.success !== false;
         if (boxdServiceable && Array.isArray(boxdResult.courier_ids)) {
           const sName = rc.courierServiceName.toLowerCase();
@@ -218,16 +109,14 @@ const calculateRate = async (req, res) => {
           }
         }
         if (!boxdServiceable) continue;
-        // ✅ Mark serviceable so the outer check below passes
         serviceable = { success: true };
       } else if (provider === "Proship") {
-        const payload = {
-          pickUpPincode: pickUpPincode,
-          deliveryPincode: deliveryPincode,
-        };
-        const proshipResult = await checkProshipServiceability(payload);
+        if (!serviceabilityCache[provider]) {
+          const payload = { pickUpPincode, deliveryPincode };
+          serviceabilityCache[provider] = await checkProshipServiceability(payload);
+        }
+        const proshipResult = serviceabilityCache[provider];
         if (!proshipResult || proshipResult.success === false) continue;
-
         let proshipServiceable = true;
         if (proshipResult.couriers) {
           const sName = rc.courierServiceName.toLowerCase();
@@ -237,97 +126,62 @@ const calculateRate = async (req, res) => {
             proshipServiceable = !!proshipResult.couriers.dtdc;
           }
         }
-
         if (!proshipServiceable) continue;
         serviceable = { success: true };
       } else {
+        if (!serviceabilityCache[provider]) {
+          serviceabilityCache[provider] = {
+            local: await checkPincodeServiceability(pickUpPincode, provider, deliveryPincode, paymentType)
+          };
+        }
+        let localServiceability = serviceabilityCache[provider].local;
 
-        let localServiceability = await checkPincodeServiceability(
-          pickUpPincode,
-          provider,
-          deliveryPincode,
-          paymentType,
-        );
-
-        // Step 4: Determine whether to call API fallback
         if (localServiceability.success === true) {
           serviceable = { success: true };
-        } else if (
-          ["courier_not_found", "error", "pincode_not_found"].includes(
-            localServiceability.reason,
-          )
-        ) {
-          // Local data missing → use API
-          if (provider === "EcomExpress") {
-            serviceable = await checkServiceabilityEcomExpress(
-              pickUpPincode,
-              deliveryPincode,
-            );
-          } else if (provider === "Shree Maruti") {
-            const payload = {
-              fromPincode: parseInt(pickUpPincode),
-              toPincode: parseInt(deliveryPincode),
-              isCodOrder: paymentType === "COD",
-              deliveryMode: "SURFACE",
-            };
-            serviceable = await checkServiceabilityShreeMaruti(payload);
-          } else if (provider === "Delhivery") {
-            serviceable = await checkPincodeServiceabilityDelhivery(
-              pickUpPincode,
-              deliveryPincode,
-              orderType,
-            );
-          } else if (provider === "Dtdc") {
-            serviceable = await checkServiceabilityDTDC(
-              pickUpPincode,
-              deliveryPincode,
-              paymentType,
-            );
-          } else if (provider === "Smartship") {
-            const payload = {
-              source_pincode: pickUpPincode,
-              destination_pincode: deliveryPincode,
-              order_weight: applicableWeight,
-              order_value: declaredValue,
-            };
-            serviceable = await checkSmartshipHubServiceability(payload);
-          } else if (provider === "Amazon Shipping") {
-            serviceable = await checkAmazonServiceabilityWithoutOrder(
-              pickUpPincode,
-              deliveryPincode,
-              applicableWeight,
-              declaredValue,
-              paymentType,
-              dimensions,
-            );
-          } else if (provider === "Zipypost") {
-            const payload = {
-              source_pincode: pickUpPincode,
-              destination_pincode: deliveryPincode,
-              payment_type: paymentType,
-              order_value: declaredValue,
-              length: dimensions.length,
-              width: dimensions.width,
-              height: dimensions.height,
-              order_weight: applicableWeight,
-            };
-            serviceable = await checkZipypostServiceability(payload);
-            // console.log("service",serviceable)
-          } else if (provider === "Ekart") {
-            const payload = {
-              pickUpPincode: pickUpPincode,
-              deliveryPincode: deliveryPincode,
-              paymentMethod: paymentType,
-              codAmount: declaredValue,
-            };
-            serviceable = await checkEkartServiceability(payload);
+        } else if (["courier_not_found", "error", "pincode_not_found"].includes(localServiceability.reason)) {
+          if (!serviceabilityCache[provider].api) {
+            if (provider === "EcomExpress") {
+              serviceabilityCache[provider].api = await checkServiceabilityEcomExpress(pickUpPincode, deliveryPincode);
+            } else if (provider === "Shree Maruti") {
+              serviceabilityCache[provider].api = await checkServiceabilityShreeMaruti({
+                fromPincode: parseInt(pickUpPincode),
+                toPincode: parseInt(deliveryPincode),
+                isCodOrder: paymentType === "COD",
+                deliveryMode: "SURFACE",
+              });
+            } else if (provider === "Delhivery") {
+              serviceabilityCache[provider].api = await checkPincodeServiceabilityDelhivery(pickUpPincode, deliveryPincode, orderType);
+            } else if (provider === "Dtdc") {
+              serviceabilityCache[provider].api = await checkServiceabilityDTDC(pickUpPincode, deliveryPincode, paymentType);
+            } else if (provider === "Smartship") {
+              serviceabilityCache[provider].api = await checkSmartshipHubServiceability({
+                source_pincode: pickUpPincode,
+                destination_pincode: deliveryPincode,
+                order_weight: applicableWeight,
+                order_value: declaredValue,
+              });
+            } else if (provider === "Amazon Shipping") {
+              serviceabilityCache[provider].api = await checkAmazonServiceabilityWithoutOrder(pickUpPincode, deliveryPincode, applicableWeight, declaredValue, paymentType, dimensions);
+            } else if (provider === "Zipypost") {
+              serviceabilityCache[provider].api = await checkZipypostServiceability({
+                source_pincode: pickUpPincode,
+                destination_pincode: deliveryPincode,
+                payment_type: paymentType,
+                order_value: declaredValue,
+                length: dimensions.length,
+                width: dimensions.width,
+                height: dimensions.height,
+                order_weight: applicableWeight,
+              });
+            } else if (provider === "Ekart") {
+              serviceabilityCache[provider].api = await checkEkartServiceability({ pickUpPincode, deliveryPincode, paymentMethod: paymentType, codAmount: declaredValue });
+            }
           }
+          serviceable = serviceabilityCache[provider].api;
         } else {
-          // Local says not serviceable → skip API
           continue;
         }
-
-      } // end else (non-BoxdLogistics)
+      }
 
       let isServiceable = serviceable && serviceable.success !== false;
 

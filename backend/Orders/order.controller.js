@@ -334,8 +334,9 @@ const requestPickup = async (req, res) => {
             currentOrder.service_details.courierProviderName === "Delhivery"
           ) {
             const result = await createPickupRequest(
-              currentOrder.warehouse.warehouseName,
-              currentOrder.awb_number
+              currentOrder.warehouse?.warehouseName || "Default Warehouse",
+              currentOrder.awb_number,
+              currentOrder.pickupAddress
             );
             if (result.success) {
               currentOrder.status = "WaitingPickup";
