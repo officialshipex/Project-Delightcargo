@@ -8,7 +8,10 @@ const API_TOKEN = process.env.DEL_API_TOKEN;
 const Order = require("../../../models/newOrder.model");
 const crypto = require("crypto");
 const Wallet = require("../../../models/wallet");
-const { createClientWarehouse } = require("./couriers.controller");
+const {
+  createClientWarehouse,
+  getUniqueWarehouseName,
+} = require("./couriers.controller");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -24,7 +27,7 @@ const createShipmentFunctionDelhivery = async (
 
   try {
     const currentOrder = await Order.findById(id);
-    const createClientWarehouses = await createClientWarehouse(
+    const warehouseCreationResult = await createClientWarehouse(
       currentOrder.pickupAddress
     );
 
@@ -80,7 +83,11 @@ const createShipmentFunctionDelhivery = async (
     // console.log("warehouse", selectedServiceDetails);
     const payloadData = {
       pickup_location: {
-        name: wh.contactName || "Default Warehouse",
+        name:
+          warehouseCreationResult.name ||
+          warehouseCreationResult.data?.name ||
+          getUniqueWarehouseName(currentOrder.pickupAddress) ||
+          "Default Warehouse",
       },
       shipments: [
         {

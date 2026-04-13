@@ -237,23 +237,20 @@ const pincodeServiceability = async (req, res) => {
       )
     );
 
-    let ans = [];
+    const ans = [];
+    const serviceabilityCache = {};
 
     // ✅ Step 5: Iterate through user’s rateCards
     for (let rc of rateCards) {
       if (rc.status !== "Active") continue;
-      // console.log("rate card",rc)
       const provider = rc.courierProviderName;
-      // console.log("provider", provider)
-      const providerCheck = providers.find((p) => {
-        // console.log("p.name.toLowerCase()", p.name.toLowerCase())
-        // console.log("provider.toLowerCase()", provider.toLowerCase())
-        return p.name.toLowerCase() === provider.toLowerCase()
-      });
-      // console.log("Checking serviceability for provider:", providerCheck);
+      const providerCheck = providers.find((p) => p.name.toLowerCase() === provider.toLowerCase());
       if (!providerCheck) continue;
 
-      const serviceable = await providerCheck.check();
+      if (!serviceabilityCache[provider]) {
+        serviceabilityCache[provider] = await providerCheck.check();
+      }
+      const serviceable = serviceabilityCache[provider];
       // console.log("serviceable",serviceable)
       // console.log(`Serviceability for ${provider}:`, serviceable);
       let isServiceable = serviceable && serviceable.success !== false;

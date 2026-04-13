@@ -7,6 +7,7 @@ const plan = require("../../models/Plan.model");
 const { getZone } = require("../../Rate/zoneManagementController");
 const {
   createClientWarehouse,
+  getUniqueWarehouseName,
 } = require("../../AllCouriers/Delhivery/Courier/couriers.controller");
 const {
   fetchBulkWaybills,
@@ -121,8 +122,9 @@ const createDelhiveryShipment = async ({
 
     // Step 6️⃣ Prepare payload
     const pickupWarehouseName =
+      warehouseCreationResult.name ||
       warehouseCreationResult.data?.name ||
-      currentOrder.pickupAddress.contactName;
+      getUniqueWarehouseName(currentOrder.pickupAddress);
     const payment_type =
       currentOrder.paymentDetails.method === "COD" ? "COD" : "Pre-paid";
 

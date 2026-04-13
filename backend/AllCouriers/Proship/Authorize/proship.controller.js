@@ -9,10 +9,14 @@ const getProshipAccessToken = async () => {
   try {
     // console.log("username",PROSHIP_USERNAME);
     // console.log("password",PROSHIP_PASSWORD)
-    const response = await axios.post(`${PROSHIP_BASE_URL}/auth/signin`, {
-      username: PROSHIP_USERNAME,
-      password: PROSHIP_PASSWORD,
-    });
+    const response = await axios.post(
+      `${PROSHIP_BASE_URL}/auth/signin`,
+      {
+        username: PROSHIP_USERNAME,
+        password: PROSHIP_PASSWORD,
+      },
+      { timeout: 8000 }
+    );
     // console.log("response",response.data)
     return response.data.accessToken;
   } catch (error) {

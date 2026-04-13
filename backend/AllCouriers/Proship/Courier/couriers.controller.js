@@ -22,7 +22,10 @@ const checkProshipServiceability = async (payload) => {
         drop_pincode: parseInt(payload.deliveryPincode),
         pickup_pincode: parseInt(payload.pickUpPincode)
       }],
-      { headers: { Authorization: `Bearer ${token}` } }
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 8000
+      }
     );
     // console.log("service", response.data)
     const results = response.data.result || [];
@@ -53,6 +56,10 @@ const checkProshipServiceability = async (payload) => {
     return { success: false, error: error.message };
   }
 };
+// checkProshipServiceability({
+//   pickUpPincode: "110001",
+//   deliveryPincode: "110002"
+// })
 
 const createProshipOrder = async (req, res) => {
   const session = await mongoose.startSession();
@@ -191,6 +198,7 @@ const createProshipOrder = async (req, res) => {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
+      timeout: 10000
     });
 
     console.log("Proship Create Order Response:", response.data);
@@ -297,7 +305,8 @@ const trackProshipOrder = async (awb) => {
         },
         headers: {
           Authorization: `Bearer ${token}`
-        }
+        },
+        timeout: 8000
       }
     );
 
@@ -320,7 +329,8 @@ const cancelProshipOrder = async (awb) => {
 
     // Placeholder for Proship Cancellation API
     const response = await axios.post(`${PROSHIP_BASE_URL}/order/cancel_order`, { waybill: awb }, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 8000
     });
     // return response.data;
     console.log("cancel response", response.data)
