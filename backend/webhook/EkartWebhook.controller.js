@@ -166,7 +166,7 @@ const EkartWebhook = async (req, res) => {
 
         order.tracking.push({
           Instructions: normalizedData.Instructions,
-          Status: normalizedData.Status,
+          status: normalizedData.Status,
           StatusDateTime: normalizedData.StatusDateTime,
           StatusLocation: location || "Unknown",
         });

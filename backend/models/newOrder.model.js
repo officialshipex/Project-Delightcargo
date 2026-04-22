@@ -197,6 +197,28 @@ orderSchema.index({ userId: 1, createdAt: -1 });
 
 const Shipment = mongoose.model("newOrder", orderSchema);
 
+// ── Auto NDR AI Calling Trigger ──────────────────────────────────────────
+orderSchema.pre("save", function (next) {
+  // Check if ndrStatus changed to "Undelivered"
+  if (this.isModified("ndrStatus") && this.ndrStatus === "Undelivered") {
+    this._shouldAutoCallAiNdr = true;
+  }
+  next();
+});
+
+orderSchema.post("save", async function (doc) {
+  if (doc._shouldAutoCallAiNdr) {
+    try {
+      // Lazy load to avoid potential circular dependencies
+      const { autoTriggerNdrAiCall } = require("../aiCalling/autoNdrAiCall");
+      // Fire and forget (don't await to avoid blocking the save/response)
+      autoTriggerNdrAiCall(doc, doc.ndrStatus);
+    } catch (err) {
+      console.error("AI NDR Hook error:", err);
+    }
+  }
+});
+
 module.exports = Shipment;
 
 // 27684

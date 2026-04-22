@@ -55,17 +55,18 @@ const ShreeMarutiWebhook = async (req, res) => {
     console.log("Normalized Webhook Data:", normalizedData);
 
     // ------------------------------------------------
-    // DUPLICATE TRACKING CHECK
+    // DUPLICATE TRACKING CHECK (More robust)
     // ------------------------------------------------
-    const lastTracking = order.tracking[order.tracking.length - 1];
-    if (
-      lastTracking &&
-      lastTracking.Instructions === normalizedData.Instructions &&
-      lastTracking.StatusLocation === (data.location || "Unknown") &&
-      new Date(lastTracking.StatusDateTime).getTime() ===
-      new Date(normalizedData.StatusDateTime).getTime()
-    ) {
-      console.log(`Duplicate tracking entry for AWB ${awb}. Skipping update.`);
+    const isDuplicate = order.tracking.some(
+      (t) =>
+        t.StatusDateTime &&
+        new Date(t.StatusDateTime).getTime() ===
+        new Date(normalizedData.StatusDateTime).getTime() &&
+        t.Instructions === normalizedData.Instructions
+    );
+
+    if (isDuplicate) {
+      console.log(`Duplicate tracking entry for AWB ${awb} at ${normalizedData.StatusDateTime}. Skipping update.`);
       return res.status(200).json({
         success: true,
         message: "Duplicate tracking entry, update skipped",
@@ -94,19 +95,10 @@ const ShreeMarutiWebhook = async (req, res) => {
       if (status === "RTO" || status === "RTO_REQUESTED") {
         order.status = "RTO";
         order.ndrStatus = "RTO";
-      }
-
-      if (status === "RTO_OUT_FOR_DELIVERY") {
+      } else if (status === "RTO_OUT_FOR_DELIVERY" || status === "RTO_IN_TRANSIT") {
         order.status = "RTO In-transit";
         order.ndrStatus = "RTO In-transit";
-      }
-
-      if (status === "RTO_IN_TRANSIT") {
-        order.status = "RTO In-transit";
-        order.ndrStatus = "RTO In-transit";
-      }
-
-      if (status === "RTO_DELIVERED") {
+      } else if (status === "RTO_DELIVERED") {
         order.status = "RTO Delivered";
         order.ndrStatus = "RTO Delivered";
       }
@@ -115,9 +107,7 @@ const ShreeMarutiWebhook = async (req, res) => {
        ==============   FORWARD FLOW HANDLING   ===============
        ======================================================== */
       if (status === "NEW") order.status = "Booked";
-
       if (status === "NOT_PICKED_UP") order.status = "Not Picked";
-
       if (status === "READY_FOR_DISPATCH") order.status = "Ready To Ship";
 
       const isPickupCancelled =
@@ -213,7 +203,6 @@ const ShreeMarutiWebhook = async (req, res) => {
       }
 
       if (status === "LOST") order.status = "Lost";
-
       if (status === "ON_HOLD") order.status = "In-transit";
 
       /* ========================================================
@@ -233,8 +222,6 @@ const ShreeMarutiWebhook = async (req, res) => {
           lastNdrDate = new Date(lastAction.date).getTime();
         }
 
-        const attemptCount = order.ndrHistory.length + 1;
-
         // store reason always
         order.ndrReason = {
           date: normalizedData.StatusDateTime,
@@ -242,61 +229,32 @@ const ShreeMarutiWebhook = async (req, res) => {
         };
 
         /* 
-    ───────────────────────────────────────────────
-    BLOCK WRONG NDR UPDATES:
-    If NDR was already raised → ndrStatus = Action_Requested
-    And new event is same or older → ignore
-    ───────────────────────────────────────────────
-  */
-        if (
-          order.ndrStatus === "Action_Requested" &&
-          lastNdrDate &&
-          currentDate <= lastNdrDate
-        ) {
-          console.log("NDR IGNORE: Duplicate or older UNDELIVERED update");
-
-          // do NOT change ndrStatus
-          // do NOT set reattempt true
-          // do NOT push NDR history again
-
-          // only save tracking
-          order.tracking.push({
-            Instructions: normalizedData.Instructions,
-            Status: normalizedData.Status,
-            StatusDateTime: normalizedData.StatusDateTime,
-            StatusLocation: data.location || "Unknown",
-          });
-          await order.save();
-          return res.status(200).json({
-            success: true,
-            message: "Webhook processed (ignored duplicate NDR)",
-          });
-        }
-
-        /*
-    ───────────────────────────────────────────────
-    VALID NDR CASE:
-    Only if:
-    - ndrStatus is NOT Action_Requested
-    - currentDate > lastNdrDate
-    - attemptCount <= 2
-    ───────────────────────────────────────────────
-  */
-
+          ───────────────────────────────────────────────
+          VALID NDR CASE:
+          Only if:
+          - ndrStatus is NOT Action_Requested (or it's a newer update)
+          - currentDate > lastNdrDate
+          - attemptCount <= 2
+          ───────────────────────────────────────────────
+        */
         if (!lastNdrDate || currentDate > lastNdrDate) {
-          order.reattempt = true;
-
-          order.ndrHistory.push({
-            actions: [
-              {
-                action: `NDR ${attemptCount} Raised`,
-                actionBy: order.provider,
-                remark: normalizedData.StrRemarks,
-                source: order.provider,
-                date: normalizedData.StatusDateTime,
-              },
-            ],
-          });
+          const attemptCount = order.ndrHistory.length + 1;
+          if (attemptCount <= 3) { // Limit to 3 NDR attempts as per business logic
+            order.reattempt = true;
+            order.ndrHistory.push({
+              actions: [
+                {
+                  action: `NDR ${attemptCount} Raised`,
+                  actionBy: order.provider,
+                  remark: normalizedData.StrRemarks,
+                  source: order.provider,
+                  date: normalizedData.StatusDateTime,
+                },
+              ],
+            });
+          }
+        } else {
+          console.log("NDR IGNORE: Duplicate or older UNDELIVERED update based on date.");
         }
       }
     }
@@ -306,7 +264,7 @@ const ShreeMarutiWebhook = async (req, res) => {
        ======================================================== */
     order.tracking.push({
       Instructions: normalizedData.Instructions,
-      Status: normalizedData.Status,
+      status: normalizedData.Status, // 🔹 Use lowercase 'status' to match schema
       StatusDateTime: normalizedData.StatusDateTime,
       StatusLocation: data.location || "Unknown",
     });
@@ -316,7 +274,7 @@ const ShreeMarutiWebhook = async (req, res) => {
     // 🔹 Trigger Notifications if status changed via Webhook
     if (order.status !== oldStatus) {
       console.log(`🔔 Webhook: Status changed from ${oldStatus} to ${order.status}. Sending notifications...`);
-      
+
       const notificationData = {
         userId: order.userId,
         awb_number: order.awb_number,
@@ -324,9 +282,9 @@ const ShreeMarutiWebhook = async (req, res) => {
         date: new Date(),
         mobile_number: order.receiverAddress?.phoneNumber, // 🔹 Corrected key
         email: order.receiverAddress?.email,              // 🔹 Corrected key
-        
-        
-        
+
+
+
       };
 
       // Fire and forget - failures won't stop the webhook processing

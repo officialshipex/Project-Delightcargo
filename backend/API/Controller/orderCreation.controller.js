@@ -44,7 +44,7 @@ const externalOrderSchema = Joi.object({
         quantity: Joi.number().required(),
         name: Joi.string().required(),
         sku: Joi.string().optional(),
-        unitPrice: Joi.string().required(),
+        unitPrice: Joi.number().required(),
       })
     )
     .min(1)
@@ -96,6 +96,26 @@ const orderCreationController = async (req, res) => {
     } = value;
 
     const userId = req.user?._id || "external";
+    
+    // 💰 Calculate and validate total amount based on products
+    const calculatedTotalAmount = productDetails.reduce((acc, item) => {
+      return acc + (item.unitPrice * item.quantity);
+    }, 0);
+
+    // If amount is provided, it must match the calculated total
+    if (paymentDetails.amount !== undefined && paymentDetails.amount !== null) {
+      if (Math.abs(paymentDetails.amount - calculatedTotalAmount) > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: "Payment amount does not match the product unit prices and quantities.",
+          details: `Expected: ${calculatedTotalAmount}, Provided: ${paymentDetails.amount}`,
+        });
+      }
+    } else {
+      // If amount is not provided (e.g., optional for COD), set it to the calculated total
+      paymentDetails.amount = calculatedTotalAmount;
+    }
+
 
     // 🧩 Check if user exists and KYC is completed
     const currentUser = await User.findById(userId);

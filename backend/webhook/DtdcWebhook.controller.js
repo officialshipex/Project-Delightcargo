@@ -81,7 +81,7 @@ const DTDCWebhook = async (req, res) => {
 
       // Add into tracking history
       order.tracking.push({
-        Status: normalizedData.Status,
+        status: normalizedData.Status,
         StatusDateTime: normalizedData.StatusDateTime,
         StatusLocation: normalizedData.StatusLocation,
         Instructions: normalizedData.Instructions,

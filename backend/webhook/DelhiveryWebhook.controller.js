@@ -88,10 +88,10 @@ const DelhiveryWebhook = async (req, res) => {
       const dbMapping = statusDoc.data.find(
         (d) =>
           normalizeString(d.scan_type) ===
-            normalizeString(normalizedData.StatusType) &&
+          normalizeString(normalizedData.StatusType) &&
           normalizeString(d.scan) === normalizeString(normalizedData.Status) &&
           normalizeString(d.instructions) ===
-            normalizeString(normalizedData.Instructions),
+          normalizeString(normalizedData.Instructions),
       );
 
       if (dbMapping) {
@@ -168,7 +168,7 @@ const DelhiveryWebhook = async (req, res) => {
       }
     }
     order.tracking.push({
-      Status: normalizedData.Status,
+      status: normalizedData.Status,
       StatusDateTime: normalizedData.StatusDateTime,
       StatusLocation: normalizedData.StatusLocation,
       Instructions: normalizedData.Instructions,
@@ -180,7 +180,7 @@ const DelhiveryWebhook = async (req, res) => {
     // 🔹 Trigger Notifications if status changed via Webhook
     if (order.status !== oldStatus) {
       console.log(`🔔 Webhook: Status changed from ${oldStatus} to ${order.status}. Sending notifications...`);
-      
+
       const notificationData = {
         userId: order.userId,
         awb_number: order.awb_number,
@@ -188,9 +188,9 @@ const DelhiveryWebhook = async (req, res) => {
         date: new Date(),
         mobile_number: order.receiverAddress?.phoneNumber, // 🔹 Corrected key
         email: order.receiverAddress?.email,              // 🔹 Corrected key
-        
-        
-        
+
+
+
       };
 
       // Fire and forget - failures won't stop the webhook processing
