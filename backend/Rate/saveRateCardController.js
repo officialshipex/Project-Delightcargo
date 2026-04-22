@@ -422,13 +422,7 @@ const exportDemoRatecard = async (req, res) => {
 
     worksheet.columns = [
       { header: "Plan Name", key: "planName", width: 20 },
-      {
-        header: "Courier Provider Name",
-        key: "courierProviderName",
-        width: 25,
-      },
       { header: "Courier Service Name", key: "courierServiceName", width: 25 },
-      { header: "Type", key: "type", width: 10 },
       { header: "Type Text", key: "typeText", width: 15 },
       { header: "weight", key: "weight", width: 12 },
       { header: "zoneA", key: "zoneA", width: 10 },
@@ -441,11 +435,10 @@ const exportDemoRatecard = async (req, res) => {
     ];
 
     // --- First ratecard: Basic and Additional ---
+    // --- First ratecard: Basic and Additional ---
     worksheet.addRow({
       planName: "Silver",
-      courierProviderName: "Bluedart",
       courierServiceName: "Bluedart Air",
-      type: "1",
       typeText: "Basic",
       weight: "0.5",
       zoneA: "56.00",
@@ -459,9 +452,7 @@ const exportDemoRatecard = async (req, res) => {
 
     worksheet.addRow({
       planName: "Silver",
-      courierProviderName: "Bluedart",
       courierServiceName: "Bluedart Air",
-      type: "2",
       typeText: "Additional",
       weight: "0.5",
       zoneA: "42.40",
@@ -473,15 +464,14 @@ const exportDemoRatecard = async (req, res) => {
       codPercentage: "1.97",
     });
 
+
     // --- Add a blank row for visual separation ---
     // worksheet.addRow({});
 
     // --- Second ratecard: Basic and Additional ---
     worksheet.addRow({
       planName: "Gold",
-      courierProviderName: "Xpressbees",
       courierServiceName: "Xpressbees Air",
-      type: "1",
       typeText: "Basic",
       weight: "0.5",
       zoneA: "48.00",
@@ -495,9 +485,7 @@ const exportDemoRatecard = async (req, res) => {
 
     worksheet.addRow({
       planName: "Gold",
-      courierProviderName: "Xpressbees",
       courierServiceName: "Xpressbees Air",
-      type: "2",
       typeText: "Additional",
       weight: "0.5",
       zoneA: "43.00",
@@ -508,6 +496,7 @@ const exportDemoRatecard = async (req, res) => {
       codCharge: "32.78",
       codPercentage: "1.70",
     });
+
 
     res.setHeader(
       "Content-Type",
@@ -598,27 +587,36 @@ const uploadRatecard = async (req, res) => {
       const rowNum = i + 2;
 
       const plan = normalize(row["Plan Name"]);
-      const provider = normalize(row["Courier Provider Name"]);
       const service = normalize(row["Courier Service Name"]);
 
       if (!planSet.has(plan)) {
         errors.push(`Row ${rowNum}: Invalid Plan`);
         continue;
       }
-      if (!providerSet.has(provider)) {
-        errors.push(`Row ${rowNum}: Invalid Provider`);
-        continue;
-      }
-      if (!serviceSet.has(service)) {
-        errors.push(`Row ${rowNum}: Invalid Service (${service})`);
+
+      // Fetch matching service to get provider
+      const matchedService = services.find(s => normalize(s.name) === service);
+      if (!matchedService) {
+        errors.push(`Row ${rowNum}: Invalid Service (${row["Courier Service Name"]})`);
         continue;
       }
 
-      const key = `${row["Plan Name"]}__${row["Courier Provider Name"]}__${row["Courier Service Name"]}`;
+      const providerName = matchedService.provider;
+      const matchedProvider = providers.find(p => normalize(p.courierProvider) === normalize(providerName));
+
+      if (!matchedProvider || matchedProvider.status === "Disable") {
+        errors.push(`Row ${rowNum}: Provider ${providerName} is either invalid or disabled`);
+        continue;
+      }
+
+      const provider = normalize(providerName);
+
+
+      const key = `${row["Plan Name"]}__${providerName}__${row["Courier Service Name"]}`;
       if (!grouped[key]) {
         grouped[key] = {
           plan: row["Plan Name"],
-          courierProviderName: row["Courier Provider Name"],
+          courierProviderName: providerName,
           courierServiceName: row["Courier Service Name"],
           weightPriceBasic: [],
           weightPriceAdditional: [],
@@ -636,14 +634,14 @@ const uploadRatecard = async (req, res) => {
         zoneE: toFixedNum(row["zoneE"]),
       };
 
-      const type = String(row["Type"] || "").toLowerCase().trim();
-      if (type === "basic" || type === "1") {
+      const typeText = normalize(row["Type Text"] || "");
+      if (typeText === "basic") {
         grouped[key].weightPriceBasic.push(weightObj);
-      } else if (type === "additional" || type === "2") {
+      } else if (typeText === "additional") {
         grouped[key].weightPriceAdditional.push(weightObj);
       } else {
         errors.push(
-          `Row ${rowNum}: Invalid Type (must be Basic/1 or Additional/2)`
+          `Row ${rowNum}: Invalid Type Text (must be Basic or Additional)`
         );
       }
     }

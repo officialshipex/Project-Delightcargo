@@ -146,7 +146,7 @@ const AmazonShippingWebhook = async (req, res) => {
     // TRACKING PUSH
     // ---------------------------
     order.tracking.push({
-      Status: order.status,
+      status: order.status,
       Instructions: eventCode,
       StatusDateTime: eventTime,
       StatusLocation: detail.location

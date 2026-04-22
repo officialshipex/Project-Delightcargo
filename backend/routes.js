@@ -62,10 +62,12 @@ const referralRoute = require("./Referral/referal.router")
 const Notification = require("./notification/notification.router")
 const webhook = require("./webhook/webhook.router")
 const Invoice = require("./Invoice/invoice.router")
+const aiCallingRouter = require("./aiCalling/aiCalling.router")
 const B2B = require("./B2B/routes");
 router.use("/b2b", B2B);
 
 router.use("/notification", Notification);
+router.use("/ai-calling", aiCallingRouter);
 
 router.use("/referral", referralRoute);
 router.use("/courier", CourierRouter);
@@ -172,6 +174,9 @@ router.use("/support", ticketRoutes);
 //API routes
 const api = require("./API/Router/api.router");
 const { saveZipypost } = require("./AllCouriers/Zipypost/Authorize/zipyPost.controller");
+const announcementRouter = require("./announcement/announcement.route");
+router.use("/announcement", announcementRouter);
+
 router.use("/api", api);
 
 module.exports = router;

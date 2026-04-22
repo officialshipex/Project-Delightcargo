@@ -319,7 +319,7 @@ const ProshipWebhook = async (req, res) => {
             console.log(`Proship Webhook: Duplicate/older NDR for AWB ${awb}, skipping NDR push.`);
             order.tracking.push({
               Instructions: remark,
-              Status: statusDescription,
+              status: statusDescription,
               StatusDateTime: timestamp,
               StatusLocation: location,
             });

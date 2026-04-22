@@ -169,6 +169,12 @@ const notificationSettingSchema = new mongoose.Schema(
     emailCancelledUpdatedAt: { type: Date },
     emailCancelledTemplate: { type: String, default: "" },
     emailCancelledSubject: { type: String, default: "" },
+
+    // 🔹 AI Calling Settings
+    isAiOrderVerifyEnable: { type: Boolean, default: false },
+    isAdminAiOrderVerifyEnable: { type: Boolean, default: true },
+    isAiNdrFollowupEnable: { type: Boolean, default: false },
+    isAdminAiNdrFollowupEnable: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
