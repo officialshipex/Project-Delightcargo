@@ -30,6 +30,7 @@ const {
 const { checkEkartServiceability } = require("../AllCouriers/Ekart/Couriers/couriers.controller.js");
 const { checkServiceabilityBoxdLogistics } = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller.js");
 const { checkProshipServiceability } = require("../AllCouriers/Proship/Courier/couriers.controller.js");
+const { checkServiceabilityShipRocket } = require("../AllCouriers/ShipRocket/Courier/couriers.controller.js");
 
 const calculateRate = async (req, res) => {
   try {
@@ -82,7 +83,7 @@ const calculateRate = async (req, res) => {
       if (!activeCouriersLower.includes(provider.toLowerCase())) continue;
       if (rc.status !== "Active") continue;
 
-      if (!["Delhivery", "Shree Maruti", "Dtdc", "Smartship", "Amazon Shipping", "EcomExpress", "Zipypost", "Ekart", "BoxdLogistics", "Proship"].includes(provider)) continue;
+      if (!["Delhivery", "Shree Maruti", "Dtdc", "Smartship", "Amazon Shipping", "EcomExpress", "Zipypost", "Ekart", "BoxdLogistics", "Proship", "Shiprocket"].includes(provider)) continue;
 
       if (provider === "BoxdLogistics") {
         if (!serviceabilityCache[provider]) {
@@ -127,6 +128,21 @@ const calculateRate = async (req, res) => {
           }
         }
         if (!proshipServiceable) continue;
+        serviceable = { success: true };
+      } else if (provider === "Shiprocket") {
+        const sName = rc.courierServiceName;
+        const cacheKey = `${provider}_${sName}`;
+        if (!serviceabilityCache[cacheKey]) {
+          const payload = {
+            serviceName: sName,
+            origin: pickUpPincode,
+            destination: deliveryPincode,
+            payment_type: paymentType === "COD",
+            weight: applicableWeight,
+          };
+          serviceabilityCache[cacheKey] = await checkServiceabilityShipRocket(payload);
+        }
+        if (!serviceabilityCache[cacheKey]?.success) continue;
         serviceable = { success: true };
       } else {
         if (!serviceabilityCache[provider]) {

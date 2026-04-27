@@ -29,12 +29,10 @@ const getAllCouriers = async (req, res) => {
 
 const updateStatusController = async (req, res) => {
   try {
-    // const { provider } = req.params; // e.g., 'DTDC'
-    const { provider,status } = req.body;     // 'Enable' or 'Disable'
+    const { id, status } = req.body;
 
-    // Find and update by provider field
-    const courier = await AllCourier.findOneAndUpdate(
-      { courierProvider: provider },
+    const courier = await AllCourier.findByIdAndUpdate(
+      id,
       { status },
       { new: true }
     );

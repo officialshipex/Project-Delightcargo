@@ -69,6 +69,9 @@ const {
 const {
   removeFromPickupManifest,
 } = require("./scheduledPickup.controller");
+const {
+  cancelOrder: cancelShiprocketOrder,
+} = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 // Create a shipment
 const newOrder = async (req, res) => {
   try {
@@ -1606,19 +1609,19 @@ const cancelOrdersAtBooked = async (req, res) => {
       if (result.error) {
         return res.status(400).send({ error: "Failed to cancel order" });
       }
-    } else if (currentOrder.provider === "Shiprocket") {
-      const result = await cancelOrder(currentOrder.awb_number);
-      if (!result.success) {
-        return {
-          error: "Failed to cancel shipment with Shiprocket",
+    } else if (currentOrder.provider === "Shiprocket" || currentOrder.partner === "Shiprocket") {
+      const result = await cancelShiprocketOrder(currentOrder.awb_number);
+      if (result.error) {
+        return res.status(400).json({
+          error: result.error || "Failed to cancel shipment with Shiprocket",
           details: result,
           orderId: currentOrder._id,
-        };
-      } else if (currentOrder.provider === "Nimuspost") {
-        const result = await cancelShipmentXpressBees(currentOrder.awb_number);
-        if (result.error) {
-          return res.status(400).send({ error: "Failed to cancel order" });
-        }
+        });
+      }
+    } else if (currentOrder.provider === "Nimuspost") {
+      const result = await cancelShipmentXpressBees(currentOrder.awb_number);
+      if (result.error) {
+        return res.status(400).send({ error: "Failed to cancel order" });
       }
     } else if (currentOrder.provider === "Delhivery") {
       // console.log("I am in it");
@@ -1687,8 +1690,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       if (result.error) {
         return res.status(400).send({ error: result.error });
       }
-    }
-    else {
+    } else {
       return {
         error: "Unsupported courier provider",
         orderId: currentOrder._id,
@@ -2113,6 +2115,9 @@ const bulkCancelOrder = async (req, res) => {
             break;
           case "Proship":
             cancelResponse = await cancelProshipOrder(currentOrder.awb_number);
+            break;
+          case "Shiprocket":
+            cancelResponse = await cancelShiprocketOrder(currentOrder.awb_number);
             break;
           default:
             failedCount++;

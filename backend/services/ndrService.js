@@ -1,6 +1,5 @@
 const axios = require("axios");
 const DELHIVERY_API_URL = process.env.DELHIVERY_URL;
-const DEL_API_TOKEN = process.env.DEL_API_TOKEN;
 const Order = require("../models/newOrder.model");
 const moment = require("moment");
 const FormData = require("form-data");
@@ -22,6 +21,7 @@ const {
 const {
   getAccessToken: getEkartAccessToken,
 } = require("../AllCouriers/Ekart/Authorize/Ekart.controller");
+const { getDelhiveryApiKey } = require("../AllCouriers/Delhivery/Authorize/saveCourierContoller");
 
 const ordersDatabase = [
   {
@@ -414,7 +414,8 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
       ],
     };
 
-    console.log("payload", payload, DEL_API_TOKEN);
+    const apiKey = await getDelhiveryApiKey(order.courierName || order.provider);
+    console.log("payload", payload, apiKey);
     const response = await axios.post(
       "https://track.delhivery.com/api/p/update",
       payload,
@@ -422,7 +423,7 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
-          Authorization: `Token ${DEL_API_TOKEN}`,
+          Authorization: `Token ${apiKey}`,
         },
       }
     );
@@ -437,7 +438,7 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
     const ndrStatusResponse = await axios.get(
       `https://track.delhivery.com/api/cmu/get_bulk_upl/${request_id}?verbose=true`,
       {
-        headers: { Authorization: `Token ${DEL_API_TOKEN}` },
+        headers: { Authorization: `Token ${apiKey}` },
       }
     );
     // console.log("ndr delhivery",ndrStatusResponse.data.failed_wbns)

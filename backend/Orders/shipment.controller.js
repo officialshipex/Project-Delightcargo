@@ -3,8 +3,8 @@ const {
   getServiceablePincodesData,
 } = require("../AllCouriers/NimbusPost/Couriers/couriers.controller");
 const {
-  checkServiceability,
-} = require("../AllCouriers/ShipRocket/MainServices/mainServices.controller");
+  checkServiceabilityShipRocket,
+} = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 const {
   checkServiceabilityXpressBees,
 } = require("../AllCouriers/Xpressbees/MainServices/mainServices.controller");
@@ -312,6 +312,19 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         }
       }
       return result;
+    }
+    if (service.provider.toLowerCase() === "shiprocket") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
+      const payload = {
+        serviceName: service.name,
+        origin: pickupPincode,
+        destination: deliveryPincode,
+        payment_type: paymentMethod === "COD",
+        weight: (currentOrder.packageDetails?.applicableWeight || 0),
+      };
+      return await checkServiceabilityShipRocket(payload);
     }
 
     // Default

@@ -50,6 +50,7 @@ const saveSmartShip = async (req, res) => {
     courierProvider,
     CODDays,
     status,
+    email: username
   };
 
   try {

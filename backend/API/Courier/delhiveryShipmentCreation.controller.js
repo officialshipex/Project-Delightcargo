@@ -11,15 +11,16 @@ const {
 } = require("../../AllCouriers/Delhivery/Courier/couriers.controller");
 const {
   fetchBulkWaybills,
+  getDelhiveryApiKey,
 } = require("../../AllCouriers/Delhivery/Authorize/saveCourierContoller");
 const url = process.env.DELHIVERY_URL;
-const API_TOKEN = process.env.DEL_API_TOKEN;
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
 const createDelhiveryShipment = async ({
   id,
   provider,
+  courierName,
   finalCharges,
   courierServiceName,
   priceBreakup
@@ -61,9 +62,12 @@ const createDelhiveryShipment = async ({
 
     const currentWallet = users.Wallet;
 
+    // Fetch API Key for the specific account
+    const apiKey = await getDelhiveryApiKey(courierName || provider);
+
     // Step 3️⃣ Fetch waybills & zone in parallel
     const [waybills, zone] = await Promise.all([
-      fetchBulkWaybills(1),
+      fetchBulkWaybills(1, apiKey),
       getZone(
         currentOrder.pickupAddress.pinCode,
         currentOrder.receiverAddress.pinCode
@@ -84,7 +88,8 @@ const createDelhiveryShipment = async ({
 
     // Step 4️⃣ Create warehouse
     const warehouseCreationResult = await createClientWarehouse(
-      currentOrder.pickupAddress
+      currentOrder.pickupAddress,
+      apiKey
     );
     if (!warehouseCreationResult.success) {
       await Order.findByIdAndUpdate(id, { status: "new" });
@@ -188,7 +193,7 @@ const createDelhiveryShipment = async ({
     // Step 8️⃣ Create shipment via API
     const response = await axios.post(`${url}/api/cmu/create.json`, payload, {
       headers: {
-        Authorization: `Token ${API_TOKEN}`,
+        Authorization: `Token ${apiKey}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       timeout: 8000,
@@ -216,7 +221,8 @@ const createDelhiveryShipment = async ({
             cancelledAtStage: null,
             awb_number: result.waybill,
             shipment_id: result.refnum,
-            provider,
+            provider: provider,
+            courierName: courierName || provider,
             totalFreightCharges: balanceToBeDeducted,
             courierServiceName,
             shipmentCreatedAt: new Date(),

@@ -1,0 +1,275 @@
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+}
+
+const mongoose = require("mongoose");
+const AllCourier = require("../../../models/AllCourierSchema");
+const CourierService = require("../../../models/CourierService.Schema");
+const Order = require("../../../models/newOrder.model");
+const User = require("../../../models/User.model");
+const Wallet = require("../../../models/wallet");
+const { getAuthToken } = require("../Authorize/shiprocket.controller");
+const { getZone } = require("../../../Rate/zoneManagementController");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
+const createShiprocketShipment = require("../../../API/Courier/shiprocketShipmentCreation.controller");
+const axios = require("axios");
+
+const BASE_URL = `${process.env.SHIPROCKET_URL}/v1/external`;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const cleanPhone = (phone) => {
+  const digits = (phone || "").replace(/\D/g, "");
+  return digits.length > 10 ? digits.slice(-10) : digits;
+};
+
+// ─── Courier Setup (Admin) ────────────────────────────────────────────────────
+const getAllActiveCourierServices = async (req, res) => {
+  try {
+    const token = await getAuthToken();
+    if (!token) return res.status(500).json({ message: "ShipRocket authentication failed." });
+
+    const response = await axios.get(`${BASE_URL}/courier/courierListWithCounts?type=active`, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 10000,
+    });
+
+    if (response?.data?.courier_data) {
+      const allServices = response.data.courier_data.map((element) => ({
+        service: element.name,
+        provider_courier_id: element.id,
+      }));
+      return res.status(200).json(allServices);
+    }
+
+    return res.status(400).json({ message: "Failed to fetch courier services." });
+  } catch (error) {
+    console.error("ShipRocket getAllActiveCourierServices Error:", error.response?.data || error.message);
+    return res.status(500).json({
+      message: "Failed to fetch courier services.",
+      error: error.response?.data || error.message,
+    });
+  }
+};
+
+const addService = async (req, res) => {
+  try {
+    const { service: name, provider_courier_id } = req.body;
+    if (!name) return res.status(400).json({ message: "Service name is required." });
+
+    const currCourier = await AllCourier.findOne({ courierProvider: "Shiprocket" });
+    if (!currCourier) return res.status(404).json({ message: "ShipRocket not configured." });
+
+    const existing = await CourierService.findOne({ provider: "Shiprocket", name });
+    if (existing) return res.status(400).json({ message: `${name} already exists.` });
+
+    const isAir = /air/i.test(name);
+    const courierType = isAir ? "Domestic (Air)" : "Domestic (Surface)";
+
+    const newService = new CourierService({
+      provider: "Shiprocket",
+      courier: name,
+      name,
+      courierType,
+      status: "Enable",
+    });
+
+    await newService.save();
+    return res.status(201).json({ message: `${name} added successfully.`, provider_courier_id });
+  } catch (error) {
+    console.error("ShipRocket addService Error:", error.message);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+// ─── Main Services ────────────────────────────────────────────────────────────
+const getAllPickupLocations = async () => {
+  try {
+    const token = await getAuthToken();
+    if (!token) return null;
+    const response = await axios.get(`${BASE_URL}/settings/company/pickup`, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 10000,
+    });
+    return response.data?.data?.shipping_address || [];
+  } catch (error) {
+    console.error("ShipRocket getAllPickupLocations Error:", error.response?.data || error.message);
+    return null;
+  }
+};
+
+const addPickupLocation = async (pickupData) => {
+  try {
+    const token = await getAuthToken();
+    if (!token) return null;
+
+    const requestData = {
+      pickup_location: pickupData.warehouseName || pickupData.contactName,
+      name: pickupData.contactName || "",
+      email: pickupData.email || "info@shipex.in",
+      phone: cleanPhone(pickupData.phoneNumber) || "9999999999",
+      address: pickupData.address,
+      address_2: pickupData.address2 || "",
+      city: pickupData.city,
+      state: pickupData.state,
+      country: "India",
+      pin_code: String(pickupData.pinCode),
+    };
+
+    const response = await axios.post(`${BASE_URL}/settings/company/addpickup`, requestData, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 10000,
+    });
+    return response.data;
+  } catch (error) {
+    if (error.response?.status !== 422) {
+      console.error("ShipRocket addPickupLocation Error:", error.response?.data || error.message);
+    }
+    return null;
+  }
+};
+
+const requestShipmentPickup = async (shipment_id) => {
+  try {
+    const token = await getAuthToken();
+    if (!token) return { success: false, message: "Auth failed" };
+
+    const response = await axios.post(`${BASE_URL}/courier/generate/pickup`, { shipment_id: [shipment_id] }, {
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      timeout: 15000,
+    });
+
+    if (response.data?.pickup_status === 1 || response.data?.response?.pickup_scheduled_date) {
+      return { success: true, data: response.data, message: "Pickup scheduled successfully." };
+    }
+    return { success: false, message: "Pickup scheduling failed.", data: response.data };
+  } catch (error) {
+    console.error("ShipRocket requestPickup Error:", error.response?.data || error.message);
+    return { success: false, message: error.response?.data?.message || error.message };
+  }
+};
+
+const checkServiceabilityShipRocket = async (payload) => {
+  try {
+    const token = await getAuthToken();
+    if (!token) return { success: false };
+
+    const { serviceName, origin, destination, payment_type, weight } = payload;
+    const cod = payment_type === true ? 1 : 0;
+
+    const response = await axios.get(`${BASE_URL}/courier/serviceability/`, {
+      headers: { Authorization: `Bearer ${token}` },
+      params: {
+        pickup_postcode: origin,
+        delivery_postcode: destination,
+        cod,
+        weight: weight || "0.5"
+      },
+      timeout: 10000,
+    });
+
+    const available = response.data?.data?.available_courier_companies || [];
+    const matched = available.filter((item) => item.courier_name === serviceName && item.blocked === 0);
+    return { success: matched.length > 0 };
+  } catch (error) {
+    console.error("ShipRocket checkServiceability Error:", error.response?.data || error.message);
+    return { success: false, message: error.message };
+  }
+};
+
+const getTrackingByAWB = async (awb_code) => {
+  try {
+    const token = await getAuthToken();
+    if (!token) return { success: false, data: [] };
+
+    const response = await axios.get(`${BASE_URL}/courier/track/awb/${awb_code}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 10000,
+    });
+
+    const trackingData = response.data?.tracking_data;
+    if (!trackingData) return { success: false, data: [] };
+
+    const shipment = trackingData.shipment_track?.[0] || {};
+    const activities = trackingData.shipment_track_activities || [];
+    if (!activities.length) return { success: false, data: [] };
+
+    const normalised = activities.map((a) => ({
+      current_status: a.status || "",
+      location: a.location || "",
+      timestamp: a.date || null,
+      instructions: a.activity || a.status || "",
+      shipment_status: shipment.shipment_status || null,
+    }));
+
+    return { success: true, data: normalised, shipment_status: shipment.shipment_status || null };
+  } catch (error) {
+    console.error("ShipRocket getTrackingByAWB Error:", error.response?.data || error.message);
+    return { success: false, data: [] };
+  }
+};
+
+const cancelOrder = async (awb_number) => {
+  try {
+    const token = await getAuthToken();
+    if (!token) return { success: false, message: "Auth failed" };
+
+    const response = await axios.post(`${BASE_URL}/orders/cancel/shipment/awbs`, { awbs: [String(awb_number)] }, {
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      timeout: 15000,
+    });
+    return { success: true, data: response.data };
+  } catch (error) {
+    console.error("ShipRocket cancelOrder Error:", error.response?.data || error.message);
+    return { success: false, error: error.response?.data || error.message };
+  }
+};
+
+const generateLabel = async (shipment_id) => {
+  try {
+    const token = await getAuthToken();
+    if (!token) return null;
+    const response = await axios.get(`${BASE_URL}/courier/generate/label`, {
+      headers: { Authorization: `Bearer ${token}` },
+      params: { shipment_id },
+      timeout: 15000,
+    });
+    return response.data?.label_url || null;
+  } catch (error) {
+    console.error("ShipRocket generateLabel Error:", error.response?.data || error.message);
+    return null;
+  }
+};
+
+const createCustomOrder = async (req, res) => {
+  try {
+    const { id, finalCharges, courierServiceName, provider, priceBreakup } = req.body;
+    
+    const result = await createShiprocketShipment({
+      id,
+      provider: provider || "Shiprocket",
+      finalCharges,
+      courierServiceName,
+      priceBreakup
+    });
+
+    if (result.success) {
+      return res.status(200).json(result);
+    } else {
+      return res.status(400).json(result);
+    }
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+module.exports = {
+  getAllActiveCourierServices,
+  addService,
+  createCustomOrder,
+  cancelOrder,
+  checkServiceabilityShipRocket,
+  requestShipmentPickup,
+  getTrackingByAWB,
+  getAllPickupLocations,
+  generateLabel,
+};

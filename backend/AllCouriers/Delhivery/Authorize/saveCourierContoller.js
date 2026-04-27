@@ -1,32 +1,63 @@
-if(process.env.NODE_ENV!="production"){
-require('dotenv').config();
+if (process.env.NODE_ENV != "production") {
+    require('dotenv').config();
 }
 const axios = require('axios');
 
-const AllCourier=require("../../../models/AllCourierSchema");
+const AllCourier = require("../../../models/AllCourierSchema");
 const { getUniqueId } = require("../../getUniqueId");
 
-const API_TOKEN = process.env.DEL_API_TOKEN;
-const BASE_URL=process.env.DELHIVERY_URL;
+const BASE_URL = process.env.DELHIVERY_URL;
+
+const getDelhiveryApiKey = async (courierName) => {
+    try {
+        let courier;
+        if (courierName) {
+            courier = await AllCourier.findOne({ courierName: courierName, courierProvider: 'Delhivery' });
+        } else {
+            // If no specific courierName is provided, get the first active Delhivery account
+            courier = await AllCourier.findOne({ courierProvider: 'Delhivery', status: 'active' });
+            
+            // If no active one found, just get the first one
+            if (!courier) {
+                courier = await AllCourier.findOne({ courierProvider: 'Delhivery' });
+            }
+        }
+        
+        // console.log("courier found:", courier ? courier.courierName : "None, using fallback");
+        return courier ? courier.apiKey : process.env.DEL_API_TOKEN;
+    } catch (error) {
+        console.error("Error fetching Delhivery API key:", error);
+        return process.env.DEL_API_TOKEN;
+    }
+};
 
 const getToken = async (req, res) => {
     const { apiKey } = req.body.credentials;  // Destructure apiKey from the request body
     const { courierName, courierProvider, CODDays, status } = req.body;  // Destructure courier data from the request body
 
-    // Validate if the API token matches the provided apiKey
-    if (API_TOKEN !== apiKey) {
-        // If the token does not match, return an unauthorized response
-        return res.status(400).json({ message: 'Unauthorized access. Invalid API key.' });
-    }
-
-    const courierData = {
-        courierName,
-        courierProvider,
-        CODDays,
-        status,
-    };
+    // Removed manual token validation to allow multiple accounts
 
     try {
+        // Check if an account with the same courierName already exists
+        const existingByName = await AllCourier.findOne({ courierName });
+        if (existingByName) {
+            return res.status(400).json({ message: `Courier account with name '${courierName}' already exists.` });
+        }
+
+        // Check if an account with the same apiKey already exists for Delhivery
+        const existingByApiKey = await AllCourier.findOne({ apiKey, courierProvider: 'Delhivery' });
+        if (existingByApiKey) {
+            return res.status(400).json({ message: 'Delhivery account with this API key already exists.' });
+        }
+
+        const courierData = {
+            courierName,
+            courierProvider,
+            CODDays,
+            status,
+            apiKey,
+        };
+
         // Create a new courier entry in the database
         const newCourier = new AllCourier(courierData);
         await newCourier.save();
@@ -95,22 +126,23 @@ const isEnabeled = async (req, res) => {
 const getCourierList = async (req, res) => {
 
     try {
-       const response = await axios.get(`https://www.delhivery.com/api/v1/users/login`, {
-                   headers: {
-                       Authorization: `Token ${API_TOKEN}`
-                   }
-               });
-               console.log("dfsdfdsf",response)
-            const currCourier = await Courier.findOne({ provider: 'Delhivery' })
-            const servicesData = currCourier.services;
+        const { apiKey } = req.query;
+        const response = await axios.get(`https://www.delhivery.com/api/v1/users/login`, {
+            headers: {
+                Authorization: `Token ${apiKey || process.env.DEL_API_TOKEN}`
+            }
+        });
+        console.log("dfsdfdsf", response)
+        const currCourier = await Courier.findOne({ provider: 'Delhivery' })
+        const servicesData = currCourier.services;
 
-            const allServices = servicesData.map(element => ({
-                service: element.courierProviderServiceName,
-                isAdded: true
-            }));
+        const allServices = servicesData.map(element => ({
+            service: element.courierProviderServiceName,
+            isAdded: true
+        }));
 
-            return res.status(201).json(allServices);
-        
+        return res.status(201).json(allServices);
+
 
         res.status(400).json({ message: 'Failed to fetch services' });
     } catch (error) {
@@ -186,7 +218,8 @@ const addService = async (req, res) => {
                 courierProviderServiceId: getUniqueId(),
                 courierProviderServiceName: name,
                 courierProviderName: 'Delhivery',
-                createdName:req.body.name
+                courierName: req.body.name,
+                createdName: req.body.name
             });
 
             const S2 = await Courier.findOne({ provider: 'Delhivery' });
@@ -207,14 +240,14 @@ const addService = async (req, res) => {
     }
 };
 
-const fetchBulkWaybills = async (count) => {
+const fetchBulkWaybills = async (count, apiKey) => {
     const url = `${BASE_URL}/waybill/api/bulk/json/?count=${count}`;
 
     try {
         const response = await axios.get(url, {
             headers: {
                 "Content-Type": "application/json",
-                Authorization: `Token ${API_TOKEN}`,
+                Authorization: `Token ${apiKey || process.env.DEL_API_TOKEN}`,
             }
         });
 
@@ -233,4 +266,4 @@ const fetchBulkWaybills = async (count) => {
     }
 };
 
-module.exports = { saveDelhivery, isEnabeled, getCourierList, enable, disable, addService, fetchBulkWaybills, getToken };
+module.exports = { saveDelhivery, isEnabeled, getCourierList, enable, disable, addService, fetchBulkWaybills, getToken, getDelhiveryApiKey };

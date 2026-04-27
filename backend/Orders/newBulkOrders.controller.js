@@ -37,6 +37,7 @@ const {
 const { createOrderEkart } = require("../AllCouriers/Ekart/Couriers/bulkShipment.controller");
 const { createOrderBoxdLogistics } = require("../AllCouriers/BoxdLogistics/Courier/bulkShipmentcontroller");
 const { createOrderProship } = require("../AllCouriers/Proship/Courier/bulkShipment.controller");
+const { createShipmentFunctionShipRocket } = require("../AllCouriers/ShipRocket/Courier/bulkShipment.controller");
 
 const updatePickup = async (req, res) => {
   try {
@@ -190,6 +191,16 @@ const callProviderWithRetry = async (
           break;
         case "Proship":
           result = await createOrderProship(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges,
+            priceBreakup
+          );
+          break;
+        case "Shiprocket":
+          result = await createShipmentFunctionShipRocket(
             serviceDetails,
             order._id,
             wh,
