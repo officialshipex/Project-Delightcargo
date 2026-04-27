@@ -161,6 +161,7 @@ const orderSchema = new mongoose.Schema(
     manifest: { type: String },
     shipment_id: { type: String },
     provider: { type: String },
+    courierName: { type: String },
     partner: { type: String },
     totalFreightCharges: { type: Number },
     status: { type: String, required: true },

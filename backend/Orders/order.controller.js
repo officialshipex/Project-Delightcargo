@@ -12,7 +12,7 @@ const {
   requestShipmentPickup,
   cancelOrder,
   getTrackingByAWB,
-} = require("../AllCouriers/ShipRocket/MainServices/mainServices.controller");
+} = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 const {
   pickup,
   cancelShipmentXpressBees,
@@ -36,7 +36,7 @@ const {
 } = require("../AllCouriers/NimbusPost/Shipments/bulkShipment.controller");
 const {
   createShipmentFunctionShipRocket,
-} = require("../AllCouriers/ShipRocket/MainServices/bulkShipment.controller");
+} = require("../AllCouriers/ShipRocket/Courier/bulkShipment.controller");
 const {
   createShipmentFunctionXpressBees,
 } = require("../AllCouriers/Xpressbees/MainServices/bulkShipment.controller");

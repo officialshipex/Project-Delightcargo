@@ -1,191 +1,69 @@
-if(process.env.NODE_ENV!="production"){
-  require('dotenv').config();
-  }
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+}
+
 const axios = require("axios");
-
 const AllCourier = require("../../../models/AllCourierSchema");
-const BASE_URL=process.env.SHIPROCKET_URL;
 
-const getToken = async (req,res) => {
-    const email = req.body.credentials.username;
-    const password = req.body.credentials.password;
-    const courierData ={
-          courierName : req.body.courierName,
-          courierProvider : req.body.courierProvider,
-          CODDays: req.body.CODDays,
-          status:req.body.status
+const BASE_URL = `${process.env.SHIPROCKET_URL}/v1/external`;
+const SHIPROCKET_EMAIL = process.env.SHIPR_GMAIL;
+const SHIPROCKET_PASSWORD = process.env.SHIPR_PASS;
 
-    }
-
-    if (!email || !password) {
-        return res.status(400).json({
-            message: "Email and password are required.",
-        });
-    } 
-
-    try {
-        const options = {
-            method: "POST",
-            url: `${BASE_URL}/v1/external/auth/login`,
-            headers: {
-                Accept: "application/json",
-                "Content-Type": "application/json",
-            },
-            data: { email, password },
-        };
-
-        const response = await axios.request(options);
-
-        if (response.status === 200 && response.data.token) {
-          const newCourier = new AllCourier(courierData);
-          await newCourier.save();
-          return response.data.token;
-
-        } else {
-            throw new Error(`Login failed: Status ${response.status}`);
-        }
-    } catch (error) {
-        if (error.response) {
-            throw new Error(`Error in authentication: ${error.response.data.message || error.message}`);
-        } else {
-            throw new Error(`Error in authentication: ${error.message}`);
-        }
-    }
+const getAuthToken = async () => {
+  try {
+    const response = await axios.post(
+      `${BASE_URL}/auth/login`,
+      { email: SHIPROCKET_EMAIL, password: SHIPROCKET_PASSWORD },
+      { headers: { "Content-Type": "application/json" }, timeout: 10000 }
+    );
+    if (response.data?.token) return response.data.token;
+    console.error("ShipRocket getAuthToken: No token in response");
+    return null;
+  } catch (error) {
+    console.error("ShipRocket Auth Error:", error.response?.data || error.message);
+    return null;
+  }
 };
-
-
 
 const saveShipRocket = async (req, res) => {
-   
-    console.log("I am in shiprocket");
-    try {
-        const existingCourier = await Courier.findOne({ provider: 'Shiprocket' });
+  const { username: email, password } = req.body.credentials;
+  const { courierName, courierProvider, CODDays, status } = req.body;
 
-        if (existingCourier) {
-            return res.status(400).json({ message: 'Shiprocket service is already added' });
-        }
+  if (!email || !password) return res.status(400).json({ message: "Email and password are required." });
 
-        const newCourier = new Courier({
-            provider: 'Shiprocket'
-        });
-        await newCourier.save();
-        res.status(201).json({ message: 'Shiprocket Integrated Successfully' });
-    } catch (error) {
-        res.status(500).json({ message: 'An error has occurred', error: error.message });
-    }
+  try {
+    const response = await axios.post(
+      `${BASE_URL}/auth/login`,
+      { email, password },
+      { headers: { "Content-Type": "application/json" }, timeout: 10000 }
+    );
+    if (!response.data?.token) return res.status(401).json({ message: "Invalid ShipRocket credentials." });
+  } catch (error) {
+    return res.status(400).json({
+      message: "ShipRocket authentication failed.",
+      error: error.response?.data?.message || error.message,
+    });
+  }
+
+  try {
+    const newCourier = new AllCourier({
+      courierName,
+      courierProvider,
+      CODDays,
+      status,
+      email,
+    });
+    await newCourier.save();
+    return res.status(201).json({
+      message: "ShipRocket courier successfully added.",
+      courier: newCourier,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to save ShipRocket courier.",
+      error: error.message,
+    });
+  }
 };
 
-const isEnabeled = async (req, res) => {
-    try {
-        const existingCourier = await Courier.findOne({ provider:'Shiprocket' });
-    
-        if (!existingCourier) {
-          return res.status(404).json({ isEnabeled: false, message: "Courier not found" });
-        }
-    
-        if (existingCourier.isEnabeled && !existingCourier.toEnabeled) {
-          return res.status(201).json({ isEnabeled: true, toEnabeled: false });
-      
-      } else if (!existingCourier.isEnabeled && existingCourier.toEnabeled) {
-          return res.status(201).json({ isEnabeled: false, toEnabeled: true });
-      
-      } else if (existingCourier.isEnabeled && existingCourier.toEnabeled) {
-          return res.status(201).json({ isEnabeled: true, toEnabeled: true });
-      
-      } else {
-          return res.status(201).json({ isEnabeled: false, toEnabeled: false });
-      }
-      
-      } catch (error) {
-        console.error("Error:", error);
-        res.status(500).json({ message: "Internal Server Error" });
-      }
-  };
-
-  const enable = async (req, res) => {
-
-    try {
-      const existingCourier = await Courier.findOne({ provider: 'Shiprocket' });
-  
-      if (!existingCourier) {
-        return res.status(404).json({ isEnabeled: false, message: "Courier not found" });
-      }
-  
-      existingCourier.isEnabeled = true;
-      existingCourier.toEnabeled = false;
-      const result = await existingCourier.save();
-      return res.status(201).json({ isEnabeled: true, toEnabeled: false });
-    }
-    catch (error) {
-      onsole.error("Error:", error);
-      res.status(500).json({ message: "Internal Server Error" });
-    }
-  
-  }
-  
-
-  const disable = async (req, res) => {
-
-    try {
-      const existingCourier = await Courier.findOne({ provider: 'Shiprocket'});
-  
-      if (!existingCourier) {
-        return res.status(404).json({ isEnabeled: false, message: "Courier not found" });
-      }
-  
-      existingCourier.isEnabeled = true;
-      existingCourier.toEnabeled = true;
-      const result=await existingCourier.save();
-      return res.status(201).json({ isEnabeled: true, toEnabeled:true});
-    }
-    catch (error) {
-      onsole.error("Error:", error);
-      res.status(500).json({ message: "Internal Server Error" });
-    }
-  
-  }
-
-  const getAuthToken = async ()=>{
-    
-        
-        const email= process.env.SHIPR_GMAIL
-        const password=process.env.SHIPR_PASS
-          
-
-  
-  
-          
-        
-        if (!email || !password) {
-          return res.status(400).json({
-              message: "Email and password are required.",
-          });
-      } 
-  
-      try {
-          const options = {
-              method: "POST",
-              url: `${BASE_URL}/v1/external/auth/login`,
-              headers: {
-                  Accept: "application/json",
-                  "Content-Type": "application/json",
-              },
-              data: { email, password },
-          };
-  
-          const response = await axios.request(options);
-  
-          if (response.status === 200 && response.data.token) {
-            
-            
-            return response.data.token;
-  
-          } else {
-              throw new Error(`Login failed: Status ${response.status}`);
-          }
-      } catch (error) {
-            console.log(error)
-        }
-      }
-
-module.exports = { saveShipRocket, getToken, isEnabeled, disable,enable, getAuthToken };
+module.exports = { saveShipRocket, getAuthToken };

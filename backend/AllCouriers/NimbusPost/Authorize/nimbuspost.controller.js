@@ -15,7 +15,8 @@ const url=process.env.NIMBUSPOST_URL;
       courierName: req.body.courierName,
       courierProvider: req.body.courierProvider,
       CODDays: req.body.CODDays,
-      status:req.body.status
+      status:req.body.status,
+      email: req.body.credentials.email
     }
 
     try {

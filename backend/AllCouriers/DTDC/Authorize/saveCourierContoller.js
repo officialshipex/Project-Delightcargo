@@ -32,6 +32,8 @@ const getToken = async (req, res) => {
     courierProvider,
     CODDays,
     status,
+    apiKey,
+    email: username
   };
 
   try {

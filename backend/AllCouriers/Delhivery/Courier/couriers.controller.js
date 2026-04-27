@@ -2,9 +2,8 @@ if (process.env.NODE_ENV != "production") {
   require("dotenv").config();
 }
 const axios = require("axios");
-const { fetchBulkWaybills } = require("../Authorize/saveCourierContoller");
+const { fetchBulkWaybills, getDelhiveryApiKey } = require("../Authorize/saveCourierContoller");
 const url = process.env.DELHIVERY_URL;
-const API_TOKEN = process.env.DEL_API_TOKEN;
 const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
 const crypto = require("crypto");
@@ -38,7 +37,7 @@ const getUniqueWarehouseName = (payload) => {
   return `${payload.contactName.substring(0, 30)}-${hash}`.trim();
 };
 
-const createClientWarehouse = async (payload) => {
+const createClientWarehouse = async (payload, apiKey) => {
   if (!payload) {
     throw new Error("Payload is required to create a warehouse.");
   }
@@ -68,7 +67,7 @@ const createClientWarehouse = async (payload) => {
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Token ${API_TOKEN}`,
+          Authorization: `Token ${apiKey || process.env.DEL_API_TOKEN}`,
         },
       },
     );
@@ -128,6 +127,7 @@ const createOrder = async (req, res) => {
     const {
       id,
       provider,
+      courierName,
       finalCharges,
       courierServiceName,
       estimatedDeliveryDate,
@@ -152,26 +152,35 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Step 2️⃣ Run user, wallet, plan fetch concurrently
-    const [users, plans] = await Promise.all([
+    // Step 2️⃣ Fetch user, wallet, and courier service concurrently
+    const [users, plans, shipmentType] = await Promise.all([
       user.findById(currentOrder.userId).populate("Wallet").session(session),
       plan.findOne({ userId: currentOrder.userId }).session(session),
+      CourierService.findOne({
+        name: courierServiceName,
+        provider: "Delhivery",
+      }).session(session),
     ]);
 
-    if (!users || !users.Wallet) {
+    if (!users || !users.Wallet || !shipmentType) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({ success: false, message: "User or Wallet not found" });
+      return res.status(400).json({
+        success: false,
+        message: !users || !users.Wallet ? "User or Wallet not found" : "Invalid Courier Service Name",
+      });
     }
 
     const currentWallet = users.Wallet;
+    const internalCourierName = shipmentType.courierName || provider;
+
+    // Fetch API key for the specific account
+    const apiKey = await getDelhiveryApiKey(internalCourierName);
 
     // Step 3️⃣ Get waybills & zone in parallel
     const [waybills, zone] = await Promise.all([
-      fetchBulkWaybills(1),
+      fetchBulkWaybills(1, apiKey),
       getZone(
         currentOrder.pickupAddress.pinCode,
         currentOrder.receiverAddress.pinCode,
@@ -190,27 +199,20 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Step 4️⃣ Create warehouse and get courier type in parallel
-    const [warehouseCreationResult, shipmentType] = await Promise.all([
-      createClientWarehouse(currentOrder.pickupAddress),
-      CourierService.findOne({
-        name: courierServiceName,
-        provider: "Delhivery",
-      }).session(session),
-    ]);
+    // Step 4️⃣ Create warehouse
+    const warehouseCreationResult = await createClientWarehouse(
+      currentOrder.pickupAddress,
+      apiKey,
+    );
 
-    if (!warehouseCreationResult.success || !shipmentType) {
+    if (!warehouseCreationResult.success) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
         success: false,
-        message: !warehouseCreationResult.success
-          ? "Failed to create or fetch pickup warehouse"
-          : "Invalid Courier Service Name",
-        details: warehouseCreationResult.success
-          ? undefined
-          : warehouseCreationResult,
+        message: "Failed to create or fetch pickup warehouse",
+        details: warehouseCreationResult,
       });
     }
 
@@ -291,7 +293,7 @@ const createOrder = async (req, res) => {
     // Step 7️⃣ Create Shipment (external API, keep as-is)
     const response = await axios.post(`${url}/api/cmu/create.json`, payload, {
       headers: {
-        Authorization: `Token ${API_TOKEN}`,
+        Authorization: `Token ${apiKey}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       timeout: 8000,
@@ -320,7 +322,8 @@ const createOrder = async (req, res) => {
             cancelledAtStage: null,
             awb_number: result.waybill,
             shipment_id: result.refnum,
-            provider,
+            provider: provider,
+            courierName: internalCourierName,
             totalFreightCharges: balanceToBeDeducted,
             courierServiceName,
             shipmentCreatedAt: new Date(),
@@ -396,7 +399,9 @@ const checkPincodeServiceabilityDelhivery = async (
   pickUpPincode,
   deliveryPincode,
   order_type,
+  courierName,
 ) => {
+  const apiKey = await getDelhiveryApiKey(courierName); // Pass courierName to get the correct API key
   if (!pickUpPincode || !deliveryPincode) {
     return {
       success: false,
@@ -409,7 +414,7 @@ const checkPincodeServiceabilityDelhivery = async (
     // --- Check Delivery Pincode ---
     const deliveryResponse = await axios.get(`${url}/c/api/pin-codes/json?`, {
       headers: {
-        Authorization: `Token ${API_TOKEN}`,
+        Authorization: `Token ${apiKey}`,
       },
       params: { filter_codes: deliveryPincode },
       timeout: 8000,
@@ -429,7 +434,7 @@ const checkPincodeServiceabilityDelhivery = async (
     // --- Check Pickup Pincode ---
     const pickupResponse = await axios.get(`${url}/c/api/pin-codes/json?`, {
       headers: {
-        Authorization: `Token ${API_TOKEN}`,
+        Authorization: `Token ${apiKey}`,
       },
       params: { filter_codes: pickUpPincode },
       timeout: 5000,
@@ -464,11 +469,14 @@ const trackShipmentDelhivery = async (waybill) => {
   }
 
   try {
+    const order = await Order.findOne({ awb_number: waybill });
+    const apiKey = order ? await getDelhiveryApiKey(order.courierName || order.provider) : await getDelhiveryApiKey();
+
     const response = await axios.get(
       `${url}/api/v1/packages/json/?waybill=${waybill}`,
       {
         headers: {
-          authorization: `Token ${API_TOKEN}`,
+          authorization: `Token ${apiKey}`,
         },
       },
     );
@@ -534,8 +542,13 @@ const generateShippingLabel = async (req, res) => {
   }
 };
 
-const createPickupRequest = async (warehouse_name, awb, pickupAddress = null) => {
+const createPickupRequest = async (warehouse_name, awb, pickupAddress = null, apiKey) => {
   const result = getCurrentDateTime();
+  
+  if (!apiKey) {
+      const order = await Order.findOne({ awb_number: awb });
+      apiKey = order ? await getDelhiveryApiKey(order.courierName || order.provider) : await getDelhiveryApiKey();
+  }
 
   const finalWarehouseName = pickupAddress ? getUniqueWarehouseName(pickupAddress) : warehouse_name;
 
@@ -560,7 +573,7 @@ const createPickupRequest = async (warehouse_name, awb, pickupAddress = null) =>
     const response = await axios.post(`${url}/fm/request/new/`, pickupDetails, {
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Token ${API_TOKEN}`,
+        Authorization: `Token ${apiKey}`,
       },
     });
 
@@ -676,10 +689,13 @@ const cancelOrderDelhivery = async (awb_number) => {
   };
 
   try {
+    const order = await Order.findOne({ awb_number: awb_number });
+    const apiKey = order ? await getDelhiveryApiKey(order.courierName || order.provider) : await getDelhiveryApiKey();
+
     const response = await axios.post(`${url}/api/p/edit`, payload, {
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Token ${API_TOKEN}`,
+        Authorization: `Token ${apiKey}`,
       },
     });
     console.log("cancel", response.data);

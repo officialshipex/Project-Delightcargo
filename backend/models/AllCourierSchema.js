@@ -4,6 +4,7 @@ const allCourierSchema = new mongoose.Schema({
     courierName: {
         type: String,
         required: true,
+        unique: true,
     },
     courierProvider: {
         type: String,
@@ -18,6 +19,14 @@ const allCourierSchema = new mongoose.Schema({
         required: true,
         enum: ["Enable", "Disable"],
       },
+    email: {
+        type: String,
+        required: false,
+    },
+    apiKey: {
+        type: String,
+        required: false,
+    },
     date: {
         type: Date,
         default: Date.now,

@@ -1,6 +1,6 @@
 const WareHouse = require("../models/wareHouse.model");
 const User = require("../models/User.model");
-const { addPickupLocation, getAllPickupLocations } = require("../AllCouriers/ShipRocket/MainServices/mainServices.controller");
+const { addPickupLocation, getAllPickupLocations } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 const{createClientWarehouse}=require("../AllCouriers/Delhivery/Courier/couriers.controller");
 
 const createWareHouse = async (req, res) => {

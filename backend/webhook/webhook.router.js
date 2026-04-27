@@ -7,6 +7,7 @@ const { DelhiveryWebhook } = require("./DelhiveryWebhook.controller")
 const { EkartWebhook } = require("./EkartWebhook.controller")
 const { AmazonShippingNDRWebhook } = require("./NDR/AmazonShippingWebhook.controller")
 const { ProshipWebhook } = require("./ProshipWebhook.controller")
+const { ShipRocketWebhook } = require("./ShipRocketWebhook.controller")
 
 const { delhiveryManifestCallback } = require("../B2B/controller/Couriers/AllCouriers/Delhivery/Courier/couriers.controller")
 
@@ -15,6 +16,7 @@ webhookRouter.post('/ekart', EkartWebhook);
 webhookRouter.post("/shree-maruti", ShreeMarutiWebhook);
 webhookRouter.post("/dtdc", DTDCWebhook);
 webhookRouter.post("/amazon-shipping", AmazonShippingWebhook);
+webhookRouter.post("/shiprocket", ShipRocketWebhook);
 
 
 webhookRouter.post("/amazon-shipping-ndr", AmazonShippingNDRWebhook);

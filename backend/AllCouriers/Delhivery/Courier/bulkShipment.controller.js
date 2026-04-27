@@ -2,9 +2,8 @@ if (process.env.NODE_ENV != "production") {
   require("dotenv").config();
 }
 const axios = require("axios");
-const { fetchBulkWaybills } = require("../Authorize/saveCourierContoller");
+const { fetchBulkWaybills, getDelhiveryApiKey } = require("../Authorize/saveCourierContoller");
 const url = process.env.DELHIVERY_URL;
-const API_TOKEN = process.env.DEL_API_TOKEN;
 const Order = require("../../../models/newOrder.model");
 const crypto = require("crypto");
 const Wallet = require("../../../models/wallet");
@@ -27,8 +26,13 @@ const createShipmentFunctionDelhivery = async (
 
   try {
     const currentOrder = await Order.findById(id);
+    
+    // Fetch API Key for the specific account
+    const apiKey = await getDelhiveryApiKey(selectedServiceDetails.courier || selectedServiceDetails.provider);
+
     const warehouseCreationResult = await createClientWarehouse(
-      currentOrder.pickupAddress
+      currentOrder.pickupAddress,
+      apiKey
     );
 
     // if (currentOrder.status !== "new") {
@@ -72,7 +76,7 @@ const createShipmentFunctionDelhivery = async (
       }
     }
 
-    const waybills = await fetchBulkWaybills(1);
+    const waybills = await fetchBulkWaybills(1, apiKey);
 
     const payment_type =
       currentOrder.paymentDetails.method === "COD" ? "COD" : "Prepaid";
@@ -140,7 +144,7 @@ const createShipmentFunctionDelhivery = async (
     if (balance >= finalCharges) {
       const response = await axios.post(delUrl, payload, {
         headers: {
-          Authorization: `Token ${API_TOKEN}`,
+          Authorization: `Token ${apiKey}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
       });
@@ -154,6 +158,7 @@ const createShipmentFunctionDelhivery = async (
         currentOrder.awb_number = result.waybill;
         currentOrder.shipment_id = `${result.refnum}`;
         currentOrder.provider = selectedServiceDetails.provider;
+        currentOrder.courierName = selectedServiceDetails.courierName || selectedServiceDetails.provider;
         currentOrder.totalFreightCharges =
           finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
         currentOrder.courierServiceName = selectedServiceDetails.name;

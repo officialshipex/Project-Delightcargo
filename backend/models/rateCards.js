@@ -40,6 +40,10 @@ const rateCardSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  courierName: {
+    type: String,
+    required: false,
+  },
   courierServiceName: {
     type: String,
     required: true,

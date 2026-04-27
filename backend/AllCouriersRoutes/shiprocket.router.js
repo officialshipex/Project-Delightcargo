@@ -1,80 +1,58 @@
-
 const express = require("express");
 const router = express.Router();
 
-const shiprocketAuthorize = require("../AllCouriers/ShipRocket/Authorize/shiprocket.controller");
-
-const { getAllActiveCourierServices, addService } = require("../AllCouriers/ShipRocket/Couriers/couriers.controller");
-
+const { saveShipRocket, getAuthToken } = require("../AllCouriers/ShipRocket/Authorize/shiprocket.controller");
 const {
-    createCustomOrder,
+  getAllActiveCourierServices,
+  addService,
+  createCustomOrder,
+  cancelOrder,
+  checkServiceabilityShipRocket,
+  requestShipmentPickup,
+  getTrackingByAWB,
+  getAllPickupLocations,
+  generateLabel,
+} = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 
-    updateOrder,
-    cancelOrder,
+// ── Auth / Courier Setup ──────────────────────────────────────────────────────
+router.post("/getAuthToken", saveShipRocket);
 
-    listCouriers,
-    checkServiceability,
-    requestShipmentPickup,
-
-    createReturnOrder,
-
-    generateManifest,
-
-    generateLabel,
-    generateInvoice,
-    getAllNDRShipments,
-
-    getTrackingByAWB,
-
-    getTrackingByOrderID,
-
-} = require('../AllCouriers/ShipRocket/MainServices/mainServices.controller');
-
-router.get('/saveNew', shiprocketAuthorize.saveShipRocket);
-router.get('/isEnabeled', shiprocketAuthorize.isEnabeled);
-router.get('/disable',shiprocketAuthorize.disable);
-router.get('/enable',shiprocketAuthorize.enable);
-router.post('/getToken', shiprocketAuthorize.getToken);
-
+// ── Courier Services (Admin) ──────────────────────────────────────────────────
 router.get("/getAllActiveCourierServices", getAllActiveCourierServices);
-
 router.post("/addService", addService);
 
-router.post('/createShipment', createCustomOrder);
+// ── Shipment ──────────────────────────────────────────────────────────────────
+router.post("/createShipment", createCustomOrder);
 
-router.put('/update-order/:order_id', updateOrder);
-router.delete('/cancel-order/:order_id', cancelOrder);
+// ── Pickup ────────────────────────────────────────────────────────────────────
+router.get("/pickupLocations", async (req, res) => {
+  try {
+    const locations = await getAllPickupLocations();
+    return res.status(200).json(locations || []);
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to fetch pickup locations", error: error.message });
+  }
+});
 
-// List of Couriers
-router.get('/couriers', listCouriers);
+// ── Tracking ──────────────────────────────────────────────────────────────────
+router.get("/track/:awb_code", async (req, res) => {
+  try {
+    const result = await getTrackingByAWB(req.params.awb_code);
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({ message: "Tracking failed", error: error.message });
+  }
+});
 
-// Check Courier Serviceability
-// router.get('/courier-serviceability', checkServiceability);
+// ── Label ─────────────────────────────────────────────────────────────────────
+router.get("/label/:shipment_id", async (req, res) => {
+  try {
+    const labelUrl = await generateLabel(req.params.shipment_id);
+    if (labelUrl) return res.status(200).json({ label_url: labelUrl });
+    return res.status(400).json({ message: "Failed to generate label" });
+  } catch (error) {
+    return res.status(500).json({ message: "Label generation failed", error: error.message });
+  }
+});
 
-// Request for Shipment Pickup
-router.post('/request-pickup', requestShipmentPickup);
-
-// Create a Return Order
-router.post('/return-order', createReturnOrder);
-
-// Generate Manifest
-router.post('/manifest/generate', generateManifest);
-
-// Generate Label
-router.post('/label/generate', generateLabel);
-
-// Generate Invoice
-router.post('/invoice/generate', generateInvoice);
-
-// Get All NDR Shipments
-router.get('/ndr/all', getAllNDRShipments);
-
-// Get Tracking through AWB
-// router.get('/track/awb/:awb_code', getTrackingByAWB);
-
-// Get Tracking Data through Order ID
-router.get('/track/order/:order_id', getTrackingByOrderID);
-
-
-// export default router;
-module.exports = router
+module.exports = router;

@@ -39,6 +39,9 @@ const {
 const {
   trackProshipOrder,
 } = require("../AllCouriers/Proship/Courier/couriers.controller");
+const {
+  getTrackingByAWB: trackShiprocketOrder,
+} = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 const Bottleneck = require("bottleneck");
 const {
   sendWhatsAppMessage,
@@ -74,14 +77,15 @@ const trackSingleOrder = async (order) => {
       "Shree Maruti": trackOrderShreeMaruti,
       ShreeMaruti: trackOrderShreeMaruti,
       DTDC: trackOrderDTDC,
-      Dtdc: trackOrderDTDC, // optional: keep both keys if needed
+      Dtdc: trackOrderDTDC,
       EcomExpress: shipmentTrackingforward,
       "Amazon Shipping": getShipmentTracking,
-      Amazon: getShipmentTracking, // optional: keep both keys if needed
+      Amazon: getShipmentTracking,
       Smartship: trackOrderSmartShip,
       ZipyPost: trackOrderZipypost,
       BoxdLogistics: trackOrderBoxdLogistics,
       Proship: trackProshipOrder,
+      Shiprocket: trackShiprocketOrder,
     };
 
     // if (!trackingFunctions[provider]) {
@@ -89,13 +93,14 @@ const trackSingleOrder = async (order) => {
     //   return;
     // }
     let result;
-    // let normalizedData;
     if (partner && partner === "ZipyPost") {
       result = await trackingFunctions["ZipyPost"](awb_number, shipment_id);
     } else if (partner && partner === "BoxdLogistics") {
       result = await trackingFunctions["BoxdLogistics"](awb_number, shipment_id);
     } else if (partner && partner === "Proship") {
       result = await trackingFunctions["Proship"](awb_number, shipment_id);
+    } else if (partner && partner === "Shiprocket") {
+      result = await trackingFunctions["Shiprocket"](awb_number);
     } else if (provider && trackingFunctions[provider]) {
       result = await trackingFunctions[provider](awb_number, shipment_id);
     } else {
@@ -112,7 +117,7 @@ const trackSingleOrder = async (order) => {
     // Normalize only the latest one
     const normalizedData = mapTrackingResponse(
       [latestTrackingEvent],
-      (partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship") ? partner : provider,
+      (partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket") ? partner : provider,
     );
     // console.log("normalized", normalizedData);
 
@@ -1276,11 +1281,92 @@ const trackSingleOrder = async (order) => {
     }
 
 
+    // ── ShipRocket Status Handling ──────────────────────────────────────────
+    if (partner === "Shiprocket") {
+      // shipment_status numeric codes from ShipRocket API:
+      // 1=Pending, 2=Confirmed, 3=Ready To Ship, 4=Picked Up, 5=In Transit
+      // 6=Out for Delivery, 7=Undelivered, 8=Delivered, 9=Cancelled
+      // 10=RTO Initiated, 11=RTO In Transit, 12=RTO Delivered, 13=Lost
+      const statusCode = normalizedData.shipment_status;
+
+      if ([1, 2, 3].includes(statusCode)) {
+        order.status = "Ready To Ship";
+        order.ndrStatus = "Ready To Ship";
+      } else if (statusCode === 4 || statusCode === 5) {
+        order.status = "In-transit";
+        order.ndrStatus = "In-transit";
+        order.reattempt = false;
+        if (!order.invoiceDate) order.invoiceDate = normalizedData.StatusDateTime;
+      } else if (statusCode === 6) {
+        order.status = "Out for Delivery";
+        order.ndrStatus = "Out for Delivery";
+        order.reattempt = false;
+      } else if (statusCode === 7) {
+        if (order.ndrStatus !== "Action_Requested") {
+          order.status = "Undelivered";
+          order.ndrStatus = "Undelivered";
+          order.ndrReason = {
+            date: normalizedData.StatusDateTime,
+            reason: normalizedData.Instructions || "Delivery attempt failed",
+          };
+
+          const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+          const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+          const lastEntryDate = lastAction?.date
+            ? new Date(lastAction.date).getTime()
+            : null;
+          const currentStatusDate = new Date(normalizedData.StatusDateTime).getTime();
+
+          if (order.ndrHistory.length === 0 || !lastEntryDate || currentStatusDate > lastEntryDate) {
+            const attemptCount = order.ndrHistory.length + 1;
+            order.reattempt = true;
+            order.ndrHistory.push({
+              actions: [{
+                action: `NDR ${attemptCount} Raised`,
+                actionBy: order.courierServiceName || "Shiprocket",
+                remark: normalizedData.Instructions || "Delivery Failed",
+                source: "Shiprocket",
+                date: normalizedData.StatusDateTime,
+              }],
+            });
+          }
+        }
+
+        if (order.ndrHistory.length >= 4) order.reattempt = false;
+      } else if (statusCode === 8) {
+        order.status = "Delivered";
+        order.reattempt = false;
+        if (order.ndrHistory.length > 0) order.ndrStatus = "Delivered";
+      } else if (statusCode === 9) {
+        order.status = "Cancelled";
+        order.ndrStatus = "Cancelled";
+        order.reattempt = false;
+        balanceTobeAdded =
+          order.totalFreightCharges === "N/A" ? 0 : parseFloat(order.totalFreightCharges);
+        shouldUpdateWallet = true;
+      } else if (statusCode === 10) {
+        order.status = "RTO";
+        order.ndrStatus = "RTO";
+        order.reattempt = false;
+      } else if (statusCode === 11) {
+        order.status = "RTO In-transit";
+        order.ndrStatus = "RTO In-transit";
+        order.reattempt = false;
+      } else if (statusCode === 12) {
+        order.status = "RTO Delivered";
+        order.ndrStatus = "RTO Delivered";
+        order.reattempt = false;
+      } else if (statusCode === 13) {
+        order.status = "Lost";
+        order.reattempt = false;
+      }
+    }
+
     if (Array.isArray(result.data) && result.data.length > 0) {
       // If API returned a full list of tracking events
       const newTrackingArray = result.data.map((item) => {
         const mapped =
-          partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship"
+          partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket"
             ? mapTrackingResponse([item], partner)
             : mapTrackingResponse([item], provider, result?.remark);
 
@@ -1631,10 +1717,11 @@ const mapTrackingResponse = (data, provider, remark) => {
     },
 
     Shiprocket: {
-      Status: data.current_status || null,
-      StatusLocation: data.location || "Unknown",
-      StatusDateTime: data.timestamp || null,
-      Instructions: data.instructions || null,
+      Status: data[0]?.current_status || null,
+      StatusLocation: data[0]?.location || "Unknown",
+      StatusDateTime: data[0]?.timestamp ? new Date(data[0].timestamp) : null,
+      Instructions: data[0]?.instructions || null,
+      shipment_status: data[0]?.shipment_status || null,
     },
     NimbusPost: {
       Status: data.status || null,
