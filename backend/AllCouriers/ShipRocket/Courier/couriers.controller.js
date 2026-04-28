@@ -32,11 +32,12 @@ const getAllActiveCourierServices = async (req, res) => {
       headers: { Authorization: `Bearer ${token}` },
       timeout: 10000,
     });
+    // console.log("all service", response.data)
 
     if (response?.data?.courier_data) {
       const allServices = response.data.courier_data.map((element) => ({
         service: element.name,
-        provider_courier_id: element.id,
+        courier_id: element.id,
       }));
       return res.status(200).json(allServices);
     }
@@ -48,36 +49,6 @@ const getAllActiveCourierServices = async (req, res) => {
       message: "Failed to fetch courier services.",
       error: error.response?.data || error.message,
     });
-  }
-};
-
-const addService = async (req, res) => {
-  try {
-    const { service: name, provider_courier_id } = req.body;
-    if (!name) return res.status(400).json({ message: "Service name is required." });
-
-    const currCourier = await AllCourier.findOne({ courierProvider: "Shiprocket" });
-    if (!currCourier) return res.status(404).json({ message: "ShipRocket not configured." });
-
-    const existing = await CourierService.findOne({ provider: "Shiprocket", name });
-    if (existing) return res.status(400).json({ message: `${name} already exists.` });
-
-    const isAir = /air/i.test(name);
-    const courierType = isAir ? "Domestic (Air)" : "Domestic (Surface)";
-
-    const newService = new CourierService({
-      provider: "Shiprocket",
-      courier: name,
-      name,
-      courierType,
-      status: "Enable",
-    });
-
-    await newService.save();
-    return res.status(201).json({ message: `${name} added successfully.`, provider_courier_id });
-  } catch (error) {
-    console.error("ShipRocket addService Error:", error.message);
-    return res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
 
@@ -152,7 +123,9 @@ const checkServiceabilityShipRocket = async (payload) => {
   try {
     const token = await getAuthToken();
     if (!token) return { success: false };
-
+    const shiprocketService = await CourierService.findOne({ name: payload.serviceName, provider: "Shiprocket" })
+    if (!shiprocketService) return { success: false }
+    // console.log("payload", payload)
     const { serviceName, origin, destination, payment_type, weight } = payload;
     const cod = payment_type === true ? 1 : 0;
 
@@ -168,7 +141,9 @@ const checkServiceabilityShipRocket = async (payload) => {
     });
 
     const available = response.data?.data?.available_courier_companies || [];
-    const matched = available.filter((item) => item.courier_name === serviceName && item.blocked === 0);
+    // console.log(available, "response.data")
+    const matched = available.filter((item) => item.courier_name === shiprocketService.courier && item.blocked === 0);
+    // console.log(matched, "matched")
     return { success: matched.length > 0 };
   } catch (error) {
     console.error("ShipRocket checkServiceability Error:", error.response?.data || error.message);
@@ -243,7 +218,7 @@ const generateLabel = async (shipment_id) => {
 const createCustomOrder = async (req, res) => {
   try {
     const { id, finalCharges, courierServiceName, provider, priceBreakup } = req.body;
-    
+
     const result = await createShiprocketShipment({
       id,
       provider: provider || "Shiprocket",
@@ -264,7 +239,6 @@ const createCustomOrder = async (req, res) => {
 
 module.exports = {
   getAllActiveCourierServices,
-  addService,
   createCustomOrder,
   cancelOrder,
   checkServiceabilityShipRocket,

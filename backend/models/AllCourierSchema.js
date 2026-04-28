@@ -27,6 +27,10 @@ const allCourierSchema = new mongoose.Schema({
         type: String,
         required: false,
     },
+    password: {
+        type: String,
+        required: false,
+    },
     date: {
         type: Date,
         default: Date.now,

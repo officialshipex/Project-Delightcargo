@@ -10,12 +10,18 @@ const SHIPROCKET_EMAIL = process.env.SHIPR_GMAIL;
 const SHIPROCKET_PASSWORD = process.env.SHIPR_PASS;
 
 const getAuthToken = async () => {
+  const shiprocketCredentials = await AllCourier.findOne({ courierProvider: "Shiprocket", status: "Enable" });
+
+  const loginEmail = shiprocketCredentials?.email || process.env.SHIPR_GMAIL;
+  const loginPassword = shiprocketCredentials?.password || process.env.SHIPR_PASS;
+
   try {
     const response = await axios.post(
       `${BASE_URL}/auth/login`,
-      { email: SHIPROCKET_EMAIL, password: SHIPROCKET_PASSWORD },
+      { email: loginEmail, password: loginPassword },
       { headers: { "Content-Type": "application/json" }, timeout: 10000 }
     );
+    // console.log(response.data.token)
     if (response.data?.token) return response.data.token;
     console.error("ShipRocket getAuthToken: No token in response");
     return null;
@@ -24,6 +30,7 @@ const getAuthToken = async () => {
     return null;
   }
 };
+// getAuthToken()
 
 const saveShipRocket = async (req, res) => {
   const { username: email, password } = req.body.credentials;
@@ -52,6 +59,7 @@ const saveShipRocket = async (req, res) => {
       CODDays,
       status,
       email,
+      password,
     });
     await newCourier.save();
     return res.status(201).json({
