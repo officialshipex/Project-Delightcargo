@@ -191,7 +191,7 @@ const createShreeMarutiShipment = async ({
     if (response.status === 200) {
       const result = response.data.data;
 
-      const balanceToBeDeducted = parseInt(finalCharges);
+      const balanceToBeDeducted = parseFloat(finalCharges);
 
       currentOrder.status = "Booked";
       currentOrder.cancelledAtStage = null;

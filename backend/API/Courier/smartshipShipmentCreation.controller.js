@@ -217,7 +217,7 @@ const createSmartshipShipment = async ({
           awb_number: result.awb_number,
           shipment_id: result.request_order_id || "",
           provider,
-          totalFreightCharges: parseInt(finalCharges),
+          totalFreightCharges: parseFloat(finalCharges),
           courierServiceName,
           shipmentCreatedAt: new Date(),
           zone: zone.zone,
@@ -239,14 +239,14 @@ const createSmartshipShipment = async ({
     await Wallet.updateOne(
       { _id: currentWallet._id },
       {
-        $inc: { balance: -parseInt(finalCharges) },
+        $inc: { balance: -parseFloat(finalCharges) },
         $push: {
           transactions: {
             channelOrderId: currentOrder.orderId,
             category: "debit",
-            amount: parseInt(finalCharges),
+            amount: parseFloat(finalCharges),
             balanceAfterTransaction:
-              currentWallet.balance - parseInt(finalCharges),
+              currentWallet.balance - parseFloat(finalCharges),
             date: new Date(),
             awb_number: result.awb_number,
             description: `Freight Charges Applied`,
