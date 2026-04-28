@@ -15,7 +15,7 @@ router.get("/couriers", async (req, res) => {
 // ✅ Create New Courier Service
 router.post("/couriers", async (req, res) => {
   try {
-    const { provider, courier, courierType, name, status } = req.body;
+    const { provider, courier, courierType, name, status, courier_id } = req.body;
 
     const newCourier = new CourierService({
       provider,
@@ -23,6 +23,7 @@ router.post("/couriers", async (req, res) => {
       courierType,
       name,
       status,
+      courier_id,
     });
     console.log(req.body);
     await newCourier.save();

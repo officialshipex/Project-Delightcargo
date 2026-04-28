@@ -26,6 +26,10 @@ const CourierServiceSchema = new mongoose.Schema({
     type: String,
     required: true,
     enum: ["Enable", "Disable"],
+  },
+  courier_id: {
+    type: String,
+    required: false,
   }
 }, { timestamps: true });
 

@@ -35,6 +35,14 @@ const splitName = (fullName) => {
   return { first: parts[0] || "", last: parts.slice(1).join(" ") || "." };
 };
 
+const ensureAddress = (addr) => {
+  let clean = (addr || "").trim();
+  if (clean.length < 10) {
+    clean = clean + " House No 1, Main Road";
+  }
+  return clean;
+};
+
 const createShiprocketShipment = async ({
   id,
   provider,
@@ -83,6 +91,7 @@ const createShiprocketShipment = async ({
       return { success: false, message: "Insufficient Wallet Balance" };
     }
 
+
     // Step 4️⃣ Get Zone
     const zone = await getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode);
     if (!zone) {
@@ -117,27 +126,66 @@ const createShiprocketShipment = async ({
     }
 
     // Step 7️⃣ Add/Verify Pickup Location in Shiprocket
-    const pickupLocationName = currentOrder.pickupAddress.contactName;
+    let pickupLocationName = currentOrder.pickupAddress.contactName;
     try {
-      await axios.post(
-        `${BASE_URL}/settings/company/addpickup`,
-        {
-          pickup_location: pickupLocationName,
-          name: currentOrder.pickupAddress.contactName,
-          email: currentOrder.pickupAddress.email || user.email || SHIPROCKET_EMAIL,
-          phone: cleanPhone(currentOrder.pickupAddress.phoneNumber),
-          address: currentOrder.pickupAddress.address,
-          city: currentOrder.pickupAddress.city,
-          state: currentOrder.pickupAddress.state,
-          country: "India",
-          pin_code: String(currentOrder.pickupAddress.pinCode),
-        },
-        { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
-      );
+      // Fetch existing pickup locations to see if one matches this pincode
+      const pickupResponse = await axios.get(`${BASE_URL}/settings/company/pickup`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 10000
+      });
+
+      const existingLocations = pickupResponse.data?.data?.shipping_address || pickupResponse.data?.data || [];
+      console.log("Existing Shiprocket Locations Count:", existingLocations.length);
+
+      // Try to find a match by pincode and address snippet to be more accurate
+      const orderPin = String(currentOrder.pickupAddress.pinCode);
+      const orderAddr = (currentOrder.pickupAddress.address || "").toLowerCase();
+
+      const match = existingLocations.find(loc => {
+        const locPin = String(loc.pin_code);
+        const locAddr = (loc.address || "").toLowerCase();
+        return locPin === orderPin && (orderAddr.includes(locAddr.substring(0, 10)) || locAddr.includes(orderAddr.substring(0, 10)));
+      }) || existingLocations.find(loc => String(loc.pin_code) === orderPin);
+
+      if (match) {
+        pickupLocationName = match.pickup_location;
+        console.log("Matched existing location nickname:", pickupLocationName);
+      } else {
+        console.log("No matching location found for pincode:", orderPin, ". Attempting to add new location with name:", pickupLocationName);
+        // If no match, try to add new one
+        await axios.post(
+          `${BASE_URL}/settings/company/addpickup`,
+          {
+            pickup_location: pickupLocationName,
+            name: currentOrder.pickupAddress.contactName,
+            email: currentOrder.pickupAddress.email || user.email || SHIPROCKET_EMAIL,
+            phone: cleanPhone(currentOrder.pickupAddress.phoneNumber),
+            address: ensureAddress(currentOrder.pickupAddress.address),
+            city: currentOrder.pickupAddress.city,
+            state: currentOrder.pickupAddress.state,
+            country: "India",
+            pin_code: orderPin,
+          },
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+        );
+      }
     } catch (e) {
-      // Ignore 422 if location already exists
+      console.error("Shiprocket Pickup Location Sync Error:", e.response?.data || e.message);
+      // If adding fails for validation (like address length), we must stop and inform the user
       if (e.response?.status !== 422) {
-        console.error("Shiprocket Add Pickup Error:", e.response?.data || e.message);
+        await Order.findByIdAndUpdate(id, { status: "new" });
+        await session.abortTransaction();
+        session.endSession();
+        let errMsg = "Shiprocket Pickup Location Error";
+        if (e.response?.data?.message) {
+          try {
+            const parsed = JSON.parse(e.response.data.message);
+            if (parsed.address) errMsg += ": " + parsed.address.join(" ");
+          } catch (err) {
+            errMsg += ": " + e.response.data.message;
+          }
+        }
+        return { success: false, message: errMsg };
       }
     }
 
@@ -152,7 +200,7 @@ const createShiprocketShipment = async ({
       pickup_location: pickupLocationName,
       billing_customer_name: senderName.first,
       billing_last_name: senderName.last,
-      billing_address: currentOrder.pickupAddress.address,
+      billing_address: ensureAddress(currentOrder.pickupAddress.address),
       billing_city: currentOrder.pickupAddress.city,
       billing_pincode: String(currentOrder.pickupAddress.pinCode),
       billing_state: currentOrder.pickupAddress.state,
@@ -162,7 +210,7 @@ const createShiprocketShipment = async ({
       shipping_is_billing: false,
       shipping_customer_name: receiverName.first,
       shipping_last_name: receiverName.last,
-      shipping_address: currentOrder.receiverAddress.address,
+      shipping_address: ensureAddress(currentOrder.receiverAddress.address),
       shipping_city: currentOrder.receiverAddress.city,
       shipping_pincode: String(currentOrder.receiverAddress.pinCode),
       shipping_state: currentOrder.receiverAddress.state,
@@ -189,6 +237,8 @@ const createShiprocketShipment = async ({
       timeout: 20000,
     });
 
+    console.log("response data", orderResponse.data, orderResponse.data.data)
+
     if (!orderResponse.data?.shipment_id) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
@@ -206,16 +256,36 @@ const createShiprocketShipment = async ({
         provider: "Shiprocket",
       });
 
-      if (courierService?.provider_courier_id) {
+      if (courierService?.courier_id) {
         const awbResponse = await axios.post(
           `${BASE_URL}/courier/assign/awb`,
-          { shipment_id, courier_id: courierService.provider_courier_id },
+          { shipment_id, courier_id: courierService.courier_id },
           { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 }
         );
+        console.log("awb response", awbResponse.data)
+        awb_number = awbResponse.data?.response?.data?.awb_code || "PENDING";
+      } else {
+        // Fallback: auto-assign if no ID is found (optional, or could error)
+        const awbResponse = await axios.post(
+          `${BASE_URL}/courier/assign/awb`,
+          { shipment_id },
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 }
+        );
+        console.log("awb response (auto-assign)", awbResponse.data)
         awb_number = awbResponse.data?.response?.data?.awb_code || "PENDING";
       }
     } catch (awbErr) {
       console.error("Shiprocket AWB Assignment Error:", awbErr.response?.data || awbErr.message);
+    }
+
+    if (awb_number === "PENDING") {
+      await Order.findByIdAndUpdate(id, { status: "new" });
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        message: "Failed to assign AWB. Shiprocket order created but AWB assignment is pending/failed."
+      };
     }
 
     // Update Order & Wallet
@@ -241,9 +311,7 @@ const createShiprocketShipment = async ({
               status: "Booked",
               StatusLocation: currentOrder.pickupAddress?.city || "N/A",
               StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-              Instructions: awb_number === "PENDING" 
-                ? "Order created in Shipex. Awaiting AWB assignment." 
-                : "Order booked successfully",
+              Instructions: "Order booked successfully",
             },
           },
         },
@@ -260,7 +328,7 @@ const createShiprocketShipment = async ({
               balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
               date: new Date(),
               awb_number: awb_number,
-              description: "Freight Charges Applied (Shiprocket)",
+              description: "Freight Charges Applied",
               priceBreakup,
             },
           },
@@ -280,7 +348,7 @@ const createShiprocketShipment = async ({
         });
         const fresh = await Order.findById(id);
         if (fresh) await assignPickupManifest(fresh);
-      } catch (e) {}
+      } catch (e) { }
     });
 
     return {

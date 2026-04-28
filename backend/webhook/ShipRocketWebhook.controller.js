@@ -8,28 +8,72 @@ const {
 } = require("../notification/notification.controller");
 
 /**
- * Shiprocket Status ID Mapping (Simplified):
- * 1  - PICKUP_SCHEDULED
- * 2  - PICKUP_ERROR
- * 3  - PICKUP_RESCHEDULED
- * 4  - PICKUP_EXCEPTION
- * 5  - OUT_FOR_PICKUP
- * 6  - PICKED_UP
- * 7  - IN_TRANSIT
- * 8  - OUT_FOR_DELIVERY
- * 9  - DELIVERED
- * 10 - CANCELLED
- * 11 - RTO_INITIATED
- * 12 - RTO_DELIVERED
- * 13 - NDR
- * 14 - DISPATCHED
- * 17 - OUT_FOR_DELIVERY (Secondary)
- * 18 - DELIVERY_BOY_ASSIGNED
- * 19 - RE-ATTEMPT_REQUESTED
+ * Shiprocket Status ID Mapping (Provided by User):
+ * 6  - Shipped
+ * 7  - Delivered
+ * 8  - Canceled
+ * 9  - RTO Initiated
+ * 10 - RTO Delivered
+ * 12 - Lost
+ * 13 - Pickup Error
+ * 14 - RTO Acknowledged
+ * 15 - Pickup Rescheduled
+ * 16 - Cancellation Requested
+ * 17 - Out For Delivery
+ * 18 - In Transit
+ * 19 - Out For Pickup
+ * 20 - Pickup Exception
+ * 21 - Undelivered
+ * 22 - Delayed
+ * 23 - Partial_Delivered
+ * 24 - DESTROYED
+ * 25 - DAMAGED
+ * 26 - FULFILLED
+ * 27 - Pickup Booked
+ * 38 - REACHED AT DESTINATION HUB
+ * 39 - MISROUTED
+ * 40 - RTO_NDR
+ * 41 - RTO_OFD
+ * 42 - PICKED UP
+ * 43 - SELF FULFILLED
+ * 44 - DISPOSED OFF
+ * 45 - CANCELLED_BEFORE_DISPATCHED
+ * 46 - RTO IN INTRANSIT
+ * 47 - QC FAILED
+ * 48 - Reached Warehouse
+ * 49 - Custom Cleared
+ * 50 - In Flight
+ * 51 - Handover to Courier
+ * 52 - Shipment Booked
+ * 54 - In Transit Overseas
+ * 55 - Connection Aligned
+ * 56 - Reached Overseas Warehouse
+ * 57 - Custom Cleared Overseas
+ * 59 - Box Packing
+ * 60 - FC Allocated
+ * 61 - Picklist Generated
+ * 62 - Ready To Pack
+ * 63 - Packed
+ * 67 - FC MANIFEST GENERATED
+ * 68 - PROCESSED AT WAREHOUSE
+ * 71 - HANDOVER EXCEPTION
+ * 72 - PACKED EXCEPTION
+ * 75 - RTO_LOCK
+ * 76 - UNTRACEABLE
+ * 77 - ISSUE_RELATED_TO_THE_RECIPIENT
+ * 78 - REACHED_BACK_AT_SELLER_CITY
  */
 
 const ShipRocketWebhook = async (req, res) => {
   try {
+    const webhookToken = req.headers["x-api-key"];
+    const secureToken = process.env.SHIPROCKET_WEBHOOK_TOKEN;
+
+    if (webhookToken !== secureToken) {
+      console.warn("ShipRocket Webhook: Unauthorized access attempt.");
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
     const body = req.body;
     console.log("ShipRocket Webhook Received:", JSON.stringify(body, null, 2));
 
@@ -77,35 +121,55 @@ const ShipRocketWebhook = async (req, res) => {
        STATUS MAPPING
     ================================================================ */
     switch (statusId) {
-      case 1: // PICKUP_SCHEDULED
-      case 3: // PICKUP_RESCHEDULED
-      case 5: // OUT_FOR_PICKUP
+      case 62: // Ready To Pack
+      case 63: // Packed
+      case 67: // FC MANIFEST GENERATED
+        order.status = "Ready To Ship";
+        break;
+
+      case 15: // Pickup Rescheduled
+      case 19: // Out For Pickup
+      case 27: // Pickup Booked
+      case 52: // Shipment Booked
+      case 59: // Box Packing
+      case 60: // FC Allocated
+      case 61: // Picklist Generated
+      case 72: // PACKED EXCEPTION
         order.status = "Booked";
         break;
 
-      case 6: // PICKED_UP
-      case 14: // DISPATCHED
+      case 6:  // Shipped
+      case 18: // In Transit
+      case 22: // Delayed
+      case 38: // REACHED AT DESTINATION HUB
+      case 39: // MISROUTED
+      case 42: // PICKED UP
+      case 48: // Reached Warehouse
+      case 49: // Custom Cleared
+      case 50: // In Flight
+      case 51: // Handover to Courier
+      case 54: // In Transit Overseas
+      case 55: // Connection Aligned
+      case 56: // Reached Overseas Warehouse
+      case 57: // Custom Cleared Overseas
+      case 68: // PROCESSED AT WAREHOUSE
+      case 71: // HANDOVER EXCEPTION
         order.status = "In-transit";
         order.ndrStatus = "In-transit";
         order.reattempt = false;
         if (!order.invoiceDate) order.invoiceDate = timestamp;
         break;
 
-      case 7: // IN_TRANSIT
-        order.status = "In-transit";
-        order.ndrStatus = "In-transit";
-        order.reattempt = false;
-        break;
-
-      case 8: // OUT_FOR_DELIVERY
-      case 17: // OUT_FOR_DELIVERY
-      case 18: // DELIVERY_BOY_ASSIGNED
+      case 17: // Out For Delivery
         order.status = "Out for Delivery";
         order.ndrStatus = "Out for Delivery";
         order.reattempt = false;
         break;
 
-      case 9: // DELIVERED
+      case 7:  // Delivered
+      case 23: // Partial_Delivered
+      case 26: // FULFILLED
+      case 43: // SELF FULFILLED
         order.status = "Delivered";
         if (order.ndrHistory.length > 0) {
           order.ndrStatus = "Delivered";
@@ -116,7 +180,9 @@ const ShipRocketWebhook = async (req, res) => {
         }
         break;
 
-      case 10: // CANCELLED
+      case 8:  // Canceled
+      case 16: // Cancellation Requested
+      case 45: // CANCELLED_BEFORE_DISPATCHED
         order.status = "Cancelled";
         order.ndrStatus = "Cancelled";
         // Handle Wallet Refund
@@ -129,7 +195,7 @@ const ShipRocketWebhook = async (req, res) => {
             const currentWallet = await Wallet.findById(userDoc.Wallet);
             if (currentWallet) {
               const alreadyRefunded = currentWallet.transactions.some(
-                t => t.awb_number === order.awb_number && t.category === "credit" && t.description === "Freight Charges Received"
+                t => t.awb_number === order.awb_number && t.category === "credit" && (t.description === "Freight Charges Received" || t.description === "Freight Charges Refunded")
               );
 
               if (!alreadyRefunded) {
@@ -158,21 +224,44 @@ const ShipRocketWebhook = async (req, res) => {
         }
         break;
 
-      case 11: // RTO_INITIATED
+      case 9:  // RTO Initiated
+      case 14: // RTO Acknowledged
+      case 40: // RTO_NDR
+      case 46: // RTO IN INTRANSIT
+      case 75: // RTO_LOCK
+      case 41: // RTO_OFD
         order.status = "RTO";
         order.ndrStatus = "RTO";
         order.reattempt = false;
         break;
 
-      case 12: // RTO_DELIVERED
+      case 10: // RTO Delivered
+      case 78: // REACHED_BACK_AT_SELLER_CITY
         order.status = "RTO Delivered";
         order.ndrStatus = "RTO Delivered";
         order.reattempt = false;
         break;
 
-      case 13: // NDR
-      case 2: // PICKUP_ERROR
-      case 4: // PICKUP_EXCEPTION
+      case 12: // Lost
+      case 76: // UNTRACEABLE
+      case 24: // DESTROYED
+      case 44: // DISPOSED OFF
+      case 47: // QC FAILED
+        order.status = "Lost";
+        order.ndrStatus = "Lost";
+        order.reattempt = false;
+        break;
+
+      case 25: // DAMAGED
+        order.status = "Damaged";
+        order.ndrStatus = "Damaged";
+        order.reattempt = false;
+        break;
+
+      case 13: // Pickup Error
+      case 20: // Pickup Exception
+      case 21: // Undelivered
+      case 77: // ISSUE_RELATED_TO_THE_RECIPIENT
         order.status = "Undelivered";
         order.ndrStatus = "Undelivered";
         order.reattempt = true;
@@ -189,19 +278,14 @@ const ShipRocketWebhook = async (req, res) => {
             actions: [
               {
                 action: `NDR ${attemptCount} Raised`,
-                actionBy: "ShipRocket",
+                actionBy: order.provider,
                 remark: remark,
-                source: "ShipRocket",
+                source: order.provider,
                 date: timestamp,
               },
             ],
           });
         }
-        break;
-
-      case 19: // RE-ATTEMPT_REQUESTED
-        order.status = "In-transit";
-        order.ndrStatus = "Action_Requested";
         break;
 
       default:

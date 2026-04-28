@@ -34,6 +34,9 @@ const {
 const {
   checkProshipServiceability,
 } = require("../../AllCouriers/Proship/Courier/couriers.controller.js");
+const {
+  checkServiceabilityShipRocket,
+} = require("../../AllCouriers/ShipRocket/Courier/couriers.controller.js");
 
 // ✅ Input Validation Schema
 const serviceabilitySchema = Joi.object({
@@ -64,6 +67,7 @@ const courierIds = {
   Ekart: "08",
   BoxdLogistics: "09",
   Proship: "10",
+  Shiprocket: "11",
 };
 
 const pincodeServiceability = async (req, res) => {
@@ -127,10 +131,10 @@ const pincodeServiceability = async (req, res) => {
 
     // ✅ Get enabled couriers from DB
     const activeCouriers = await Couriers.find({ status: "Enable" }).select(
-      "courierName",
+      "courierProvider",
     );
 
-    const activeCourierNames = activeCouriers.map((c) => c.courierName);
+    const activeCourierNames = activeCouriers.map((c) => c.courierProvider);
 
     // ✅ Step 4: Courier serviceability checks
     const providers = [
@@ -231,6 +235,17 @@ const pincodeServiceability = async (req, res) => {
             deliveryPincode: deliveryPincode,
           }),
       },
+      {
+        name: "Shiprocket",
+        check: async (serviceName) =>
+          checkServiceabilityShipRocket({
+            serviceName,
+            origin: pickUpPincode,
+            destination: deliveryPincode,
+            payment_type: paymentType === "COD",
+            weight: applicableWeight,
+          }),
+      },
     ].filter((p) =>
       activeCourierNames.some(
         (name) => name.toLowerCase() === p.name.toLowerCase()
@@ -247,10 +262,11 @@ const pincodeServiceability = async (req, res) => {
       const providerCheck = providers.find((p) => p.name.toLowerCase() === provider.toLowerCase());
       if (!providerCheck) continue;
 
-      if (!serviceabilityCache[provider]) {
-        serviceabilityCache[provider] = await providerCheck.check();
+      const serviceKey = `${provider}_${rc.courierServiceName}`;
+      if (!serviceabilityCache[serviceKey]) {
+        serviceabilityCache[serviceKey] = await providerCheck.check(rc.courierServiceName);
       }
-      const serviceable = serviceabilityCache[provider];
+      const serviceable = serviceabilityCache[serviceKey];
       // console.log("serviceable",serviceable)
       // console.log(`Serviceability for ${provider}:`, serviceable);
       let isServiceable = serviceable && serviceable.success !== false;

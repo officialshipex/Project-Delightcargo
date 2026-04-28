@@ -4,7 +4,6 @@ const router = express.Router();
 const { saveShipRocket, getAuthToken } = require("../AllCouriers/ShipRocket/Authorize/shiprocket.controller");
 const {
   getAllActiveCourierServices,
-  addService,
   createCustomOrder,
   cancelOrder,
   checkServiceabilityShipRocket,
@@ -19,7 +18,6 @@ router.post("/getAuthToken", saveShipRocket);
 
 // ── Courier Services (Admin) ──────────────────────────────────────────────────
 router.get("/getAllActiveCourierServices", getAllActiveCourierServices);
-router.post("/addService", addService);
 
 // ── Shipment ──────────────────────────────────────────────────────────────────
 router.post("/createShipment", createCustomOrder);
