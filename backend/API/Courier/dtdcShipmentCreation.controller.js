@@ -220,7 +220,7 @@ const createDTDCShipment = async ({
     }
 
     // --- Update order ---
-    const balanceToBeDeducted = parseInt(finalCharges) || 0;
+    const balanceToBeDeducted = parseFloat(finalCharges) || 0;
 
     await Order.findByIdAndUpdate(
       id,
