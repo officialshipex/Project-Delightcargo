@@ -181,7 +181,7 @@ const createDelhiveryShipment = async ({
     const walletHoldAmount = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
     const balanceToBeDeducted =
-      finalCharges === "N/A" ? 0 : parseInt(finalCharges);
+      finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
     const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < balanceToBeDeducted) {
       await Order.findByIdAndUpdate(id, { status: "new" });
