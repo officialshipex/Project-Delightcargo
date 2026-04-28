@@ -16,7 +16,7 @@ webhookRouter.post('/ekart', EkartWebhook);
 webhookRouter.post("/shree-maruti", ShreeMarutiWebhook);
 webhookRouter.post("/dtdc", DTDCWebhook);
 webhookRouter.post("/amazon-shipping", AmazonShippingWebhook);
-webhookRouter.post("/shiprocket", ShipRocketWebhook);
+webhookRouter.post("/tracking-info-updates", ShipRocketWebhook);
 
 
 webhookRouter.post("/amazon-shipping-ndr", AmazonShippingNDRWebhook);
