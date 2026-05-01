@@ -2,6 +2,7 @@ const Joi = require("joi");
 const zoneManagementController = require("../../Rate/zoneManagementController");
 const getZone = zoneManagementController.getZone;
 const Plan = require("../../models/Plan.model");
+const RateCard = require("../../models/rateCards");
 const Order = require("../../models/newOrder.model"); // ✅ import Order model
 const {
   checkServiceabilityEcomExpress,
@@ -112,8 +113,16 @@ const availableCourierService = async (req, res) => {
     const ans = [];
     const serviceabilityCache = {};
 
+    // ✅ Build isFlatRate lookup by _id — user-specific even if two users share plan name
+    const rcIds = rateCards.map((r) => r._id).filter(Boolean);
+    const rateCardDocs = await RateCard.find({ _id: { $in: rcIds } });
+    const flatRateMap = new Map(
+      rateCardDocs.map((doc) => [doc._id.toString(), doc.isFlatRate === true])
+    );
+
     // 5. Loop through rateCards & calculate serviceability + charges
     for (let rc of rateCards) {
+      if (rc.status !== "Active") continue;
       const provider = rc.courierProviderName;
       if (!Object.keys(courierIds).includes(provider)) continue;
 
@@ -197,8 +206,9 @@ const availableCourierService = async (req, res) => {
           : basicCharge + additionalCharge * count;
 
       // COD calculation
+      const isFlatRate = flatRateMap.get(rc._id?.toString()) || false;
       let cod = 0;
-      if (paymentType === "COD") {
+      if (paymentType === "COD" && !isFlatRate) {
         const orderValue = Number(declaredValue) || 0;
         if (
           typeof rc.codCharge === "number" &&
@@ -209,7 +219,9 @@ const availableCourierService = async (req, res) => {
       }
 
       // GST + Final Total
-      let gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
+      let gstAmount = !isFlatRate
+        ? Number(((finalCharge + cod) * gst) / 100).toFixed(2)
+        : "0";
       let totalCharges = Math.round(finalCharge + cod + parseFloat(gstAmount));
 
       ans.push({

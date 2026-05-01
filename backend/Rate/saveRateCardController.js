@@ -21,6 +21,7 @@ const saveRate = async (req, res) => {
       courierServiceName,
       weightPriceBasic,
       weightPriceAdditional,
+      isFlatRate,
       codPercent,
       codCharge,
       status,
@@ -44,6 +45,7 @@ const saveRate = async (req, res) => {
 
     // Function to check required fields
     const checkRequiredFields = (weightData) => {
+      if (!weightData) return true; // Optional for some fields
       return weightData.every((weight) => {
         return (
           weight.zoneA !== undefined &&
@@ -79,6 +81,7 @@ const saveRate = async (req, res) => {
       // Update existing rate card
       existingRateCard.weightPriceBasic = weightPriceBasic;
       existingRateCard.weightPriceAdditional = weightPriceAdditional;
+      existingRateCard.isFlatRate = isFlatRate;
       existingRateCard.codPercent = codPercent;
       existingRateCard.codCharge = codCharge;
       existingRateCard.mode = mode;
@@ -97,6 +100,7 @@ const saveRate = async (req, res) => {
         courierServiceName,
         weightPriceBasic,
         weightPriceAdditional,
+        isFlatRate,
         codPercent,
         codCharge,
         status,
@@ -204,6 +208,7 @@ const updateRateCard = async (req, res) => {
       });
 
       if (modified) {
+        plan.markModified("rateCard");
         await plan.save();
       }
     }
@@ -432,9 +437,9 @@ const exportDemoRatecard = async (req, res) => {
       { header: "zoneE", key: "zoneE", width: 10 },
       { header: "COD Charge", key: "codCharge", width: 18 },
       { header: "COD_Percentage", key: "codPercentage", width: 15 },
+      { header: "Is Flat Rate", key: "isFlatRate", width: 15 },
     ];
 
-    // --- First ratecard: Basic and Additional ---
     // --- First ratecard: Basic and Additional ---
     worksheet.addRow({
       planName: "Silver",
@@ -448,6 +453,7 @@ const exportDemoRatecard = async (req, res) => {
       zoneE: "125.00",
       codCharge: "35.4",
       codPercentage: "1.97",
+      isFlatRate: "FALSE",
     });
 
     worksheet.addRow({
@@ -455,18 +461,15 @@ const exportDemoRatecard = async (req, res) => {
       courierServiceName: "Bluedart Air",
       typeText: "Additional",
       weight: "0.5",
-      zoneA: "42.40",
-      zoneB: "52.40",
-      zoneC: "79.00",
-      zoneD: "89.00",
-      zoneE: "112.00",
+      zoneA: "48.00",
+      zoneB: "55.00",
+      zoneC: "70.00",
+      zoneD: "80.00",
+      zoneE: "110.00",
       codCharge: "35.4",
       codPercentage: "1.97",
+      isFlatRate: "",
     });
-
-
-    // --- Add a blank row for visual separation ---
-    // worksheet.addRow({});
 
     // --- Second ratecard: Basic and Additional ---
     worksheet.addRow({
@@ -481,6 +484,7 @@ const exportDemoRatecard = async (req, res) => {
       zoneE: "100.00",
       codCharge: "32.78",
       codPercentage: "1.70",
+      isFlatRate: "TRUE",
     });
 
     worksheet.addRow({
@@ -495,6 +499,7 @@ const exportDemoRatecard = async (req, res) => {
       zoneE: "83.00",
       codCharge: "32.78",
       codPercentage: "1.70",
+      isFlatRate: "",
     });
 
 
@@ -527,34 +532,41 @@ const uploadRatecard = async (req, res) => {
     const worksheet = workbook.worksheets[0];
 
     if (!worksheet) {
-      fs.unlink(req.file.path, () => {});
+      fs.unlink(req.file.path, () => { });
       return res.status(400).json({ error: "No worksheet found" });
     }
 
     // Get header
-    const keys = worksheet
-      .getRow(1)
-      .values.slice(1)
-      .map((k) => String(k).trim());
+    const rawKeys = worksheet.getRow(1).values;
+    const keys = [];
+    for (let i = 1; i < rawKeys.length; i++) {
+      keys.push(String(rawKeys[i] || "").trim());
+    }
 
     // Parse rows, skip empty
-    const rows = worksheet
-      .getSheetValues()
-      .slice(2)
-      .filter(
-        (r) =>
-          r && r.length > 1 && r.some((cell) => cell !== null && cell !== "")
-      )
-      .map((r) => {
-        const obj = {};
-        keys.forEach((key, i) => {
-          obj[key] = r[i + 1] || "";
-        });
-        return obj;
+    const rows = [];
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return; // Skip header
+      const obj = {};
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        const key = keys[colNumber - 1];
+        if (key) {
+          // If cell has a formula or is a result, get the result
+          obj[key] = cell.value?.result !== undefined ? cell.value.result : cell.value;
+        }
       });
+      // Only add if row has at least one non-empty cell
+      if (Object.values(obj).some(v => v !== null && v !== "")) {
+        rows.push(obj);
+      }
+    });
 
     // Delete temp file
-    fs.unlink(req.file.path, () => {});
+    fs.unlink(req.file.path, () => { });
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: "No valid data rows found in Excel file." });
+    }
 
     // Fetch sets for validation
     const [providers, services, plans] = await Promise.all([
@@ -562,86 +574,114 @@ const uploadRatecard = async (req, res) => {
       CourierService.find().lean(),
       PlanName.find().lean(),
     ]);
+
     const normalize = (str = "") =>
-      str
+      String(str || "")
         .trim()
         .replace(/\s+/g, " ")
         .replace(/\u00A0/g, " ")
         .toLowerCase();
 
-    const providerSet = new Set(
-      providers.map((p) => normalize(p.courierProvider))
-    );
-    const serviceSet = new Set(services.map((s) => normalize(s.name)));
-    const planSet = new Set(plans.map((p) => normalize(p.name)));
+    // Create normalized maps for easier lookup
+    const providerMap = new Map(providers.map(p => [normalize(p.courierProvider), p]));
+    const serviceMap = new Map(services.map(s => [normalize(s.name), s]));
+    const planSet = new Set(plans.map(p => normalize(p.name)));
 
     const errors = [];
     const savedRatecards = [];
     const updatedRatecards = [];
-    const toFixedNum = (num) => Number(parseFloat(num || 0).toFixed(2));
+    const toFixedNum = (num) => {
+      const val = parseFloat(num);
+      return isNaN(val) ? 0 : Number(val.toFixed(2));
+    };
 
     // Group rows by (plan, provider, service)
     const grouped = {};
+    
+    // Key names as they appear in the sample/template
+    const H_PLAN = "Plan Name";
+    const H_SERVICE = "Courier Service Name";
+    const H_TYPE = "Type Text";
+    const H_WEIGHT = "weight";
+    const H_ZONEA = "zoneA";
+    const H_ZONEB = "zoneB";
+    const H_ZONEC = "zoneC";
+    const H_ZONED = "zoneD";
+    const H_ZONEE = "zoneE";
+    const H_COD_CHARGE = "COD Charge";
+    const H_COD_PERC = "COD_Percentage";
+    const H_IS_FLAT = "Is Flat Rate";
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNum = i + 2;
 
-      const plan = normalize(row["Plan Name"]);
-      const service = normalize(row["Courier Service Name"]);
+      // Find the row keys by normalized names to be flexible
+      const getRowVal = (headerName) => {
+        const normHeader = normalize(headerName);
+        const actualKey = Object.keys(row).find(k => normalize(k) === normHeader);
+        return actualKey ? row[actualKey] : undefined;
+      };
 
-      if (!planSet.has(plan)) {
-        errors.push(`Row ${rowNum}: Invalid Plan`);
+      const planVal = getRowVal(H_PLAN);
+      const serviceVal = getRowVal(H_SERVICE);
+      
+      const plan = normalize(planVal);
+      const service = normalize(serviceVal);
+
+      if (!plan || !planSet.has(plan)) {
+        errors.push(`Row ${rowNum}: Invalid or missing Plan Name (${planVal || "Empty"})`);
         continue;
       }
 
-      // Fetch matching service to get provider
-      const matchedService = services.find(s => normalize(s.name) === service);
+      const matchedService = serviceMap.get(service);
       if (!matchedService) {
-        errors.push(`Row ${rowNum}: Invalid Service (${row["Courier Service Name"]})`);
+        errors.push(`Row ${rowNum}: Invalid or missing Courier Service Name (${serviceVal || "Empty"})`);
         continue;
       }
 
       const providerName = matchedService.provider;
-      const matchedProvider = providers.find(p => normalize(p.courierProvider) === normalize(providerName));
+      const matchedProvider = providerMap.get(normalize(providerName));
 
       if (!matchedProvider || matchedProvider.status === "Disable") {
         errors.push(`Row ${rowNum}: Provider ${providerName} is either invalid or disabled`);
         continue;
       }
 
-      const provider = normalize(providerName);
-
-
-      const key = `${row["Plan Name"]}__${providerName}__${row["Courier Service Name"]}`;
+      const key = `${plan}__${normalize(providerName)}__${service}`;
       if (!grouped[key]) {
+        const rawFlat = String(getRowVal(H_IS_FLAT) || "").trim().toLowerCase();
+        const parsedIsFlatRate = rawFlat === "true" || rawFlat === "1" || rawFlat === "yes";
+
         grouped[key] = {
-          plan: row["Plan Name"],
+          plan: planVal,
           courierProviderName: providerName,
-          courierServiceName: row["Courier Service Name"],
+          courierServiceName: serviceVal,
           weightPriceBasic: [],
           weightPriceAdditional: [],
-          codCharge: toFixedNum(row["COD Charge"]),
-          codPercent: toFixedNum(row["COD_Percentage"]),
+          codCharge: toFixedNum(getRowVal(H_COD_CHARGE)),
+          codPercent: toFixedNum(getRowVal(H_COD_PERC)),
+          isFlatRate: parsedIsFlatRate,
         };
       }
 
       const weightObj = {
-        weight: toFixedNum(row["weight"]) * 1000, // kg to grams
-        zoneA: toFixedNum(row["zoneA"]),
-        zoneB: toFixedNum(row["zoneB"]),
-        zoneC: toFixedNum(row["zoneC"]),
-        zoneD: toFixedNum(row["zoneD"]),
-        zoneE: toFixedNum(row["zoneE"]),
+        weight: toFixedNum(getRowVal(H_WEIGHT)) * 1000,
+        zoneA: toFixedNum(getRowVal(H_ZONEA)),
+        zoneB: toFixedNum(getRowVal(H_ZONEB)),
+        zoneC: toFixedNum(getRowVal(H_ZONEC)),
+        zoneD: toFixedNum(getRowVal(H_ZONED)),
+        zoneE: toFixedNum(getRowVal(H_ZONEE)),
       };
 
-      const typeText = normalize(row["Type Text"] || "");
+      const typeText = normalize(getRowVal(H_TYPE));
       if (typeText === "basic") {
         grouped[key].weightPriceBasic.push(weightObj);
       } else if (typeText === "additional") {
         grouped[key].weightPriceAdditional.push(weightObj);
       } else {
         errors.push(
-          `Row ${rowNum}: Invalid Type Text (must be Basic or Additional)`
+          `Row ${rowNum}: Invalid Type Text "${getRowVal(H_TYPE)}" (must be Basic or Additional)`
         );
       }
     }
@@ -649,26 +689,23 @@ const uploadRatecard = async (req, res) => {
     // Save or update grouped ratecards
     for (const key in grouped) {
       const g = grouped[key];
-      const mode = services.find(
-        (s) => normalize(s.name) === normalize(g.courierServiceName)
-      )?.courierType;
+      const mode = serviceMap.get(normalize(g.courierServiceName))?.courierType;
 
-      // Common data structure
       const rateCardData = {
-        plan: (g.plan || "").trim(),
+        plan: String(g.plan || "").trim(),
         mode: mode || "",
-        courierProviderName: (g.courierProviderName || "").trim(),
-        courierServiceName: (g.courierServiceName || "").trim(),
+        courierProviderName: String(g.courierProviderName || "").trim(),
+        courierServiceName: String(g.courierServiceName || "").trim(),
         weightPriceBasic: g.weightPriceBasic,
         weightPriceAdditional: g.weightPriceAdditional,
         codCharge: parseFloat(g.codCharge) || 0,
         codPercent: parseFloat(g.codPercent) || 0,
+        isFlatRate: g.isFlatRate === true,
         status: "Active",
         shipmentType: "Forward",
         defaultRate: true,
       };
 
-      // 🔍 Check for existing rate card
       const existing = await RateCard.findOne({
         plan: rateCardData.plan,
         courierProviderName: rateCardData.courierProviderName,
@@ -677,40 +714,30 @@ const uploadRatecard = async (req, res) => {
       });
 
       if (existing) {
-        // 🟢 Update existing rate card
         Object.assign(existing, rateCardData);
         await existing.save();
         updatedRatecards.push(existing);
 
-        // ✅ Update the Plan with the updated rateCard object
-        const planName = rateCardData.plan;
-
-        // If Plan already contains that courier service, replace it
         await Plan.updateMany(
           {
-            planName,
+            planName: rateCardData.plan,
             "rateCard.courierServiceName": rateCardData.courierServiceName,
           },
           { $set: { "rateCard.$": existing.toObject() } }
         );
 
-        // If Plan doesn't contain it yet, push it as a new one
         await Plan.updateMany(
           {
-            planName,
-            "rateCard.courierServiceName": {
-              $ne: rateCardData.courierServiceName,
-            },
+            planName: rateCardData.plan,
+            "rateCard.courierServiceName": { $ne: rateCardData.courierServiceName },
           },
           { $push: { rateCard: existing.toObject() } }
         );
       } else {
-        // 🆕 Create new rate card
         const rateCardDoc = new RateCard(rateCardData);
         await rateCardDoc.save();
         savedRatecards.push(rateCardDoc);
 
-        // ✅ Push this new rateCard into Plan
         await Plan.updateMany(
           { planName: rateCardData.plan },
           { $push: { rateCard: rateCardDoc.toObject() } }
@@ -718,8 +745,13 @@ const uploadRatecard = async (req, res) => {
       }
     }
 
+    let finalMessage = `Ratecard upload complete. ${savedRatecards.length} new, ${updatedRatecards.length} updated.`;
+    if (errors.length > 0) {
+      finalMessage += ` Found ${errors.length} errors in rows.`;
+    }
+
     return res.status(200).json({
-      message: `Ratecard upload complete. ${savedRatecards.length} new, ${updatedRatecards.length} updated.`,
+      message: finalMessage,
       savedCount: savedRatecards.length,
       updatedCount: updatedRatecards.length,
       errors,

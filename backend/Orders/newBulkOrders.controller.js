@@ -278,7 +278,9 @@ const shipBulkOrder = async (req, res) => {
     // console.log(flattenedAvailableService);
 
     const fplans = plans.flatMap((plan) =>
-      plan.rateCard.map((item) => item.courierServiceName)
+      plan.rateCard
+        .filter((item) => item.status === "Active")
+        .map((item) => item.courierServiceName)
     );
     // console.log("Before filtering with fplans:");
     // flattenedAvailableService.forEach((svc) => console.log(`"${svc.name}"`));

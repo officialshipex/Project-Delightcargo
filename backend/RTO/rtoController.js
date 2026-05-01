@@ -36,54 +36,41 @@ const rtoCharges = async () => {
           item.receiverAddress.pinCode
         );
         const currentZone = zoneRes.zone;
-        const planData = await Plan.findOne({ userId: item.userId }).session(
-          session
-        );
-        const rateCard = await rateCards
-          .findOne({
-            plan: planData?.planName,
-            courierServiceName: item.courierServiceName,
-          })
-          .session(session);
+        const planData = await Plan.findOne({ userId: item.userId }).session(session);
 
-        if (!rateCard) {
+        // ✅ Get user-specific rate card from the plan's embedded array
+        const embeddedRateCard = planData?.rateCard?.find(
+          (r) => r.courierServiceName === item.courierServiceName
+        );
+
+        if (!embeddedRateCard) {
           console.warn(
-            `No rate card for courier ${item.courierServiceName}, skipping AWB ${item.awb_number}`
+            `No rate card for courier ${item.courierServiceName} in user plan, skipping AWB ${item.awb_number}`
           );
           await session.abortTransaction();
           session.endSession();
           continue;
         }
 
+        // ✅ Fetch isFlatRate by _id from RateCard collection (user-specific, _id-based)
+        const rateCardDoc = await rateCards.findById(embeddedRateCard._id).session(session);
+        const isFlatRate = rateCardDoc?.isFlatRate === true;
+
         // 2️⃣ Calculate charges
-        const extraWeight =
-          item.packageDetails.applicableWeight * 1000 -
-          rateCard.weightPriceBasic[0].weight;
-        const extraWeightCount = Math.max(
-          0,
-          Math.ceil(extraWeight / rateCard.weightPriceAdditional[0].weight)
-        );
-
-        let baseCharge =
-          parseFloat(rateCard.weightPriceBasic[0][currentZone]) || 0;
-        let charges = baseCharge;
-        if (extraWeight > 0) {
-          charges +=
-            (parseFloat(rateCard.weightPriceAdditional[0][currentZone]) || 0) *
-            extraWeightCount;
-        }
-
-        const gstAmount = parseFloat(((charges * gstRate) / 100).toFixed(2));
-        const totalChargesReverse = parseFloat(
-          (charges + gstAmount).toFixed(2)
-        );
-
+        let charges = 0;
+        let gstAmount = 0;
+        let totalChargesReverse = 0;
         let codCharges = 0;
+
+        // RTO charges are no longer required (set to 0)
+        charges = 0;
+        gstAmount = 0;
+        totalChargesReverse = 0;
+
         if (item.paymentDetails?.method === "COD") {
           codCharges = Math.max(
-            rateCard.codCharge || 0,
-            ((item.paymentDetails.amount || 0) * (rateCard.codPercent || 0)) /
-              100
+            embeddedRateCard.codCharge || 0,
+            ((item.paymentDetails.amount || 0) * (embeddedRateCard.codPercent || 0)) / 100
           );
           codCharges = parseFloat(codCharges.toFixed(2));
         }
@@ -214,38 +201,45 @@ const rtoCharges = async () => {
           );
         }
 
-        // 6️⃣ Apply RTO debit (atomic decrement and then push tx with returned balance)
-        const updAfterDebit = await applyIncAndGet(
-          userWallet._id,
-          -totalChargesReverse
-        );
-        const balanceAfterDebit = parseFloat(
-          (updAfterDebit.balance || 0).toFixed(2)
-        );
+        // 6️⃣ Apply RTO debit (only if charges > 0)
+        let finalBalanceForOrder = userWallet.balance;
 
-        await wallet.updateOne(
-          { _id: userWallet._id },
-          {
-            $push: {
-              transactions: {
-                channelOrderId: item.orderId || null,
-                category: "debit",
-                amount: totalChargesReverse,
-                balanceAfterTransaction: balanceAfterDebit,
-                date: rtoDate,
-                awb_number: awb,
-                description: rtoDescription,
-                priceBreakup: {
-                  freight: charges,
-                  gst: gstAmount,
+        if (totalChargesReverse > 0) {
+          const updAfterDebit = await applyIncAndGet(
+            userWallet._id,
+            -totalChargesReverse
+          );
+          const balanceAfterDebit = parseFloat(
+            (updAfterDebit.balance || 0).toFixed(2)
+          );
+          finalBalanceForOrder = balanceAfterDebit;
+
+          await wallet.updateOne(
+            { _id: userWallet._id },
+            {
+              $push: {
+                transactions: {
+                  channelOrderId: item.orderId || null,
+                  category: "debit",
+                  amount: totalChargesReverse,
+                  balanceAfterTransaction: balanceAfterDebit,
+                  date: rtoDate,
+                  awb_number: awb,
+                  description: rtoDescription,
+                  priceBreakup: {
+                    freight: charges,
+                    gst: gstAmount,
+                  },
                 },
               },
             },
-          },
-          { session }
-        );
+            { session }
+          );
+        } else {
+          console.log(`ℹ️ Skipping RTO debit for AWB ${awb} (Flat Rate or Zero Charges)`);
+        }
 
-        // 7️⃣ Save RTO charges on order
+        // 7️⃣ Save RTO charges on order (always do this to mark as processed)
         await Order.updateOne(
           { _id: item._id },
           {

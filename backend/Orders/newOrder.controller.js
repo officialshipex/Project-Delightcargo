@@ -1445,6 +1445,7 @@ const ShipeNowOrder = async (req, res) => {
         }
 
         // ✅ Calculate Pickup Date based on Cutoff Time (EPDMap)
+
         const matchedEPD = EPDRates.find(
           (epd) => normalize(epd.serviceName) === normalize(service.item.name)
         );
@@ -1461,7 +1462,7 @@ const ShipeNowOrder = async (req, res) => {
             pickupDate.setDate(now.getDate() + 1);
           }
         }
-
+// console.log("matchedRate",matchedRate)
         return {
           ...matchedRate,
           provider: service.item.provider,

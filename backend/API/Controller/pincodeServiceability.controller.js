@@ -2,6 +2,7 @@ const Joi = require("joi");
 const zoneManagementController = require("../../Rate/zoneManagementController");
 const getZone = zoneManagementController.getZone;
 const Plan = require("../../models/Plan.model");
+const RateCard = require("../../models/rateCards");
 const Couriers = require("../../models/AllCourierSchema.js");
 
 const {
@@ -127,7 +128,14 @@ const pincodeServiceability = async (req, res) => {
         message: "No rate cards available for this user.",
       });
     }
-    const rateCards = plan.rateCard;
+    const rateCards = plan.rateCard.filter(rc => rc.status === "Active");
+
+    // ✅ Build isFlatRate lookup by _id — user-specific even if two users share plan name
+    const rcIds = rateCards.map((r) => r._id).filter(Boolean);
+    const rateCardDocs = await RateCard.find({ _id: { $in: rcIds } });
+    const flatRateMap = new Map(
+      rateCardDocs.map((doc) => [doc._id.toString(), doc.isFlatRate === true])
+    );
 
     // ✅ Get enabled couriers from DB
     const activeCouriers = await Couriers.find({ status: "Enable" }).select(
@@ -307,8 +315,9 @@ const pincodeServiceability = async (req, res) => {
           : basicCharge + additionalCharge * count;
 
       // ✅ COD calculation
+      const isFlatRate = flatRateMap.get(rc._id?.toString()) || false;
       let cod = 0;
-      if (paymentType === "COD") {
+      if (paymentType === "COD" && !isFlatRate) {
         const orderValue = Number(declaredValue) || 0;
         if (
           typeof rc.codCharge === "number" &&
@@ -319,7 +328,9 @@ const pincodeServiceability = async (req, res) => {
       }
 
       // ✅ GST + Final total
-      const gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
+      const gstAmount = !isFlatRate
+        ? Number(((finalCharge + cod) * gst) / 100).toFixed(2)
+        : "0";
       const totalCharges = Math.round(
         finalCharge + cod + parseFloat(gstAmount),
       );

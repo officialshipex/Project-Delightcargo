@@ -74,7 +74,15 @@ const calculateRate = async (req, res) => {
     const ans = [];
     const serviceabilityCache = {};
 
+    // ✅ Build isFlatRate lookup by _id — user-specific even if two users share plan name
+    const rcIds = rateCards.map((r) => r._id).filter(Boolean);
+    const rateCardDocs = await RateCard.find({ _id: { $in: rcIds } });
+    const flatRateMap = new Map(
+      rateCardDocs.map((doc) => [doc._id.toString(), doc.isFlatRate === true])
+    );
+
     for (let rc of rateCards) {
+      const isFlatRate = flatRateMap.get(rc._id?.toString()) || false;
       const provider = rc.courierProviderName;
       const mode = rc.mode;
       let serviceable = { success: false };
@@ -219,9 +227,10 @@ const calculateRate = async (req, res) => {
           ? basicCharge
           : basicCharge + additionalCharge * count;
 
+      const isFlat = isFlatRate;
       // Step 6: COD charges
       let cod = 0;
-      if (paymentType === "COD") {
+      if (paymentType === "COD" && !isFlat) {
         const orderValue = Number(declaredValue) || 0;
         if (
           typeof rc.codCharge === "number" &&
@@ -232,7 +241,11 @@ const calculateRate = async (req, res) => {
       }
 
       // Step 7: GST and total
-      let gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
+      let gstAmount = 0;
+      if (!isFlat) {
+        gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
+      }
+
       let totalCharges = Math.round(finalCharge + cod + parseFloat(gstAmount));
 
       ans.push({
@@ -290,8 +303,17 @@ async function calculateRateForService(payload) {
     // const rateCards = [];
     const plan = await Plan.findOne({ userId: userID });
     let RateCards = plan.rateCard;
-    // console.log("rate", RateCards);
+
+    // ✅ Build isFlatRate lookup by _id — user-specific even if two users share plan name
+    const rcIds = RateCards.map((r) => r._id).filter(Boolean);
+    const rateCardDocs = await RateCard.find({ _id: { $in: rcIds } });
+    const flatRateMap = new Map(
+      rateCardDocs.map((doc) => [doc._id.toString(), doc.isFlatRate === true])
+    );
+
     for (const rc of RateCards) {
+      if (rc.status !== "Active") continue;
+      const isFlatRate = flatRateMap.get(rc._id?.toString()) || false;
       const basicChargeForward = parseFloat(
         rc.weightPriceBasic[0][currentZone],
       );
@@ -317,7 +339,7 @@ async function calculateRateForService(payload) {
         // console.log("totalForwardCharge222", totalForwardCharge);
       }
       let codCharge = 0;
-      if (cod === "Yes") {
+      if (cod === "Yes" && !isFlatRate) {
         const orderValue = Number(valueInINR) || 0;
         if (
           typeof rc.codCharge === "number" &&
@@ -332,15 +354,18 @@ async function calculateRateForService(payload) {
           console.error("COD charge or percentage is not properly defined.");
         }
       }
-      // console.log("totalForwardCharge", totalForwardCharge);
-      const gstAmountForward = (
-        (totalForwardCharge + codCharge) *
-        (gstRate / 100)
-      ).toFixed(2);
+      let gstAmountForward = 0;
+      if (!isFlatRate) {
+        gstAmountForward = (
+          (totalForwardCharge + codCharge) *
+          (gstRate / 100)
+        ).toFixed(2);
+      }
+
       const totalChargesForward = (
         totalForwardCharge +
         codCharge +
-        (totalForwardCharge + codCharge) * (gstRate / 100)
+        parseFloat(gstAmountForward)
       ).toFixed(2);
       // console.log("totalChargesForward",totalChargesForward)
       const allRates = {
@@ -403,6 +428,10 @@ async function calculateRateForDispute(payload) {
       throw new Error("No matching service found");
     }
 
+    // ✅ Fetch actual RateCard by _id for user-specific isFlatRate and status check
+    const actualRateCard = await RateCard.findById(services[0]?._id);
+    const disputeIsFlatRate = actualRateCard?.isFlatRate === true;
+
     // Convert extra weight from KG to grams
     const extraWeightInGrams = Math.ceil(parseFloat(weight) * 1000); // e.g., 2.88 kg → 2880 g
 
@@ -429,7 +458,7 @@ async function calculateRateForDispute(payload) {
       totalForwardCharge = parseFloat(totalForwardCharge.toFixed(2));
 
       let codCharge = 0;
-      if (cod === "Yes") {
+      if (cod === "Yes" && !disputeIsFlatRate) {
         const orderValue = Number(valueInINR) || 0;
         if (
           typeof rc.codCharge === "number" &&
@@ -445,9 +474,12 @@ async function calculateRateForDispute(payload) {
         }
       }
 
-      const gstAmountForward = parseFloat(
-        ((totalForwardCharge + codCharge) * (gstRate / 100)).toFixed(2),
-      );
+      let gstAmountForward = 0;
+      if (!disputeIsFlatRate) {
+        gstAmountForward = parseFloat(
+          ((totalForwardCharge + codCharge) * (gstRate / 100)).toFixed(2),
+        );
+      }
       const totalChargesForward = parseFloat(
         (totalForwardCharge + codCharge + gstAmountForward).toFixed(2),
       );
@@ -505,7 +537,11 @@ async function calculateRateForServiceBulk(payload) {
         filteredServices.courierServiceName?.trim().toLowerCase(),
     );
 
-    if (!rc) throw new Error("Selected courier not found in plan rate card");
+    if (!rc || rc.status !== "Active") throw new Error("Selected courier not found or is currently inactive");
+
+    // ✅ Fetch actual RateCard by _id for user-specific isFlatRate
+    const actualRateCard = await RateCard.findById(rc?._id);
+    const isFlatRate = actualRateCard?.isFlatRate === true;
 
     // Extract basic & additional weight/charges
     const basicWeight = parseFloat(rc.weightPriceBasic?.[0]?.weight || 0);
@@ -528,7 +564,7 @@ async function calculateRateForServiceBulk(payload) {
 
     // 🧾 COD charge calculation
     let codCharge = 0;
-    if (cod === "Yes") {
+    if (cod === "Yes" && !isFlatRate) {
       const orderValue = Number(valueInINR) || 0;
       const baseCodCharge = parseFloat(rc.codCharge) || 0;
       const codPercent = parseFloat(rc.codPercent) || 0;
@@ -536,7 +572,10 @@ async function calculateRateForServiceBulk(payload) {
     }
 
     // 🧮 GST + Final total
-    const gstAmount = ((totalForwardCharge + codCharge) * gstRate) / 100;
+    let gstAmount = 0;
+    if (!isFlatRate) {
+      gstAmount = ((totalForwardCharge + codCharge) * gstRate) / 100;
+    }
     const totalFinalCharge = totalForwardCharge + codCharge + gstAmount;
 
     const rateDetails = {

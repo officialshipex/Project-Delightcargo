@@ -56,13 +56,19 @@ const rateCardSchema = new mongoose.Schema({
   },
   weightPriceBasic: [weightSchema], // Array of weight schemas for the basic rate
   weightPriceAdditional: [weightSchema], // Array of weight schemas for the additional rate
+  isFlatRate: {
+    type: Boolean,
+    default: false,
+  },
   codPercent: {
     type: Number,
-    required: true,
+    required: false,
+    default: 0,
   },
   codCharge: {
     type: Number,
-    required: true,
+    required: false,
+    default: 0,
   },
   gst: {
     type: Number,

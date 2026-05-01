@@ -77,13 +77,20 @@ const ShipRocketWebhook = async (req, res) => {
     const body = req.body;
     console.log("ShipRocket Webhook Received:", JSON.stringify(body, null, 2));
 
+    const moment = require("moment");
+
     // Shiprocket sends individual shipment event
     const awb = body.awb;
     const statusId = parseInt(body.current_status_id || body.status_id);
     const statusText = body.current_status || body.status || "Unknown";
-    const location = body.location || "Unknown";
-    const timestamp = body.current_timestamp ? new Date(body.current_timestamp) : new Date();
-    const remark = body.activity || statusText;
+    const location = body.location || (body.scans && body.scans.length > 0 ? body.scans[body.scans.length - 1].location : "Unknown");
+    
+    // Parse date using moment to handle Shiprocket's format
+    const rawTimestamp = body.current_timestamp || (body.scans && body.scans.length > 0 ? body.scans[body.scans.length - 1].date : null);
+    const timestamp = rawTimestamp ? moment(rawTimestamp, ["DD-MM-YYYY HH:mm:ss", "YYYY-MM-DD HH:mm:ss", "DD MM YYYY HH:mm:ss"]).toDate() : new Date();
+    
+    // Extract remark/activity
+    const remark = body.activity || (body.scans && body.scans.length > 0 ? body.scans[body.scans.length - 1].activity : statusText);
 
     if (!awb) {
       console.warn("ShipRocket Webhook: Missing AWB, skipping event.");
