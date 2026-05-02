@@ -282,7 +282,7 @@ const pincodeServiceability = async (req, res) => {
       if (provider.toLowerCase() === "boxdlogistics" && isServiceable && Array.isArray(serviceable.courier_ids)) {
         const sName = rc.courierServiceName.toLowerCase();
         if (sName.includes("surface")) {
-          isServiceable = serviceable.courier_ids.includes(4);
+          isServiceable = serviceable.courier_ids.includes(4) || serviceable.courier_ids.includes(47);
         } else if (sName.includes("air")) {
           isServiceable = serviceable.courier_ids.includes(6);
         }

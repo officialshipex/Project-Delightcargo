@@ -286,7 +286,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
       if (res && res.success && Array.isArray(res.courier_ids)) {
         const sName = service.name.toLowerCase();
         if (sName.includes("surface")) {
-          return { ...res, success: res.courier_ids.includes(4) };
+          return { ...res, success: res.courier_ids.includes(4) || res.courier_ids.includes(47) };
         } else if (sName.includes("air")) {
           return { ...res, success: res.courier_ids.includes(6) };
         }

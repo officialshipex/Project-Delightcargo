@@ -13,8 +13,36 @@ const PlanName = require("../models/createPlanName.model");
 const B2BRateCard = require("../B2B/models/ratecard.model");
 const ActivityLog = require("../models/ActivityLog.model");
 
+const normalizeRateCard = (data) => {
+  const parseObj = (obj) => {
+    if (!obj) return {};
+    const result = { ...obj };
+    ["weight", "zoneA", "zoneB", "zoneC", "zoneD", "zoneE"].forEach(key => {
+      if (result[key] !== undefined) {
+        result[key] = parseFloat(result[key]) || 0;
+      }
+    });
+    return result;
+  };
+
+  const wrapArray = (val) => {
+    if (Array.isArray(val)) return val.map(parseObj);
+    if (val && typeof val === "object") return [parseObj(val)];
+    return [];
+  };
+
+  return {
+    ...data,
+    weightPriceBasic: wrapArray(data.weightPriceBasic),
+    weightPriceAdditional: wrapArray(data.weightPriceAdditional),
+    codPercent: parseFloat(data.codPercent) || 0,
+    codCharge: parseFloat(data.codCharge) || 0,
+  };
+};
+
 const saveRate = async (req, res) => {
   try {
+    const normalizedData = normalizeRateCard(req.body);
     const {
       plan,
       courierProviderName,
@@ -27,22 +55,8 @@ const saveRate = async (req, res) => {
       codCharge,
       status,
       shipmentType,
-    } = req.body;
-
-    // console.log(weightPriceBasic);
-    // console.log(weightPriceAdditional);
-
-    // Fetch users with assigned plans (filtered by planName)
-    const usersWithPlans = await Plan.find({ planName: plan });
-
-    // if (!usersWithPlans || usersWithPlans.length === 0) {
-    //   return res.status(404).json({
-    //     success: false,
-    //     message: "No users found with assigned plans",
-    //   });
-    // }
-
-    // console.log(usersWithPlans);
+      userId // Added userId for user-specific override
+    } = normalizedData;
 
     // Function to check required fields
     const checkRequiredFields = (weightData) => {
@@ -68,6 +82,43 @@ const saveRate = async (req, res) => {
       });
     }
 
+    // If userId is provided, handle user-specific override without affecting global RateCard collection
+    if (userId) {
+      const userPlan = await Plan.findOne({ userId });
+      if (!userPlan) {
+        return res.status(404).json({ message: "User plan not found" });
+      }
+
+      const rateCardData = {
+        _id: new (require("mongoose")).Types.ObjectId(),
+        ...normalizedData
+      };
+
+      const existingIdx = userPlan.rateCard.findIndex(
+        (rc) =>
+          rc.courierServiceName === courierServiceName &&
+          rc.courierProviderName === courierProviderName
+      );
+
+      if (existingIdx !== -1) {
+        // Maintain the same ID if it exists
+        rateCardData._id = userPlan.rateCard[existingIdx]._id || rateCardData._id;
+        userPlan.rateCard[existingIdx] = rateCardData;
+      } else {
+        userPlan.rateCard.push(rateCardData);
+      }
+
+      userPlan.markModified("rateCard");
+      await userPlan.save();
+
+      return res.status(201).json({
+        message: "Rate card updated for user successfully (Isolated).",
+        rateCard: rateCardData
+      });
+    }
+
+    // --- Global Behavior below (only reached if no userId) ---
+
     // Check if the rate card already exists
     let existingRateCard = await RateCard.findOne({
       plan,
@@ -80,71 +131,26 @@ const saveRate = async (req, res) => {
 
     if (existingRateCard) {
       // Update existing rate card
-      existingRateCard.weightPriceBasic = weightPriceBasic;
-      existingRateCard.weightPriceAdditional = weightPriceAdditional;
-      existingRateCard.isFlatRate = isFlatRate;
-      existingRateCard.codPercent = codPercent;
-      existingRateCard.codCharge = codCharge;
-      existingRateCard.mode = mode;
+      Object.assign(existingRateCard, normalizedData);
 
       savedRateCard = await existingRateCard.save();
-
-      res.status(201).json({
-        message: `${plan} rate card has been updated successfully for service ${courierServiceName} under provider ${courierProviderName}`,
-      });
     } else {
       // Create new rate card
-      const rcard = new RateCard({
-        plan,
-        mode,
-        courierProviderName,
-        courierServiceName,
-        weightPriceBasic,
-        weightPriceAdditional,
-        isFlatRate,
-        codPercent,
-        codCharge,
-        status,
-        shipmentType,
-        defaultRate: true,
-      });
-
-      savedRateCard = await rcard.save();
-
-      // Update courier service with new rate card
-      // await CourierServiceSecond.updateOne(
-      //   { courierProviderServiceName: courierServiceName },
-      //   { $push: { rateCards: savedRateCard } }
-      // );
-
-      res.status(201).json({
-        message: `${plan} rate card has been added successfully for service ${courierServiceName} under provider ${courierProviderName}`,
-      });
+      savedRateCard = await RateCard.create({ ...normalizedData, defaultRate: true });
     }
 
-    // **Update all users' rateCard field who have the same plan**
+    // **Update all users' rateCard field who have the same plan** (Original global behavior)
     await Plan.updateMany(
       { planName: plan },
       { $push: { rateCard: savedRateCard } }
     );
 
-    // Log the action
-    const performerId = req.user?._id || req.employee?._id;
-    if (performerId) {
-      await ActivityLog.create({
-        performedBy: performerId,
-        action: existingRateCard ? "EDIT" : "ADD",
-        module: "RATE_CARD",
-        planName: plan,
-        details: {
-          courierProviderName,
-          courierServiceName,
-          shipmentType
-        }
-      });
-    }
-
     console.log(`Updated users with plan "${plan}" to include new rate card`);
+
+    return res.status(201).json({
+      message: `${plan} rate card has been saved successfully.`,
+      rateCard: savedRateCard
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error saving or updating Rate Card" });
@@ -153,6 +159,15 @@ const saveRate = async (req, res) => {
 
 const getRateCard = async (req, res) => {
   try {
+    const { userId } = req.query;
+    if (userId) {
+      const userPlan = await Plan.findOne({ userId });
+      return res.status(200).json({
+        message: "User rate cards retrieved successfully",
+        rateCards: userPlan ? userPlan.rateCard : [],
+      });
+    }
+
     const allRateCard = await RateCard.find();
     res.status(200).json({
       message: "Rate cards retrieved successfully",
@@ -160,7 +175,7 @@ const getRateCard = async (req, res) => {
     });
   } catch (err) {
     console.log(err);
-    res.status(500).json({ message: "Error retrieving rate cards" }); // Handle errors
+    res.status(500).json({ message: "Error retrieving rate cards" });
   }
 };
 
@@ -195,9 +210,45 @@ const getUsersWithPlans = async (req, res) => {
 const updateRateCard = async (req, res) => {
   try {
     const { id } = req.params;
+    const { userId } = req.body;
+    const normalizedData = normalizeRateCard(req.body);
+
+    if (userId) {
+      // Step 1: Update ONLY specific user's plan
+      const plan = await Plan.findOne({ userId });
+      if (!plan) {
+        return res.status(404).json({ message: "User plan not found" });
+      }
+
+      let modified = false;
+      plan.rateCard = plan.rateCard.map((rc) => {
+        if (rc._id.toString() === id) {
+          modified = true;
+          return {
+            ...rc._doc || rc,
+            ...normalizedData,
+            _id: id 
+          };
+        }
+        return rc;
+      });
+
+      if (!modified) {
+        return res.status(404).json({ message: "Rate card not found in user plan" });
+      }
+
+      plan.markModified("rateCard");
+      await plan.save();
+
+      return res.status(200).json({
+        message: "User rate card updated successfully (Isolated).",
+      });
+    }
+
+    // --- Global Behavior below (only reached if no userId) ---
 
     // Step 1: Update the main RateCard document
-    const updatedRateCard = await RateCard.findByIdAndUpdate(id, req.body, {
+    const updatedRateCard = await RateCard.findByIdAndUpdate(id, normalizedData, {
       new: true,
       runValidators: true,
     });
@@ -206,10 +257,9 @@ const updateRateCard = async (req, res) => {
       return res.status(404).json({ message: "Rate Card not found" });
     }
 
-    // Step 2: Find all plans with the given plan name
-    const plans = await Plan.find({ planName: req.body.plan });
+    // Step 2: Update plans globally
+    const plans = await Plan.find({ planName: updatedRateCard.plan });
 
-    // Step 3: Loop over plans and update matching rateCard object
     for (const plan of plans) {
       let modified = false;
 
@@ -217,8 +267,8 @@ const updateRateCard = async (req, res) => {
         if (rc._id.toString() === id) {
           modified = true;
           return {
-            ...rc._doc, // existing structure
-            ...updatedRateCard.toObject(), // overwrite with new data
+            ...rc._doc || rc,
+            ...updatedRateCard.toObject(),
           };
         }
         return rc;
@@ -229,25 +279,28 @@ const updateRateCard = async (req, res) => {
         await plan.save();
       }
     }
-
+ 
     // Log the action
     const performerId = req.user?._id || req.employee?._id;
     if (performerId) {
       await ActivityLog.create({
         performedBy: performerId,
-        action: "EDIT",
+        action: "UPDATE",
         module: "RATE_CARD",
-        planName: req.body.plan,
+        planName: updatedRateCard.plan,
         details: {
           rateCardId: id,
-          courierServiceName: updatedRateCard.courierServiceName
+          updatedFields: Object.keys(req.body)
         }
       });
     }
 
-    res.status(200).json({ message: "Rate Card updated in matching plans." });
+    res.status(200).json({
+      message: "Rate Card updated globally.",
+      rateCard: updatedRateCard,
+    });
   } catch (error) {
-    console.error("Error updating rate card in plans:", error);
+    console.error("Error updating rate card:", error);
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 };
@@ -255,6 +308,19 @@ const updateRateCard = async (req, res) => {
 const deleteRateCard = async (req, res) => {
   try {
     const { id } = req.params;
+    const { userId } = req.body;
+
+    if (userId) {
+      const plan = await Plan.findOne({ userId });
+      if (plan) {
+        plan.rateCard = plan.rateCard.filter((rc) => rc._id.toString() !== id);
+        plan.markModified("rateCard");
+        await plan.save();
+      }
+      return res.status(200).json({ message: "Rate card removed from user plan successfully (Isolated)." });
+    }
+
+    // --- Global Behavior below ---
 
     // Step 1: Delete the RateCard document
     const deletedRateCard = await RateCard.findByIdAndDelete(id);
@@ -263,16 +329,15 @@ const deleteRateCard = async (req, res) => {
       return res.status(404).json({ message: "Rate Card not found" });
     }
 
-    // Step 2: Find all plans with the same plan name
+    // Step 2: Remove from all plans with the same plan name
     const plans = await Plan.find({ planName: deletedRateCard.plan });
 
-    // Step 3: Remove deleted rate card from each plan's rateCard array
     for (const plan of plans) {
       const originalLength = plan.rateCard.length;
-
       plan.rateCard = plan.rateCard.filter((rc) => rc._id.toString() !== id);
 
       if (plan.rateCard.length !== originalLength) {
+        plan.markModified("rateCard");
         await plan.save();
       }
     }
@@ -303,19 +368,29 @@ const deleteRateCard = async (req, res) => {
 
 const getRateCardById = async (req, res) => {
   try {
-    const { id } = req.params; // Get the ID from the URL
-    const rateCard = await RateCard.findById(id); // Fetch the rate card by ID
+    const { id } = req.params;
+    const { userId } = req.query;
+    let rateCard;
 
-    if (!rateCard) {
-      return res.status(404).json({ message: "Rate Card not found" }); // Return 404 if not found
+    if (userId) {
+      const userPlan = await Plan.findOne({ userId });
+      if (userPlan) {
+        rateCard = userPlan.rateCard.find((rc) => rc._id.toString() === id);
+      }
     }
 
-    res
-      .status(200)
-      .json({ message: "Rate card retrieved successfully", rateCard }); // Return the found rate card
+    if (!rateCard) {
+      rateCard = await RateCard.findById(id);
+    }
+
+    if (!rateCard) {
+      return res.status(404).json({ message: "Rate Card not found" });
+    }
+
+    res.status(200).json({ message: "Rate card retrieved successfully", rateCard });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Error retrieving rate card" }); // Handle any server errors
+    console.error(err);
+    res.status(500).json({ message: "Error retrieving rate card" });
   }
 };
 
@@ -628,9 +703,8 @@ const uploadRatecard = async (req, res) => {
     const normalize = (str = "") =>
       String(str || "")
         .trim()
-        .replace(/\s+/g, " ")
-        .replace(/\u00A0/g, " ")
-        .toLowerCase();
+        .toLowerCase()
+        .replace(/[\s_]/g, "");
 
     // Create normalized maps for easier lookup
     const providerMap = new Map(providers.map(p => [normalize(p.courierProvider), p]));
@@ -662,15 +736,22 @@ const uploadRatecard = async (req, res) => {
     const H_COD_PERC = "COD_Percentage";
     const H_IS_FLAT = "Is Flat Rate";
 
-    const { plan: targetPlan, replaceExisting } = req.body;
+    const { plan: targetPlan, replaceExisting, userId } = req.body;
     const performerId = req.user?._id;
 
     if (replaceExisting === "true" && targetPlan) {
-      const cardsToDelete = await RateCard.find({ plan: targetPlan });
-      const cardIds = cardsToDelete.map(c => c._id);
-      await RateCard.deleteMany({ plan: targetPlan });
-      await Plan.updateMany({ planName: targetPlan }, { $pull: { rateCard: { _id: { $in: cardIds } } } });
-      console.log(`Cleared existing rates for plan: ${targetPlan}`);
+      if (userId) {
+        // Only clear for this specific user
+        await Plan.updateOne({ userId }, { $set: { rateCard: [] } });
+        console.log(`Cleared existing rates for user: ${userId}`);
+      } else {
+        // Global clear
+        const cardsToDelete = await RateCard.find({ plan: targetPlan });
+        const cardIds = cardsToDelete.map(c => c._id);
+        await RateCard.deleteMany({ plan: targetPlan });
+        await Plan.updateMany({ planName: targetPlan }, { $pull: { rateCard: { _id: { $in: cardIds } } } });
+        console.log(`Cleared existing rates for plan: ${targetPlan}`);
+      }
     }
 
     for (let i = 0; i < rows.length; i++) {
@@ -683,8 +764,8 @@ const uploadRatecard = async (req, res) => {
         return actualKey ? row[actualKey] : undefined;
       };
 
-      const planVal = req.body.plan || getRowVal(H_PLAN);
-      const serviceVal = getRowVal(H_SERVICE);
+      const planVal = req.body.plan || getRowVal(H_PLAN) || getRowVal("Plan");
+      const serviceVal = getRowVal(H_SERVICE) || getRowVal("Service");
       
       const plan = normalize(planVal);
       const service = normalize(serviceVal);
@@ -710,7 +791,7 @@ const uploadRatecard = async (req, res) => {
 
       const key = `${plan}__${normalize(providerName)}__${service}`;
       if (!grouped[key]) {
-        const rawFlat = String(getRowVal(H_IS_FLAT) || "").trim().toLowerCase();
+        const rawFlat = String(getRowVal(H_IS_FLAT) || getRowVal("Flat Rate") || "").trim().toLowerCase();
         const parsedIsFlatRate = rawFlat === "true" || rawFlat === "1" || rawFlat === "yes";
 
         grouped[key] = {
@@ -726,7 +807,7 @@ const uploadRatecard = async (req, res) => {
       }
 
       const weightObj = {
-        weight: toFixedNum(getRowVal(H_WEIGHT)) * 1000,
+        weight: toFixedNum(getRowVal(H_WEIGHT) || getRowVal("Weight Rate")) * 1000,
         zoneA: toFixedNum(getRowVal(H_ZONEA)),
         zoneB: toFixedNum(getRowVal(H_ZONEB)),
         zoneC: toFixedNum(getRowVal(H_ZONEC)),
@@ -734,14 +815,15 @@ const uploadRatecard = async (req, res) => {
         zoneE: toFixedNum(getRowVal(H_ZONEE)),
       };
 
-      const typeText = normalize(getRowVal(H_TYPE));
+      const typeTextRaw = getRowVal(H_TYPE) || getRowVal("Type");
+      const typeText = normalize(typeTextRaw);
       if (typeText === "basic") {
         grouped[key].weightPriceBasic.push(weightObj);
       } else if (typeText === "additional") {
         grouped[key].weightPriceAdditional.push(weightObj);
       } else {
         errors.push(
-          `Row ${rowNum}: Invalid Type Text "${getRowVal(H_TYPE)}" (must be Basic or Additional)`
+          `Row ${rowNum}: Invalid Type Text "${typeTextRaw || "Empty"}" (must be Basic or Additional)`
         );
       }
     }
@@ -766,42 +848,60 @@ const uploadRatecard = async (req, res) => {
         defaultRate: true,
       };
 
-      const existing = await RateCard.findOne({
-        plan: rateCardData.plan,
-        courierProviderName: rateCardData.courierProviderName,
-        courierServiceName: rateCardData.courierServiceName,
-        shipmentType: "Forward",
-      });
+      if (userId) {
+        // --- ISOLATED USER UPDATE ---
+        const userPlan = await Plan.findOne({ userId });
+        if (userPlan) {
+          const existingIdx = userPlan.rateCard.findIndex(
+            (rc) =>
+              rc.courierServiceName === rateCardData.courierServiceName &&
+              rc.courierProviderName === rateCardData.courierProviderName
+          );
 
-      if (existing) {
-        Object.assign(existing, rateCardData);
-        await existing.save();
-        updatedRatecards.push(existing);
-
-        await Plan.updateMany(
-          {
-            planName: rateCardData.plan,
-            "rateCard.courierServiceName": rateCardData.courierServiceName,
-          },
-          { $set: { "rateCard.$": existing.toObject() } }
-        );
-
-        await Plan.updateMany(
-          {
-            planName: rateCardData.plan,
-            "rateCard.courierServiceName": { $ne: rateCardData.courierServiceName },
-          },
-          { $push: { rateCard: existing.toObject() } }
-        );
+          if (existingIdx !== -1) {
+            // Update existing in user's plan
+            const updatedObj = { ...userPlan.rateCard[existingIdx], ...rateCardData };
+            userPlan.rateCard[existingIdx] = updatedObj;
+            updatedRatecards.push(updatedObj);
+          } else {
+            // Push new to user's plan
+            const newObj = { ...rateCardData, _id: new (require("mongoose")).Types.ObjectId() };
+            userPlan.rateCard.push(newObj);
+            savedRatecards.push(newObj);
+          }
+          userPlan.markModified("rateCard");
+          await userPlan.save();
+        }
       } else {
-        const rateCardDoc = new RateCard(rateCardData);
-        await rateCardDoc.save();
-        savedRatecards.push(rateCardDoc);
+        // --- GLOBAL UPDATE ---
+        const existing = await RateCard.findOne({
+          plan: rateCardData.plan,
+          courierProviderName: rateCardData.courierProviderName,
+          courierServiceName: rateCardData.courierServiceName,
+          shipmentType: "Forward",
+        });
 
-        await Plan.updateMany(
-          { planName: rateCardData.plan },
-          { $push: { rateCard: rateCardDoc.toObject() } }
-        );
+        if (existing) {
+          Object.assign(existing, rateCardData);
+          await existing.save();
+          updatedRatecards.push(existing);
+
+          // Update all users globally who have this rate card
+          await Plan.updateMany(
+            { planName: existing.plan, "rateCard.courierServiceName": existing.courierServiceName },
+            { $set: { "rateCard.$": existing.toObject() } }
+          );
+        } else {
+          const rateCardDoc = new RateCard(rateCardData);
+          await rateCardDoc.save();
+          savedRatecards.push(rateCardDoc);
+
+          // Add to all users with this plan globally
+          await Plan.updateMany(
+            { planName: rateCardData.plan },
+            { $push: { rateCard: rateCardDoc.toObject() } }
+          );
+        }
       }
     }
 
@@ -820,6 +920,8 @@ const uploadRatecard = async (req, res) => {
         }
       });
     }
+
+    const finalMessage = `Processed ${rows.length} rows. Saved: ${savedRatecards.length}, Updated: ${updatedRatecards.length}, Errors: ${errors.length}`;
 
     return res.status(200).json({
       message: finalMessage,

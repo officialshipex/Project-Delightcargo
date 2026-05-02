@@ -112,7 +112,7 @@ const calculateRate = async (req, res) => {
         if (boxdServiceable && Array.isArray(boxdResult.courier_ids)) {
           const sName = rc.courierServiceName.toLowerCase();
           if (sName.includes("surface")) {
-            boxdServiceable = boxdResult.courier_ids.includes(4);
+            boxdServiceable = boxdResult.courier_ids.includes(4) || boxdResult.courier_ids.includes(47);
           } else if (sName.includes("air")) {
             boxdServiceable = boxdResult.courier_ids.includes(6);
           }

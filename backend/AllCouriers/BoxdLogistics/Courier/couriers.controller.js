@@ -251,7 +251,7 @@ const checkServiceabilityBoxdLogistics = async ({
         const couriers = response.data || [];
         // console.log("couriers",couriers)
         const matchedCouriers = couriers
-            .filter((c) => c.courier_id === 4 || c.courier_id === 6)
+            .filter((c) => c.courier_id === 4 || c.courier_id === 6 || c.courier_id === 47)
             .map((c) => c.courier_id);
 
         if (matchedCouriers.length > 0) {
@@ -264,7 +264,7 @@ const checkServiceabilityBoxdLogistics = async ({
 
         return {
             success: false,
-            message: "Courier 4 or 6 not available",
+            message: "Courier 4, 6 or 47 not available",
         };
     } catch (error) {
         console.log("error", error.response?.data || error.message)

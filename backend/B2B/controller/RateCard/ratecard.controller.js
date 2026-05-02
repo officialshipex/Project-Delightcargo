@@ -289,7 +289,15 @@ exports.getPlanNames = async (req, res) => {
 
 exports.getRateCardName = async (req, res) => {
   try {
-   
+    const { userId } = req.query;
+    if (userId) {
+      const userPlan = await Plans.findOne({ userId });
+      return res.status(200).json({
+        message: "User B2B rate cards retrieved successfully",
+        B2BRateCard: userPlan ? (userPlan.B2BRateCard || []) : [],
+      });
+    }
+
     const b2bRateCard = await RateCard.find();
     res.status(200).json({
       message: "Rate cards retrieved successfully",
@@ -297,7 +305,7 @@ exports.getRateCardName = async (req, res) => {
     });
   } catch (err) {
     console.log(err);
-    res.status(500).json({ message: "Error retrieving rate cards" }); // Handle errors
+    res.status(500).json({ message: "Error retrieving rate cards" });
   }
 };
 
