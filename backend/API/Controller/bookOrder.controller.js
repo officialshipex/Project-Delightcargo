@@ -160,8 +160,9 @@ const bookOrder = async (req, res) => {
     // ✅ Check wallet balance
     const walletHoldAmount = wallet.holdAmount || 0;
     const effectiveBalance = wallet.balance - walletHoldAmount;
+    const totalAvailableBalance = effectiveBalance + (wallet.creditLimit || 0);
 
-    if (effectiveBalance < finalCharges) {
+    if (totalAvailableBalance < finalCharges) {
       return res.status(400).json({
         status: "failure",
         message: "Insufficient wallet balance to create this shipment.",

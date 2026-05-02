@@ -11,6 +11,7 @@ const Couriers = require("../models/AllCourierSchema");
 const CourierService = require("../models/CourierService.Schema");
 const PlanName = require("../models/createPlanName.model");
 const B2BRateCard = require("../B2B/models/ratecard.model");
+const ActivityLog = require("../models/ActivityLog.model");
 
 const saveRate = async (req, res) => {
   try {
@@ -127,6 +128,22 @@ const saveRate = async (req, res) => {
       { $push: { rateCard: savedRateCard } }
     );
 
+    // Log the action
+    const performerId = req.user?._id || req.employee?._id;
+    if (performerId) {
+      await ActivityLog.create({
+        performedBy: performerId,
+        action: existingRateCard ? "EDIT" : "ADD",
+        module: "RATE_CARD",
+        planName: plan,
+        details: {
+          courierProviderName,
+          courierServiceName,
+          shipmentType
+        }
+      });
+    }
+
     console.log(`Updated users with plan "${plan}" to include new rate card`);
   } catch (error) {
     console.error(error);
@@ -213,6 +230,21 @@ const updateRateCard = async (req, res) => {
       }
     }
 
+    // Log the action
+    const performerId = req.user?._id || req.employee?._id;
+    if (performerId) {
+      await ActivityLog.create({
+        performedBy: performerId,
+        action: "EDIT",
+        module: "RATE_CARD",
+        planName: req.body.plan,
+        details: {
+          rateCardId: id,
+          courierServiceName: updatedRateCard.courierServiceName
+        }
+      });
+    }
+
     res.status(200).json({ message: "Rate Card updated in matching plans." });
   } catch (error) {
     console.error("Error updating rate card in plans:", error);
@@ -243,6 +275,21 @@ const deleteRateCard = async (req, res) => {
       if (plan.rateCard.length !== originalLength) {
         await plan.save();
       }
+    }
+
+    // Log the action
+    const performerId = req.user?._id || req.employee?._id;
+    if (performerId) {
+      await ActivityLog.create({
+        performedBy: performerId,
+        action: "DELETE",
+        module: "RATE_CARD",
+        planName: deletedRateCard.plan,
+        details: {
+          rateCardId: id,
+          courierServiceName: deletedRateCard.courierServiceName
+        }
+      });
     }
 
     res.status(200).json({
@@ -422,10 +469,11 @@ const getPlanNames = async (req, res) => {
 
 const exportDemoRatecard = async (req, res) => {
   try {
+    const { hidePlan } = req.query;
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("RateCard Demo");
 
-    worksheet.columns = [
+    const columns = [
       { header: "Plan Name", key: "planName", width: 20 },
       { header: "Courier Service Name", key: "courierServiceName", width: 25 },
       { header: "Type Text", key: "typeText", width: 15 },
@@ -439,6 +487,8 @@ const exportDemoRatecard = async (req, res) => {
       { header: "COD_Percentage", key: "codPercentage", width: 15 },
       { header: "Is Flat Rate", key: "isFlatRate", width: 15 },
     ];
+
+    worksheet.columns = hidePlan === "true" ? columns.filter(col => col.key !== "planName") : columns;
 
     // --- First ratecard: Basic and Additional ---
     worksheet.addRow({
@@ -612,18 +662,28 @@ const uploadRatecard = async (req, res) => {
     const H_COD_PERC = "COD_Percentage";
     const H_IS_FLAT = "Is Flat Rate";
 
+    const { plan: targetPlan, replaceExisting } = req.body;
+    const performerId = req.user?._id;
+
+    if (replaceExisting === "true" && targetPlan) {
+      const cardsToDelete = await RateCard.find({ plan: targetPlan });
+      const cardIds = cardsToDelete.map(c => c._id);
+      await RateCard.deleteMany({ plan: targetPlan });
+      await Plan.updateMany({ planName: targetPlan }, { $pull: { rateCard: { _id: { $in: cardIds } } } });
+      console.log(`Cleared existing rates for plan: ${targetPlan}`);
+    }
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNum = i + 2;
 
-      // Find the row keys by normalized names to be flexible
       const getRowVal = (headerName) => {
         const normHeader = normalize(headerName);
         const actualKey = Object.keys(row).find(k => normalize(k) === normHeader);
         return actualKey ? row[actualKey] : undefined;
       };
 
-      const planVal = getRowVal(H_PLAN);
+      const planVal = req.body.plan || getRowVal(H_PLAN);
       const serviceVal = getRowVal(H_SERVICE);
       
       const plan = normalize(planVal);
@@ -745,9 +805,20 @@ const uploadRatecard = async (req, res) => {
       }
     }
 
-    let finalMessage = `Ratecard upload complete. ${savedRatecards.length} new, ${updatedRatecards.length} updated.`;
-    if (errors.length > 0) {
-      finalMessage += ` Found ${errors.length} errors in rows.`;
+    // Log the action
+    if (performerId) {
+      await ActivityLog.create({
+        performedBy: performerId,
+        action: "UPLOAD",
+        module: "RATE_CARD",
+        planName: targetPlan || "Bulk Upload",
+        details: {
+          savedCount: savedRatecards.length,
+          updatedCount: updatedRatecards.length,
+          replaceExisting: replaceExisting === "true",
+          errorsCount: errors.length
+        }
+      });
     }
 
     return res.status(200).json({

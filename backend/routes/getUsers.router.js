@@ -7,8 +7,8 @@ const {isAuthorized} = require('../middleware/auth.middleware')
 
 router.get("/getUsers",isAuthorized, userController.getUsers);
 router.get("/getAllUsers",isAuthorized,userController.getAllUsers)
-router.put("/assignPlan", userController.assignPlan);
-router.put("/assign/plan", userController.B2BassignPlan);
+router.put("/assignPlan", isAuthorized, userController.assignPlan);
+router.put("/assign/plan", isAuthorized, userController.B2BassignPlan);
 
 router.post("/getRateCard",userController.getRatecards);
 router.get("/getUserServices", isAuthorized, userController.getUserServices);

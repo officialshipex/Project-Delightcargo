@@ -14,6 +14,7 @@ const BillingAddress = require("../models/billingInfo.model");
 const { generateKeySync } = require("crypto");
 const Wallet = require("../models/wallet");
 const KamDetails = require("../models/KamDetails.model");
+const ActivityLog = require("../models/ActivityLog.model");
 
 const refundFreightIfSingleDebit = async () => {
   try {
@@ -904,6 +905,22 @@ const assignPlan = async (req, res) => {
       existingPlan.assignedAt = new Date();
 
       await existingPlan.save();
+      
+      // Log the action
+      const performerId = req.user?._id || req.employee?._id;
+      if (performerId) {
+        await ActivityLog.create({
+          performedBy: performerId,
+          action: "EDIT",
+          module: "RATE_CARD",
+          planName: planName,
+          details: {
+            targetUserId: userId,
+            targetUserName: userName,
+            type: "B2C_ASSIGN"
+          }
+        });
+      }
 
       return res.status(200).json({
         message: "Plan updated successfully",
@@ -920,6 +937,22 @@ const assignPlan = async (req, res) => {
     });
 
     await newPlan.save();
+
+    // Log the action
+    const performerId = req.user?._id || req.employee?._id;
+    if (performerId) {
+      await ActivityLog.create({
+        performedBy: performerId,
+        action: "ADD",
+        module: "RATE_CARD",
+        planName: planName,
+        details: {
+          targetUserId: userId,
+          targetUserName: userName,
+          type: "B2C_ASSIGN"
+        }
+      });
+    }
 
     return res.status(201).json({
       message: "Plan assigned successfully",
@@ -1237,6 +1270,23 @@ const toggleProviderStatus = async (req, res) => {
 
     await Plan.updateOne({ userId }, { $set: { rateCard: plan.rateCard } });
 
+    // Log the action
+    const performerId = req.user?._id || req.employee?._id;
+    if (performerId) {
+      await ActivityLog.create({
+        performedBy: performerId,
+        action: "EDIT",
+        module: "RATE_CARD",
+        planName: plan.planName,
+        details: {
+          targetUserId: userId,
+          provider: provider,
+          newStatus: status ? "Active" : "Inactive",
+          type: "PROVIDER_TOGGLE"
+        }
+      });
+    }
+
     res.status(200).json({ success: true, message: `${provider} services ${status ? "enabled" : "disabled"} successfully` });
   } catch (error) {
     console.error("Error toggling provider status:", error);
@@ -1258,6 +1308,23 @@ const toggleServiceStatus = async (req, res) => {
     });
 
     await Plan.updateOne({ userId }, { $set: { rateCard: plan.rateCard } });
+    
+    // Log the action
+    const performerId = req.user?._id || req.employee?._id;
+    if (performerId) {
+      await ActivityLog.create({
+        performedBy: performerId,
+        action: "EDIT",
+        module: "RATE_CARD",
+        planName: plan.planName,
+        details: {
+          targetUserId: userId,
+          courierServiceName: courierServiceName,
+          newStatus: status ? "Active" : "Inactive",
+          type: "SERVICE_TOGGLE"
+        }
+      });
+    }
 
     res.status(200).json({ success: true, message: `Service ${status ? "enabled" : "disabled"} successfully` });
   } catch (error) {
@@ -1287,6 +1354,22 @@ const updateServiceRate = async (req, res) => {
     });
 
     await Plan.updateOne({ userId }, { $set: { rateCard: plan.rateCard } });
+
+    // Log the action
+    const performerId = req.user?._id || req.employee?._id;
+    if (performerId) {
+      await ActivityLog.create({
+        performedBy: performerId,
+        action: "EDIT",
+        module: "RATE_CARD",
+        planName: plan.planName,
+        details: {
+          targetUserId: userId,
+          courierServiceName: courierServiceName,
+          type: "RATE_OVERRIDE"
+        }
+      });
+    }
 
     res.status(200).json({ success: true, message: "Rate updated successfully" });
   } catch (error) {
