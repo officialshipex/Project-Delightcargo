@@ -44,6 +44,9 @@ const {
 const {
   checkProshipServiceability,
 } = require("../AllCouriers/Proship/Courier/couriers.controller");
+const {
+  checkPincodeServiceability: checkShadowfaxServiceability,
+} = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
 const checkServiceabilityAll = async (service, id, pincode) => {
   try {
     const currentOrder = await Order.findById(id);
@@ -226,6 +229,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
           deliveryPincode: deliveryPincode,
           paymentMethod,
           codAmount: currentOrder.paymentDetails?.amount || 0,
+          courierName: service.name,
         };
         const result = await checkEkartServiceability(payload);
         // console.log("result",result)
@@ -322,9 +326,15 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         origin: pickupPincode,
         destination: deliveryPincode,
         payment_type: paymentMethod === "COD",
-        weight: (currentOrder.packageDetails?.applicableWeight || 0),
+        weight: currentOrder.packageDetails?.applicableWeight || 0,
       };
       return await checkServiceabilityShipRocket(payload);
+    }
+    if (service.provider.toLowerCase() === "shadowfax") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
+      return await checkShadowfaxServiceability(deliveryPincode, service.provider);
     }
 
     // Default

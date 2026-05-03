@@ -38,6 +38,9 @@ const {
 const {
   checkServiceabilityShipRocket,
 } = require("../../AllCouriers/ShipRocket/Courier/couriers.controller.js");
+const {
+  checkPincodeServiceability: checkShadowfaxServiceability,
+} = require("../../AllCouriers/Shadowfax/Courier/couriers.controller.js");
 
 // ✅ Input Validation Schema
 const serviceabilitySchema = Joi.object({
@@ -69,6 +72,7 @@ const courierIds = {
   BoxdLogistics: "09",
   Proship: "10",
   Shiprocket: "11",
+  Shadowfax: "12",
 };
 
 const pincodeServiceability = async (req, res) => {
@@ -213,12 +217,13 @@ const pincodeServiceability = async (req, res) => {
       },
       {
         name: "Ekart",
-        check: async () =>
+        check: async (courierName) =>
           checkEkartServiceability({
             pickUpPincode,
             deliveryPincode,
             paymentMethod: paymentType,
             codAmount: declaredValue,
+            courierName,
           }),
       },
       {
@@ -253,6 +258,11 @@ const pincodeServiceability = async (req, res) => {
             payment_type: paymentType === "COD",
             weight: applicableWeight,
           }),
+      },
+      {
+        name: "Shadowfax",
+        check: async () =>
+          checkShadowfaxServiceability(deliveryPincode),
       },
     ].filter((p) =>
       activeCourierNames.some(

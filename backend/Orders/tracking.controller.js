@@ -42,6 +42,9 @@ const {
 const {
   getTrackingByAWB: trackShiprocketOrder,
 } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
+const {
+  trackShadowfaxOrder,
+} = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
 const Bottleneck = require("bottleneck");
 const {
   sendWhatsAppMessage,
@@ -86,6 +89,7 @@ const trackSingleOrder = async (order) => {
       BoxdLogistics: trackOrderBoxdLogistics,
       Proship: trackProshipOrder,
       Shiprocket: trackShiprocketOrder,
+      Shadowfax: trackShadowfaxOrder,
     };
 
     // if (!trackingFunctions[provider]) {
@@ -101,6 +105,10 @@ const trackSingleOrder = async (order) => {
       result = await trackingFunctions["Proship"](awb_number, shipment_id);
     } else if (partner && partner === "Shiprocket") {
       result = await trackingFunctions["Shiprocket"](awb_number);
+    } else if (partner && partner === "Shadowfax") {
+      result = await trackingFunctions["Shadowfax"](awb_number);
+    } else if (provider && provider === "Shadowfax") {
+      result = await trackingFunctions["Shadowfax"](awb_number);
     } else if (provider && trackingFunctions[provider]) {
       result = await trackingFunctions[provider](awb_number, shipment_id);
     } else {
@@ -1281,8 +1289,185 @@ const trackSingleOrder = async (order) => {
     }
 
 
+    // ── Shadowfax Status Handling ──────────────────────────────────────────────
+    // Shadowfax tracking_details items: { status_id, status, remarks, created, location }
+    // status_id values defined in the Shadowfax Unified API documentation.
+    if (partner === "Shadowfax" || provider === "Shadowfax") {
+      const sfxStatusId = normalizedData.Instructions?.toLowerCase() || ""; // status_id stored in Instructions
+
+      // ── Forward journey ────────────────────────────────────────────────────
+      if (sfxStatusId === "new" || sfxStatusId === "assigned_for_seller_pickup") {
+        order.status = "Booked";
+      }
+
+      if (
+        sfxStatusId === "ofp" ||
+        sfxStatusId === "picked" ||
+        sfxStatusId === "recd_at_rev_hub" ||
+        sfxStatusId === "item_manifested" ||
+        sfxStatusId === "received_from_client_warehouse"
+      ) {
+        order.status = "Ready To Ship";
+      }
+
+      if (
+        sfxStatusId === "recd_at_fwd_hub" ||
+        sfxStatusId === "recd_at_fwd_dc" ||
+        sfxStatusId === "bag_in_transit" ||
+        sfxStatusId === "bag_received" ||
+        sfxStatusId === "bag_received_at_via" ||
+        sfxStatusId === "in_transit"
+      ) {
+        order.status = "In-transit";
+        order.ndrStatus = "In-transit";
+        order.reattempt = false;
+        if (!order.invoiceDate) {
+          order.invoiceDate = normalizedData.StatusDateTime;
+        }
+      }
+
+      if (sfxStatusId === "assigned_for_delivery") {
+        order.status = "In-transit";
+        order.ndrStatus = "In-transit";
+        order.reattempt = false;
+      }
+
+      if (sfxStatusId === "ofd") {
+        order.status = "Out for Delivery";
+        order.ndrStatus = "Out for Delivery";
+        order.reattempt = false;
+      }
+
+      if (sfxStatusId === "delivered") {
+        order.status = "Delivered";
+        order.reattempt = false;
+        if (
+          order.ndrStatus === "Undelivered" ||
+          order.ndrStatus === "Out for Delivery" ||
+          order.ndrStatus === "Action_Requested"
+        ) {
+          order.ndrStatus = "Delivered";
+        }
+      }
+
+      // ── NDR cases ────────────────────────────────────────────────────────
+      if (
+        sfxStatusId === "nc" ||   // Not Contactable
+        sfxStatusId === "na" ||   // Not Attempted
+        sfxStatusId === "cid"     // Customer Initiated Delay
+      ) {
+        if (order.ndrStatus !== "Action_Requested") {
+          order.status = "Undelivered";
+          order.ndrStatus = "Undelivered";
+          order.ndrReason = {
+            date: normalizedData.StatusDateTime,
+            reason: normalizedData.Status || sfxStatusId,
+          };
+
+          const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+          const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+          const lastEntryDate = lastAction?.date
+            ? new Date(lastAction.date).getTime()
+            : null;
+          const currentStatusDate = new Date(
+            normalizedData.StatusDateTime
+          ).getTime();
+
+          if (
+            order.ndrHistory.length === 0 ||
+            !lastEntryDate ||
+            currentStatusDate > lastEntryDate
+          ) {
+            const attemptCount = order.ndrHistory.length + 1;
+            order.reattempt = true;
+            order.ndrHistory.push({
+              actions: [
+                {
+                  action: `NDR ${attemptCount} Raised`,
+                  actionBy: order.courierServiceName || "Shadowfax",
+                  remark: normalizedData.Status || sfxStatusId,
+                  source: "Shadowfax",
+                  date: normalizedData.StatusDateTime,
+                },
+              ],
+            });
+          }
+        }
+      }
+
+      if (order.ndrHistory.length >= 4) {
+        order.reattempt = false;
+      }
+
+      if (sfxStatusId === "reopen_ndr") {
+        order.reattempt = true;
+      }
+
+      // ── RTO / RTS ────────────────────────────────────────────────────────
+      if (
+        sfxStatusId === "ots" ||
+        sfxStatusId === "rts" ||
+        sfxStatusId === "oto" ||
+        sfxStatusId === "cancelled_by_customer" ||
+        sfxStatusId === "seller_not_contactable"
+      ) {
+        order.status = "RTO";
+        order.ndrStatus = "RTO";
+        order.reattempt = false;
+      }
+
+      if (
+        sfxStatusId === "rts_in_process" ||
+        sfxStatusId === "in_transit_return" ||
+        sfxStatusId === "oto_in_process" ||
+        sfxStatusId === "rto_in_process"
+      ) {
+        order.status = "RTO In-transit";
+        order.ndrStatus = "RTO In-transit";
+        order.reattempt = false;
+      }
+
+      if (
+        sfxStatusId === "rts_ofd" ||
+        sfxStatusId === "rto_ofd"
+      ) {
+        order.status = "RTO In-transit";
+        order.ndrStatus = "RTO In-transit";
+        order.reattempt = false;
+      }
+
+      if (
+        sfxStatusId === "rts_d" ||
+        sfxStatusId === "rto_d"
+      ) {
+        order.status = "RTO Delivered";
+        order.ndrStatus = "RTO Delivered";
+        order.reattempt = false;
+      }
+
+      // ── Lost ─────────────────────────────────────────────────────────────
+      if (sfxStatusId === "lost") {
+        order.status = "Lost";
+        order.reattempt = false;
+      }
+
+      // ── Cancelled ────────────────────────────────────────────────────────
+      if (sfxStatusId === "cancelled_by_seller") {
+        order.status = "Cancelled";
+        order.ndrStatus = "Cancelled";
+        order.reattempt = false;
+        balanceTobeAdded =
+          order.totalFreightCharges === "N/A"
+            ? 0
+            : parseFloat(order.totalFreightCharges);
+        shouldUpdateWallet = true;
+      }
+    }
+
+
     // ── ShipRocket Status Handling ──────────────────────────────────────────
     if (partner === "Shiprocket") {
+
       // shipment_status numeric codes from ShipRocket API:
       // 1=Pending, 2=Confirmed, 3=Ready To Ship, 4=Picked Up, 5=In Transit
       // 6=Out for Delivery, 7=Undelivered, 8=Delivered, 9=Cancelled
@@ -1634,7 +1819,22 @@ const mapTrackingResponse = (data, provider, remark) => {
     };
   }
 
+  // ── Shadowfax ──────────────────────────────────────────────────────────────
+  // Shadowfax tracking_details items: { status_id, status, remarks, created, location, awb_number }
+  if (provider === "Shadowfax") {
+    const scanArray = data || [];
+    const latestScan = scanArray[scanArray.length - 1];
+    return {
+      Status: latestScan?.status || "N/A",                // Human-readable status e.g. "Delivered"
+      Instructions: latestScan?.status_id || "N/A",       // Machine-readable status_id e.g. "delivered"
+      StatusLocation: latestScan?.location || "Unknown",
+      StatusDateTime: latestScan?.created || null,
+      StrRemarks: latestScan?.remarks || latestScan?.status || "N/A",
+    };
+  }
+
   if (provider === "Proship") {
+
     const scanArray = data || [];
     const latestScan = scanArray?.[scanArray.length - 1];
 

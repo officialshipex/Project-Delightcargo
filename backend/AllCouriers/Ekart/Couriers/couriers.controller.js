@@ -69,7 +69,7 @@ const orderCreationEkart = async (req, res) => {
     } = req.body;
     // console.log("Received orderCreationEkart request:", req.body);
 
-    const accessToken = await getAccessToken();
+    const accessToken = await getAccessToken(courierServiceName);
     // console.log("Fetched Ekart access token:", accessToken);
     if (!accessToken) {
       return res.status(500).json({
@@ -612,8 +612,12 @@ const cancelShipmentEkart = async (tracking_id) => {
       };
     }
 
-    // Fetch valid access token
-    const accessToken = await getAccessToken();
+    // 1. Find Order to get the correct account
+    const order = await Order.findOne({ awb_number: tracking_id });
+    const courierAccountName = order ? order.courierServiceName : null;
+
+    // 2. Fetch valid access token for that account
+    const accessToken = await getAccessToken(courierAccountName);
     if (!accessToken) {
       return { success: false, error: "Failed to get access token" };
     }
@@ -667,7 +671,7 @@ const cancelShipmentEkart = async (tracking_id) => {
 
 const checkEkartServiceability = async (payload) => {
   try {
-    const token = await getAccessToken();
+    const token = await getAccessToken(payload.courierName);
     if (!token) {
       return { success: false, message: "Failed to fetch access token" };
     }

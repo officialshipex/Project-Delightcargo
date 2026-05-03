@@ -30,6 +30,9 @@ const {
   cancelProshipOrder,
 } = require("../../AllCouriers/Proship/Courier/couriers.controller");
 const {
+  cancelShadowfaxOrder,
+} = require("../../AllCouriers/Shadowfax/Courier/couriers.controller");
+const {
   removeFromPickupManifest,
 } = require("../../Orders/scheduledPickup.controller");
 
@@ -81,6 +84,8 @@ const cancelOrdersAtBooked = async (req, res) => {
         provider = "BoxdLogistics";
       } else if (currentOrder.partner === "Proship") {
         provider = "Proship";
+      } else if (currentOrder.partner === "Shadowfax" || currentOrder.provider === "Shadowfax") {
+        provider = "Shadowfax";
       } else {
         provider = currentOrder.provider;
       }
@@ -113,6 +118,9 @@ const cancelOrdersAtBooked = async (req, res) => {
           break;
         case "Proship":
           result = await cancelProshipOrder(currentOrder.awb_number);
+          break;
+        case "Shadowfax":
+          result = await cancelShadowfaxOrder(currentOrder.awb_number);
           break;
         default:
           throw new Error("Unsupported courier provider");

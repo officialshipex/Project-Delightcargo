@@ -69,7 +69,7 @@ const createOrderEkart = async (
       return { success: false, message: "Pickup address not found" };
     }
 
-    const accessToken = await getAccessToken();
+    const accessToken = await getAccessToken(serviceDetails.name);
     if (!accessToken) {
       return { success: false, message: "Failed to get Ekart access token" };
     }

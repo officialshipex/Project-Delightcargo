@@ -21,7 +21,7 @@ const createEkartShipment = async ({
   const session = await mongoose.startSession();
 
   try {
-    const accessToken = await getAccessToken();
+    const accessToken = await getAccessToken(courierServiceName);
     if (!accessToken) {
       return {
         success: false,

@@ -4,22 +4,38 @@ const AllCourier = require("../../../models/AllCourierSchema");
 const USERNAME = process.env.EKART_USERNAME;
 const PASSWORD = process.env.EKART_PASSWORD;
 const EKART_CLIENT_ID = process.env.EKART_CLIENT_ID;
-const getAccessToken = async () => {
-  const credentials = {
-    username: USERNAME,
-    password: PASSWORD,
-  };
-  // console.log("Credentials:", credentials, EKART_CLIENT_ID);
-  // const client_id = "EKART_67a48734b43c30b894d7fda2";
+const getAccessToken = async (courierName) => {
   try {
+    let courier;
+    if (courierName) {
+      courier = await AllCourier.findOne({ 
+        courierName: courierName, 
+        courierProvider: 'Ekart' 
+      });
+    }
+
+    // Fallback if not found by name
+    if (!courier) {
+      courier = await AllCourier.findOne({ 
+        courierProvider: 'Ekart', 
+        status: 'Enable' 
+      });
+    }
+
+    const username = courier ? (courier.email || courier.username) : USERNAME;
+    const password = courier ? courier.password : PASSWORD;
+    const clientId = courier ? courier.apiKey : EKART_CLIENT_ID;
+
+    if (!username || !password || !clientId) {
+      console.error("Missing Ekart credentials for:", courierName || "Default");
+      return null;
+    }
+
     const response = await axios.post(
-      `https://app.elite.ekartlogistics.in/integrations/v2/auth/token/${EKART_CLIENT_ID}`,
-      credentials,
-      {
-        headers: { "Content-Type": "application/json" },
-      }
+      `https://app.elite.ekartlogistics.in/integrations/v2/auth/token/${clientId}`,
+      { username, password },
+      { headers: { "Content-Type": "application/json" } }
     );
-    // console.log("Access Token:", response.data.access_token);
     return response.data.access_token;
   } catch (error) {
     console.error("Token Error:", error.response?.data || error.message);
@@ -30,40 +46,34 @@ const getAccessToken = async () => {
 // getAccessToken();
 
 const saveEkart = async (req, res) => {
-  const { username, password } = req.body.credentials; // Destructure credentials
-  const { courierName, courierProvider, CODDays, status } = req.body; // Destructure courier data
-  //   console.log(req.body.credentials);
-  //   console.log(req.body)
-
-  // Validate if the provided credentials match the expected ones
-  if (USERNAME !== username || PASSWORD !== password) {
-    return res
-      .status(401)
-      .json({ message: "Unauthorized access. Invalid credentials." });
-  }
-
-  const courierData = {
-    courierName,
-    courierProvider,
-    CODDays,
-    status,
-  };
+  const { username, password, clientId } = req.body.credentials;
+  const { courierName, courierProvider, CODDays, status } = req.body;
 
   try {
-    // Create a new courier entry in the database
+    const existing = await AllCourier.findOne({ courierName });
+    if (existing) {
+      return res.status(400).json({ message: `Courier name '${courierName}' already exists.` });
+    }
+
+    const courierData = {
+      courierName,
+      courierProvider,
+      CODDays,
+      status,
+      email: username,
+      password,
+      apiKey: clientId
+    };
+
     const newCourier = new AllCourier(courierData);
     await newCourier.save();
 
     return res.status(201).json({
-      message: "Courier successfully added.",
+      message: "Ekart account successfully added.",
       courier: newCourier,
     });
   } catch (error) {
-    console.log(error);
-    return res.status(500).json({
-      message: "Failed to add courier.",
-      error: error.message,
-    });
+    return res.status(500).json({ message: "Failed to add Ekart account.", error: error.message });
   }
 };
 

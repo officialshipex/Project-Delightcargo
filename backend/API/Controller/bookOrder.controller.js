@@ -17,6 +17,7 @@ const createEkartShipment = require("../Courier/ekartShipmentCreation.controller
 const createBoxdLogisticsShipment = require("../Courier/boxdLogisticsShipmentCreation.controller");
 const createProshipShipment = require("../Courier/proshipShipmentCreation.controller");
 const createShiprocketShipment = require("../Courier/shiprocketShipmentCreation.controller");
+const createShadowfaxShipment = require("../Courier/shadowfaxShipmentCreation.controller");
 
 // Provider mapping
 const providerMap = {
@@ -31,6 +32,7 @@ const providerMap = {
   "09": "BoxdLogistics",
   "10": "Proship",
   "11": "Shiprocket",
+  "12": "Shadowfax",
 };
 
 // Validation schema
@@ -287,6 +289,16 @@ const bookOrder = async (req, res) => {
 
       case "Shiprocket":
         shipmentResult = await createShiprocketShipment({
+          id: order._id,
+          provider,
+          finalCharges,
+          courierServiceName,
+          priceBreakup
+        });
+        break;
+
+      case "Shadowfax":
+        shipmentResult = await createShadowfaxShipment({
           id: order._id,
           provider,
           finalCharges,
