@@ -59,14 +59,26 @@ const createOrderEkart = async (
     /* --------------------------------------------------
        4️⃣ PICKUP ADDRESS + EKART ALIAS
     -------------------------------------------------- */
-    const pickup = await pickupAddress.findOne({
+    let pickup = await pickupAddress.findOne({
       "pickupAddress.contactName": currentOrder.pickupAddress.contactName,
       "pickupAddress.address": currentOrder.pickupAddress.address,
       "pickupAddress.pinCode": currentOrder.pickupAddress.pinCode,
     });
 
     if (!pickup) {
-      return { success: false, message: "Pickup address not found" };
+      const newAddress = new pickupAddress({
+        userId: currentOrder.userId,
+        pickupAddress: {
+          contactName: currentOrder.pickupAddress.contactName,
+          email: currentOrder.pickupAddress.email || "test@test.com",
+          phoneNumber: currentOrder.pickupAddress.phoneNumber,
+          address: currentOrder.pickupAddress.address,
+          pinCode: currentOrder.pickupAddress.pinCode,
+          city: currentOrder.pickupAddress.city,
+          state: currentOrder.pickupAddress.state,
+        },
+      });
+      pickup = await newAddress.save();
     }
 
     const accessToken = await getAccessToken(serviceDetails.name);

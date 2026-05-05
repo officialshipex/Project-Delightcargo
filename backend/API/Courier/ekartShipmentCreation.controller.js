@@ -98,7 +98,7 @@ const createEkartShipment = async ({
     }
 
     // 4️⃣ Pickup address
-    const pickup = await pickupAddress
+    let pickup = await pickupAddress
       .findOne({
         "pickupAddress.contactName": currentOrder.pickupAddress.contactName,
         "pickupAddress.address": currentOrder.pickupAddress.address,
@@ -107,10 +107,19 @@ const createEkartShipment = async ({
       .session(session);
 
     if (!pickup) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
-      await session.abortTransaction();
-      session.endSession();
-      return { success: false, message: "Pickup address not found" };
+      const newAddress = new pickupAddress({
+        userId: currentOrder.userId,
+        pickupAddress: {
+          contactName: currentOrder.pickupAddress.contactName,
+          email: currentOrder.pickupAddress.email || "test@test.com",
+          phoneNumber: currentOrder.pickupAddress.phoneNumber,
+          address: currentOrder.pickupAddress.address,
+          pinCode: currentOrder.pickupAddress.pinCode,
+          city: currentOrder.pickupAddress.city,
+          state: currentOrder.pickupAddress.state,
+        },
+      });
+      pickup = await newAddress.save({ session });
     }
 
     let ekartAlias = pickup.ekartAlias;

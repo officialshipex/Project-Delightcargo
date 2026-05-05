@@ -650,7 +650,7 @@ const getDashboardOverview = async (req, res) => {
     const IST = '+05:30';
     // If not provided, take today's date in IST
     if (!startDate || !endDate) {
-      startDate = moment().utcOffset(IST).startOf('day').utc().toDate();
+      startDate = moment().utcOffset(IST).subtract(29, 'days').startOf('day').utc().toDate();
       endDate   = moment().utcOffset(IST).endOf('day').utc().toDate();
     }
 
@@ -1001,9 +1001,8 @@ const getOverviewGraphsData = async (req, res) => {
     let { startDate, endDate } = req.query;
     // If not provided, take today's date
     if (!startDate || !endDate) {
-      const today = new Date();
-      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
-      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+      startDate = moment().subtract(29, 'days').startOf('day').toDate();
+      endDate = moment().endOf('day').toDate();
     }
     const userData = await User.findById(userId);
     // Check if admin and has adminTab access
@@ -1100,9 +1099,8 @@ const getOverviewCardData = async (req, res) => {
 
     // Default: today's date
     if (!startDate || !endDate) {
-      const today = new Date();
-      startDate = new Date(today.setHours(0, 0, 0, 0));
-      endDate = new Date(today.setHours(23, 59, 59, 999));
+      startDate = moment().subtract(29, 'days').startOf('day').toDate();
+      endDate = moment().endOf('day').toDate();
     }
 
     const userData = await User.findById(userId);
@@ -1353,9 +1351,8 @@ const getOrderSummary = async (req, res) => {
     // Extract filters
     const { startDate, endDate, zone, courier, paymentMode } = req.query;
     if (!startDate || !endDate) {
-      const today = new Date();
-      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
-      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+      startDate = moment().subtract(29, 'days').startOf('day').toDate();
+      endDate = moment().endOf('day').toDate();
     }
     // console.log("xone", zone);
     const userData = await User.findById(userId);
@@ -1807,9 +1804,8 @@ const getCourierComparison = async (req, res) => {
     let { startDate, endDate } = req.query;
     // If not provided, take today's date
     if (!startDate || !endDate) {
-      const today = new Date();
-      startDate = new Date(today.setHours(0, 0, 0, 0)); // start of today
-      endDate = new Date(today.setHours(23, 59, 59, 999)); // end of today
+      startDate = moment().subtract(29, 'days').startOf('day').toDate();
+      endDate = moment().endOf('day').toDate();
     }
     const userData = await User.findById(userId);
     const isAdminView = userData?.isAdmin && userData?.adminTab;

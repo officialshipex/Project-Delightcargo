@@ -745,21 +745,6 @@ const uploadRatecard = async (req, res) => {
     const { plan: targetPlan, replaceExisting, userId } = req.body;
     const performerId = req.user?._id;
 
-    if (replaceExisting === "true" && targetPlan) {
-      if (userId) {
-        // Only clear for this specific user
-        await Plan.updateOne({ userId }, { $set: { rateCard: [] } });
-        console.log(`Cleared existing rates for user: ${userId}`);
-      } else {
-        // Global clear
-        const cardsToDelete = await RateCard.find({ plan: targetPlan });
-        const cardIds = cardsToDelete.map(c => c._id);
-        await RateCard.deleteMany({ plan: targetPlan });
-        await Plan.updateMany({ planName: targetPlan }, { $pull: { rateCard: { _id: { $in: cardIds } } } });
-        console.log(`Cleared existing rates for plan: ${targetPlan}`);
-      }
-    }
-
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNum = i + 2;
@@ -776,9 +761,21 @@ const uploadRatecard = async (req, res) => {
       const plan = normalize(planVal);
       const service = normalize(serviceVal);
 
-      if (!plan || !planSet.has(plan)) {
-        errors.push(`Row ${rowNum}: Invalid or missing Plan Name (${planVal || "Empty"})`);
-        continue;
+      // If userId is present, we don't strictly require the plan to be in the global PlanName collection
+      if (userId) {
+        if (!plan) {
+          // If no plan provided in row or body, we'll use a fallback or handle it later
+          // For now, let's assume req.body.plan was provided or we use a default
+          if (!req.body.plan) {
+             errors.push(`Row ${rowNum}: Plan Name is required even for user-specific uploads (it can be an auto-generated one)`);
+             continue;
+          }
+        }
+      } else {
+        if (!plan || !planSet.has(plan)) {
+          errors.push(`Row ${rowNum}: Invalid or missing Plan Name (${planVal || "Empty"})`);
+          continue;
+        }
       }
 
       const matchedService = serviceMap.get(service);
@@ -834,6 +831,43 @@ const uploadRatecard = async (req, res) => {
       }
     }
 
+    // If there are validation errors, stop here without touching the database
+    if (errors.length > 0) {
+      return res.status(200).json({
+        message: `Upload failed: ${errors.length} errors found. No changes were made.`,
+        savedCount: 0,
+        updatedCount: 0,
+        errors,
+        data: [],
+      });
+    }
+
+    // --- NO ERRORS FOUND: START DATABASE MODIFICATIONS ---
+
+    // 1. Clear existing rates if requested
+    if (replaceExisting === "true") {
+      if (userId) {
+        // Only clear for this specific user
+        await Plan.updateOne({ userId }, { $set: { rateCard: [] } });
+        console.log(`Cleared existing rates for user: ${userId}`);
+      } else {
+        // Global clear
+        const cardsToDelete = await RateCard.find({ plan: targetPlan });
+        const cardIds = cardsToDelete.map(c => c._id);
+        await RateCard.deleteMany({ plan: targetPlan });
+        await Plan.updateMany({ planName: targetPlan }, { $pull: { rateCard: { _id: { $in: cardIds } } } });
+        console.log(`Cleared existing rates for plan: ${targetPlan}`);
+      }
+    }
+
+    let userPlanDoc = null;
+    if (userId) {
+      userPlanDoc = await Plan.findOne({ userId });
+      if (userPlanDoc && targetPlan) {
+        userPlanDoc.planName = targetPlan;
+      }
+    }
+
     // Save or update grouped ratecards
     for (const key in grouped) {
       const g = grouped[key];
@@ -854,31 +888,27 @@ const uploadRatecard = async (req, res) => {
         defaultRate: true,
       };
 
-      if (userId) {
+      if (userId && userPlanDoc) {
         // --- ISOLATED USER UPDATE ---
-        const userPlan = await Plan.findOne({ userId });
-        if (userPlan) {
-          const existingIdx = userPlan.rateCard.findIndex(
-            (rc) =>
-              rc.courierServiceName === rateCardData.courierServiceName &&
-              rc.courierProviderName === rateCardData.courierProviderName
-          );
+        const existingIdx = userPlanDoc.rateCard.findIndex(
+          (rc) =>
+            rc.courierServiceName === rateCardData.courierServiceName &&
+            rc.courierProviderName === rateCardData.courierProviderName
+        );
 
-          if (existingIdx !== -1) {
-            // Update existing in user's plan
-            const updatedObj = { ...userPlan.rateCard[existingIdx], ...rateCardData };
-            userPlan.rateCard[existingIdx] = updatedObj;
-            updatedRatecards.push(updatedObj);
-          } else {
-            // Push new to user's plan
-            const newObj = { ...rateCardData, _id: new (require("mongoose")).Types.ObjectId() };
-            userPlan.rateCard.push(newObj);
-            savedRatecards.push(newObj);
-          }
-          userPlan.markModified("rateCard");
-          await userPlan.save();
+        if (existingIdx !== -1) {
+          // Update existing in user's plan
+          const updatedObj = { ...userPlanDoc.rateCard[existingIdx].toObject ? userPlanDoc.rateCard[existingIdx].toObject() : userPlanDoc.rateCard[existingIdx], ...rateCardData };
+          userPlanDoc.rateCard[existingIdx] = updatedObj;
+          updatedRatecards.push(updatedObj);
+        } else {
+          // Push new to user's plan
+          const newObj = { ...rateCardData, _id: new (require("mongoose")).Types.ObjectId() };
+          userPlanDoc.rateCard.push(newObj);
+          savedRatecards.push(newObj);
         }
-      } else {
+        userPlanDoc.markModified("rateCard");
+      } else if (!userId) {
         // --- GLOBAL UPDATE ---
         const existing = await RateCard.findOne({
           plan: rateCardData.plan,
@@ -909,6 +939,10 @@ const uploadRatecard = async (req, res) => {
           );
         }
       }
+    }
+
+    if (userId && userPlanDoc) {
+      await userPlanDoc.save();
     }
 
     // Log the action

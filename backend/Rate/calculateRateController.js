@@ -82,7 +82,8 @@ const calculateRate = async (req, res) => {
     );
 
     for (let rc of rateCards) {
-      const isFlatRate = flatRateMap.get(rc._id?.toString()) || false;
+      // Use flag from object if present, otherwise fallback to lookup map (for legacy/sync cases)
+      const isFlatRate = rc.isFlatRate === true || flatRateMap.get(rc._id?.toString()) === true;
       const provider = rc.courierProviderName;
       const mode = rc.mode;
       let serviceable = { success: false };
@@ -313,7 +314,8 @@ async function calculateRateForService(payload) {
 
     for (const rc of RateCards) {
       if (rc.status !== "Active") continue;
-      const isFlatRate = flatRateMap.get(rc._id?.toString()) || false;
+      // Use flag from object if present, otherwise fallback to lookup map (for legacy/sync cases)
+      const isFlatRate = rc.isFlatRate === true || flatRateMap.get(rc._id?.toString()) === true;
       const basicChargeForward = parseFloat(
         rc.weightPriceBasic[0][currentZone],
       );
@@ -429,8 +431,8 @@ async function calculateRateForDispute(payload) {
     }
 
     // ✅ Fetch actual RateCard by _id for user-specific isFlatRate and status check
-    const actualRateCard = await RateCard.findById(services[0]?._id);
-    const disputeIsFlatRate = actualRateCard?.isFlatRate === true;
+    // ✅ Check user-specific flag first, then fallback to global RateCard check
+    const disputeIsFlatRate = services[0]?.isFlatRate === true || (await RateCard.findById(services[0]?._id))?.isFlatRate === true;
 
     // Convert extra weight from KG to grams
     const extraWeightInGrams = Math.ceil(parseFloat(weight) * 1000); // e.g., 2.88 kg → 2880 g
@@ -540,8 +542,8 @@ async function calculateRateForServiceBulk(payload) {
     if (!rc || rc.status !== "Active") throw new Error("Selected courier not found or is currently inactive");
 
     // ✅ Fetch actual RateCard by _id for user-specific isFlatRate
-    const actualRateCard = await RateCard.findById(rc?._id);
-    const isFlatRate = actualRateCard?.isFlatRate === true;
+    // ✅ Check user-specific flag first, then fallback to global RateCard check
+    const isFlatRate = rc?.isFlatRate === true || (await RateCard.findById(rc?._id))?.isFlatRate === true;
 
     // Extract basic & additional weight/charges
     const basicWeight = parseFloat(rc.weightPriceBasic?.[0]?.weight || 0);

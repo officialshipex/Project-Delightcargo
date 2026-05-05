@@ -325,7 +325,8 @@ const pincodeServiceability = async (req, res) => {
           : basicCharge + additionalCharge * count;
 
       // ✅ COD calculation
-      const isFlatRate = flatRateMap.get(rc._id?.toString()) || false;
+      // Use flag from object if present, otherwise fallback to lookup map
+      const isFlatRate = rc.isFlatRate === true || flatRateMap.get(rc._id?.toString()) === true;
       let cod = 0;
       if (paymentType === "COD" && !isFlatRate) {
         const orderValue = Number(declaredValue) || 0;

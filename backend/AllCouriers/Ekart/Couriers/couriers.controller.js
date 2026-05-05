@@ -126,7 +126,7 @@ const orderCreationEkart = async (req, res) => {
     }
 
     // 4. Fetch pickup address FROM pickupAddress collection
-    const pickup = await pickupAddress
+    let pickup = await pickupAddress
       .findOne({
         "pickupAddress.contactName": currentOrder.pickupAddress.contactName,
         "pickupAddress.address": currentOrder.pickupAddress.address,
@@ -135,12 +135,19 @@ const orderCreationEkart = async (req, res) => {
       .session(session);
     // console.log("Fetched pickup address:", pickup);
     if (!pickup) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
-      await session.abortTransaction();
-      session.endSession();
-      return res
-        .status(400)
-        .json({ success: false, message: "Pickup address not found" });
+      const newAddress = new pickupAddress({
+        userId: currentOrder.userId,
+        pickupAddress: {
+          contactName: currentOrder.pickupAddress.contactName,
+          email: currentOrder.pickupAddress.email || "test@test.com",
+          phoneNumber: currentOrder.pickupAddress.phoneNumber,
+          address: currentOrder.pickupAddress.address,
+          pinCode: currentOrder.pickupAddress.pinCode,
+          city: currentOrder.pickupAddress.city,
+          state: currentOrder.pickupAddress.state,
+        },
+      });
+      pickup = await newAddress.save({ session });
     }
 
     let ekartAlias = pickup.ekartAlias;
@@ -529,19 +536,26 @@ async function addEkartAddress(address, accessToken) {
     if (!accessToken) throw new Error("Failed to get Ekart access token");
 
     // -------------------------------------------------------
-    // INLINE: FIX address_line1 IF LENGTH < 10 CHARACTERS
+    // INLINE: CLEAN AND FIX address_line1
     // -------------------------------------------------------
     let line1 = (address.address_line1 || "").trim();
-    let line2 = address.address_line2 || "";
+    
+    // 1. Remove non-ASCII characters
+    line1 = line1.replace(/[^\x20-\x7E]/g, "");
 
-    // If short → append city + state
+    // 2. Replace multiple spaces with a single space
+    line1 = line1.replace(/\s+/g, " ");
+
+    let line2 = (address.address_line2 || "").trim().replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ");
+
+    // 3. If short → append city + state (Ekart requires min 10 chars)
     if (line1.length < 10) {
-      line1 = `${line1} ${address.city} ${address.state}`.trim();
+      line1 = `${line1} ${address.city} ${address.state}`.trim().replace(/\s+/g, " ");
     }
 
-    // If still short (rare), pad with spaces
+    // 4. If still short (rare), pad with dots instead of spaces (spaces at end can trigger validation issues)
     if (line1.length < 10) {
-      line1 = line1.padEnd(10, " ");
+      line1 = line1.padEnd(10, ".");
     }
     // -------------------------------------------------------
 
