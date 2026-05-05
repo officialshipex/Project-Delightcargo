@@ -1600,7 +1600,7 @@ const trackSingleOrder = async (order) => {
           mobile_number: order.receiverAddress?.phoneNumber,
           email: order.receiverAddress?.email,
         };
-        
+
         console.log("Notification payload prepared:", notificationData);
         // Fire and forget - failures won't stop the tracking update
         (async () => {
@@ -1691,7 +1691,7 @@ const trackOrders = async () => {
       // partner:{$nin:["Proship"]}
       // ndrStatus: "Undelivered",
       // status:"Out for Delivery",
-      // provider: "Dtdc",
+      // provider: "Delhivery",
       // awb_number: "SF3252087373PRZ",
       // partner:"BoxdLogistics"
     });

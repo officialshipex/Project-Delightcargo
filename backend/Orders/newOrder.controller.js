@@ -72,6 +72,7 @@ const {
 const {
   cancelOrder: cancelShiprocketOrder,
 } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
+const { cancelShadowfaxOrder } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
 // Create a shipment
 const newOrder = async (req, res) => {
   try {
@@ -1586,7 +1587,8 @@ const cancelOrdersAtBooked = async (req, res) => {
   const allOrders = req.body;
   // console.log(allOrders);
   try {
-    const users = await user.findOne({ _id: allOrders.userId });
+    const userId = allOrders.userId?._id || allOrders.userId;
+    const users = await user.findOne({ _id: userId });
     // console.log(users)
     const currentWallet = await Wallet.findById({ _id: users.Wallet });
 
@@ -1691,6 +1693,11 @@ const cancelOrdersAtBooked = async (req, res) => {
       if (result.error) {
         return res.status(400).send({ error: result.error });
       }
+    } else if (currentOrder.provider === "Shadowfax" || currentOrder.partner === "Shadowfax") {
+      const result = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
+      if (result.success === false) {
+        return res.status(400).send({ error: result.message || "Failed to cancel order with Shadowfax" });
+      }
     } else {
       return {
         error: "Unsupported courier provider",
@@ -1716,9 +1723,9 @@ const cancelOrdersAtBooked = async (req, res) => {
     });
 
     let balanceTobeAdded =
-      allOrders.totalFreightCharges == "N/A"
+      currentOrder.totalFreightCharges == "N/A"
         ? 0
-        : parseFloat(allOrders.totalFreightCharges);
+        : parseFloat(currentOrder.totalFreightCharges);
     const session = await mongoose.startSession();
     session.startTransaction();
 
@@ -2119,6 +2126,9 @@ const bulkCancelOrder = async (req, res) => {
             break;
           case "Shiprocket":
             cancelResponse = await cancelShiprocketOrder(currentOrder.awb_number);
+            break;
+          case "Shadowfax":
+            cancelResponse = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
             break;
           default:
             failedCount++;

@@ -13,6 +13,17 @@ const {
  */
 const ShadowfaxWebhook = async (req, res) => {
   try {
+    const authHeader = req.headers["authorization"];
+    const secureToken = process.env.SHADOWFAX_WEBHOOK_TOKEN;
+
+    if (secureToken) {
+      const providedToken = authHeader?.startsWith("Token ") ? authHeader.split(" ")[1] : authHeader;
+      if (providedToken !== secureToken) {
+        console.warn("Shadowfax Webhook: Unauthorized access attempt.");
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+    }
+
     const body = req.body;
     console.log("Shadowfax Webhook Received:", JSON.stringify(body, null, 2));
 
@@ -135,7 +146,7 @@ const ShadowfaxWebhook = async (req, res) => {
               actions: [
                 {
                   action: `NDR ${attemptCount} Raised`,
-                  actionBy: order.courierServiceName || "Shadowfax",
+                  actionBy: "Shadowfax",
                   remark: statusDescription || sfxStatusId,
                   source: "Shadowfax",
                   date: timestamp,

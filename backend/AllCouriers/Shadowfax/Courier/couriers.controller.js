@@ -45,6 +45,7 @@ const checkPincodeServiceability = async (pincode, courierName) => {
       }
     );
     const data = response.data;
+    // console.log("response data",response.data)
     if (Array.isArray(data) && data.length > 0) {
       return { success: true, serviceable: true, data };
     }
@@ -69,47 +70,47 @@ const createOrder = async (req, res) => {
 
     try {
       attempt++;
-      const { orderId } = req.body;
+      const {
+        id,
+        provider,
+        courierName,
+        finalCharges,
+        courierServiceName,
+        estimatedDeliveryDate,
+        priceBreakup
+      } = req.body;
 
-      // ── Fetch order ──────────────────────────────────────────────────────
-      const currentOrder = await Order.findOne({ orderId }).session(session);
+      // ── Fetch order & Lock ────────────────────────────────────────────────
+      const currentOrder = await Order.findOneAndUpdate(
+        { _id: id, status: "new" },
+        { $set: { status: "processing" } },
+        { new: true, session }
+      );
+
       if (!currentOrder) {
         await session.abortTransaction();
         session.endSession();
         return res
           .status(404)
-          .json({ success: false, message: "Order not found." });
-      }
-
-      if (currentOrder.status !== "new") {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: `Order is already processed (status: ${currentOrder.status}).`,
-        });
+          .json({
+            success: false,
+            message: "Shipment cannot be created because order is already processed or not in 'new' status."
+          });
       }
 
       // ── Wallet check ──────────────────────────────────────────────────────
       const userDoc = await User.findById(currentOrder.userId).session(session);
-      if (!userDoc)
-        throw new Error("User linked with order not found.");
+      if (!userDoc) throw new Error("User linked with order not found.");
 
-      const currentWallet = await Wallet.findById(userDoc.Wallet).session(
-        session
-      );
-      if (!currentWallet)
-        throw new Error("Wallet linked with user not found.");
+      const currentWallet = await Wallet.findById(userDoc.Wallet).session(session);
+      if (!currentWallet) throw new Error("Wallet linked with user not found.");
 
-      const freightCharges =
-        currentOrder.totalFreightCharges === "N/A"
-          ? 0
-          : parseFloat(currentOrder.totalFreightCharges);
+      const balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
 
       const totalBalance = (currentWallet.balance || 0) + (currentWallet.creditLimit || 0);
       const effectiveBalance = totalBalance - (currentWallet.holdAmount || 0);
 
-      if (effectiveBalance < freightCharges) {
+      if (effectiveBalance < balanceToBeDeducted) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({
@@ -119,21 +120,17 @@ const createOrder = async (req, res) => {
       }
 
       // ── Build Shadowfax payload ───────────────────────────────────────────
-      const sender = currentOrder.senderAddress || {};
+      const sender = currentOrder.pickupAddress || {};
       const receiver = currentOrder.receiverAddress || {};
-      const product = currentOrder.productDetails || {};
+      const product = currentOrder.productDetails?.[0] || {};
 
       // Determine payment mode
-      const paymentMode =
-        currentOrder.paymentMode === "COD" ? "COD" : "Prepaid";
-      const codAmount =
-        paymentMode === "COD"
-          ? parseFloat(currentOrder.collectableAmount || 0)
-          : 0;
+      const paymentMode = currentOrder.paymentDetails.method === "COD" ? "COD" : "Prepaid";
+      const codAmount = paymentMode === "COD" ? parseFloat(currentOrder.paymentDetails.amount || 0) : 0;
 
       // Weight in grams (Shadowfax expects grams)
       const weightGrams = Math.round(
-        parseFloat(currentOrder.physicalWeight || product.weight || 0) * 1000
+        parseFloat(currentOrder.packageDetails.applicableWeight || product.weight || 0.5) * 1000
       );
 
       const sfxPayload = {
@@ -142,59 +139,41 @@ const createOrder = async (req, res) => {
           client_order_id: currentOrder.orderId,
           actual_weight: weightGrams,
           volumetric_weight: weightGrams,
-          product_value: parseFloat(product.value || product.price || 0),
+          product_value: parseFloat(currentOrder.paymentDetails.amount || 0),
           payment_mode: paymentMode,
           cod_amount: codAmount,
           order_service: "regular",
-          total_amount: parseFloat(
-            currentOrder.collectableAmount || product.value || 0
-          ),
+          total_amount: parseFloat(currentOrder.paymentDetails.amount || 0),
         },
         customer_details: {
-          name: receiver.name || receiver.fullName || "Customer",
-          contact: String(
-            receiver.phoneNumber || receiver.phone || receiver.mobile || ""
-          ).replace(/\D/g, "").slice(-10),
-          address_line_1:
-            receiver.addressLine1 ||
-            receiver.address ||
-            receiver.houseNumber ||
-            "",
-          address_line_2: receiver.addressLine2 || receiver.locality || "",
+          name: receiver.contactName || receiver.name || "Customer",
+          contact: String(receiver.phoneNumber || "").replace(/\D/g, "").slice(-10),
+          address_line_1: receiver.address || "",
           city: receiver.city || "",
           state: receiver.state || "",
-          pincode: parseInt(receiver.pincode || receiver.pin || 0),
+          pincode: parseInt(receiver.pinCode || 0),
         },
         pickup_details: {
-          name: sender.name || sender.fullName || sender.warehouseName || "",
-          contact: String(
-            sender.phoneNumber || sender.phone || sender.mobile || ""
-          ).replace(/\D/g, "").slice(-10),
-          address_line_1:
-            sender.addressLine1 || sender.address || sender.houseNumber || "",
-          address_line_2: sender.addressLine2 || sender.locality || "",
+          name: sender.contactName || sender.name || "Seller",
+          contact: String(sender.phoneNumber || "").replace(/\D/g, "").slice(-10),
+          address_line_1: sender.address || "",
           city: sender.city || "",
           state: sender.state || "",
-          pincode: parseInt(sender.pincode || sender.pin || 0),
+          pincode: parseInt(sender.pinCode || 0),
         },
         rto_details: {
-          name: sender.name || sender.fullName || sender.warehouseName || "",
-          contact: String(
-            sender.phoneNumber || sender.phone || sender.mobile || ""
-          ).replace(/\D/g, "").slice(-10),
-          address_line_1:
-            sender.addressLine1 || sender.address || sender.houseNumber || "",
-          address_line_2: sender.addressLine2 || sender.locality || "",
+          name: sender.contactName || sender.name || "Seller",
+          contact: String(sender.phoneNumber || "").replace(/\D/g, "").slice(-10),
+          address_line_1: sender.address || "",
           city: sender.city || "",
           state: sender.state || "",
-          pincode: parseInt(sender.pincode || sender.pin || 0),
+          pincode: parseInt(sender.pinCode || 0),
         },
         product_details: [
           {
-            sku_name:
-              product.productName || product.name || "Product",
-            price: parseFloat(product.value || product.price || 0),
-            category: product.category || "General",
+            sku_name: product.name || "Product",
+            price: parseFloat(product.price || 0),
+            category: "General",
             invoice_no: currentOrder.orderId,
             additional_details: {
               quantity: parseInt(product.quantity || 1),
@@ -204,7 +183,7 @@ const createOrder = async (req, res) => {
       };
 
       // ── Call Shadowfax API ────────────────────────────────────────────────
-      const headers = await getAuthHeaders(currentOrder.courierServiceName);
+      const headers = await getAuthHeaders(courierName || provider || currentOrder.courierServiceName);
       const sfxResponse = await axios.post(
         `${SHADOWFAX_BASE_URL}/v3/clients/orders/`,
         sfxPayload,
@@ -224,21 +203,22 @@ const createOrder = async (req, res) => {
       }
 
       // ── Deduct wallet ─────────────────────────────────────────────────────
-      if (freightCharges > 0) {
-        const newBalance = currentWallet.balance - freightCharges;
+      if (balanceToBeDeducted > 0) {
+        const newBalance = currentWallet.balance - balanceToBeDeducted;
         await Wallet.findOneAndUpdate(
           { _id: currentWallet._id },
           {
-            $inc: { balance: -freightCharges },
+            $inc: { balance: -balanceToBeDeducted },
             $push: {
               transactions: {
                 channelOrderId: currentOrder.orderId || null,
                 category: "debit",
-                amount: freightCharges,
+                amount: balanceToBeDeducted,
                 balanceAfterTransaction: newBalance,
                 date: new Date(),
                 awb_number: sfxData.data.awb_number,
                 description: "Freight Charges Applied",
+                priceBreakup
               },
             },
           },
@@ -250,7 +230,12 @@ const createOrder = async (req, res) => {
       currentOrder.awb_number = sfxData.data.awb_number;
       currentOrder.status = "Booked";
       currentOrder.provider = "Shadowfax";
-      currentOrder.partner = "Shadowfax";
+      currentOrder.courierName = courierName || provider || "Shadowfax";
+      currentOrder.totalFreightCharges = balanceToBeDeducted;
+      currentOrder.courierServiceName = courierServiceName;
+      currentOrder.estimatedDeliveryDate = estimatedDeliveryDate;
+      currentOrder.priceBreakup = priceBreakup;
+      currentOrder.shipmentCreatedAt = new Date();
       currentOrder.tracking.push({
         status: "Booked",
         StatusLocation: sender.city || "",
@@ -264,7 +249,7 @@ const createOrder = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: "Order created successfully with Shadowfax.",
+        message: "Order created successfully",
         awb_number: sfxData.data.awb_number,
         order: sfxData.data,
       });
@@ -334,6 +319,7 @@ const trackShadowfaxOrder = async (awb_number, courierName) => {
 const cancelShadowfaxOrder = async (awb_number, courierName) => {
   try {
     const headers = await getAuthHeaders(courierName);
+    // console.log("awb", awb_number)
     const response = await axios.post(
       `${SHADOWFAX_BASE_URL}/v3/clients/orders/cancel/`,
       {
@@ -342,18 +328,17 @@ const cancelShadowfaxOrder = async (awb_number, courierName) => {
       },
       { headers, timeout: 15000 }
     );
-
-    if (response.data.message === "Success") {
-      return { success: true, message: "Order cancelled successfully." };
+    // console.log("awb res", response.data)
+    if (response.data.responseCode === 200 || response.data.message === "Success") {
+      return { success: true, message: response.data.responseMsg || "Order cancelled successfully." };
     } else {
-      return { 
-        success: false, 
-        message: response.data.errors ? JSON.stringify(response.data.errors) : (response.data.message || "Failed to cancel") 
+      return {
+        success: false,
+        message: response.data.errors ? JSON.stringify(response.data.errors) : (response.data.responseMsg || response.data.message || "Failed to cancel")
       };
     }
   } catch (error) {
-    console.error("Shadowfax cancelOrder error:", error.message);
-    return { success: false, error: error.message };
+    return { success: false, message: error.message };
   }
 };
 

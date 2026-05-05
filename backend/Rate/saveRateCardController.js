@@ -707,7 +707,13 @@ const uploadRatecard = async (req, res) => {
         .replace(/[\s_]/g, "");
 
     // Create normalized maps for easier lookup
-    const providerMap = new Map(providers.map(p => [normalize(p.courierProvider), p]));
+    const providerMap = new Map();
+    providers.forEach(p => {
+      // Map by provider type (e.g. 'Ekart')
+      providerMap.set(normalize(p.courierProvider), p);
+      // Map by specific account name (e.g. 'Ekart-2')
+      providerMap.set(normalize(p.courierName), p);
+    });
     const serviceMap = new Map(services.map(s => [normalize(s.name), s]));
     const planSet = new Set(plans.map(p => normalize(p.name)));
 

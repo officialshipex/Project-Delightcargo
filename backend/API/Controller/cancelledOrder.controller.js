@@ -120,7 +120,7 @@ const cancelOrdersAtBooked = async (req, res) => {
           result = await cancelProshipOrder(currentOrder.awb_number);
           break;
         case "Shadowfax":
-          result = await cancelShadowfaxOrder(currentOrder.awb_number);
+          result = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
           break;
         default:
           throw new Error("Unsupported courier provider");

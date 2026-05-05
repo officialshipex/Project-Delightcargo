@@ -48,6 +48,7 @@ const {
 const {
   createShipmentFunctionShreeMaruti,
 } = require("../AllCouriers/ShreeMaruti/Couriers/bulkShipment.controller");
+const { createOrderShadowfax } = require("../AllCouriers/Shadowfax/Courier/bulkShipment.controller");
 
 const { AutoShip } = require("../Orders/AutoShipB2c.controller");
 
@@ -984,6 +985,15 @@ const createShipment = async (serviceDetails, order, wh, walletId, charges) => {
         break;
       case "Shree Maruti":
         result = await createShipmentFunctionShreeMaruti(
+          serviceDetails,
+          order._id,
+          wh,
+          walletId,
+          charges
+        );
+        break;
+      case "Shadowfax":
+        result = await createOrderShadowfax(
           serviceDetails,
           order._id,
           wh,
