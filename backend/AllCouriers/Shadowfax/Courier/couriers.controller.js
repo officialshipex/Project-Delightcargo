@@ -8,6 +8,7 @@ const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
 const User = require("../../../models/User.model");
 const { getShadowfaxToken } = require("../Authorize/saveCourierController");
+const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 
 const SHADOWFAX_BASE_URL =
   process.env.SHADOWFAX_URL || "https://dale.shadowfax.in/api";
@@ -246,6 +247,14 @@ const createOrder = async (req, res) => {
 
       await session.commitTransaction();
       session.endSession();
+
+      // Auto-assign pickup manifest
+      try {
+        const freshOrder = await Order.findById(currentOrder._id);
+        if (freshOrder) await assignPickupManifest(freshOrder);
+      } catch (pErr) {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      }
 
       return res.status(200).json({
         success: true,
