@@ -102,17 +102,8 @@ const orderCreationController = async (req, res) => {
       return acc + (item.unitPrice * item.quantity);
     }, 0);
 
-    // If amount is provided, it must match the calculated total
-    if (paymentDetails.amount !== undefined && paymentDetails.amount !== null) {
-      if (Math.abs(paymentDetails.amount - calculatedTotalAmount) > 0.01) {
-        return res.status(400).json({
-          success: false,
-          message: "Payment amount does not match the product unit prices and quantities.",
-          details: `Expected: ${calculatedTotalAmount}, Provided: ${paymentDetails.amount}`,
-        });
-      }
-    } else {
-      // If amount is not provided (e.g., optional for COD), set it to the calculated total
+    // Default to calculated total if amount is not provided
+    if (paymentDetails.amount === undefined || paymentDetails.amount === null) {
       paymentDetails.amount = calculatedTotalAmount;
     }
 
