@@ -255,14 +255,16 @@ const rtoCharges = async () => {
         // 8️⃣ commit
         await session.commitTransaction();
         console.log(
-          `✅ Processed AWB ${awb}: credit ${codCharges}, debit ${totalChargesReverse}, final balance ${balanceAfterDebit}`
+          `✅ Processed AWB ${awb}: credit ${codCharges}, debit ${totalChargesReverse}, final balance ${finalBalanceForOrder}`
         );
       } catch (err) {
         console.error(`Error processing AWB ${item.awb_number}:`, err);
-        try {
-          await session.abortTransaction();
-        } catch (e) {
-          console.error("Failed abortTransaction:", e);
+        if (session.inTransaction()) {
+          try {
+            await session.abortTransaction();
+          } catch (e) {
+            console.error("Failed abortTransaction:", e);
+          }
         }
       } finally {
         session.endSession();

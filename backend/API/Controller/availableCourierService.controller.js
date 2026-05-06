@@ -219,9 +219,7 @@ const availableCourierService = async (req, res) => {
       }
 
       // GST + Final Total
-      let gstAmount = !isFlatRate
-        ? Number(((finalCharge + cod) * gst) / 100).toFixed(2)
-        : "0";
+      let gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
       let totalCharges = Math.round(finalCharge + cod + parseFloat(gstAmount));
 
       ans.push({

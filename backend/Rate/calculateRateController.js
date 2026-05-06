@@ -242,10 +242,7 @@ const calculateRate = async (req, res) => {
       }
 
       // Step 7: GST and total
-      let gstAmount = 0;
-      if (!isFlat) {
-        gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
-      }
+      let gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
 
       let totalCharges = Math.round(finalCharge + cod + parseFloat(gstAmount));
 
@@ -356,13 +353,10 @@ async function calculateRateForService(payload) {
           console.error("COD charge or percentage is not properly defined.");
         }
       }
-      let gstAmountForward = 0;
-      if (!isFlatRate) {
-        gstAmountForward = (
-          (totalForwardCharge + codCharge) *
-          (gstRate / 100)
-        ).toFixed(2);
-      }
+      let gstAmountForward = (
+        (totalForwardCharge + codCharge) *
+        (gstRate / 100)
+      ).toFixed(2);
 
       const totalChargesForward = (
         totalForwardCharge +
@@ -476,12 +470,9 @@ async function calculateRateForDispute(payload) {
         }
       }
 
-      let gstAmountForward = 0;
-      if (!disputeIsFlatRate) {
-        gstAmountForward = parseFloat(
-          ((totalForwardCharge + codCharge) * (gstRate / 100)).toFixed(2),
-        );
-      }
+      let gstAmountForward = parseFloat(
+        ((totalForwardCharge + codCharge) * (gstRate / 100)).toFixed(2),
+      );
       const totalChargesForward = parseFloat(
         (totalForwardCharge + codCharge + gstAmountForward).toFixed(2),
       );
@@ -574,10 +565,7 @@ async function calculateRateForServiceBulk(payload) {
     }
 
     // 🧮 GST + Final total
-    let gstAmount = 0;
-    if (!isFlatRate) {
-      gstAmount = ((totalForwardCharge + codCharge) * gstRate) / 100;
-    }
+    let gstAmount = ((totalForwardCharge + codCharge) * gstRate) / 100;
     const totalFinalCharge = totalForwardCharge + codCharge + gstAmount;
 
     const rateDetails = {

@@ -375,6 +375,8 @@ const markWooOrderAsShipped = async (
   }
 };
 
-module.exports = { markWooOrderAsShipped };
-
-module.exports = { wooCommerceWebhookHandler, createWooCommerceWebhook };
+module.exports = { 
+  markWooOrderAsShipped, 
+  wooCommerceWebhookHandler, 
+  createWooCommerceWebhook 
+};

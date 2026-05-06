@@ -9,6 +9,7 @@ const LabelSettingsSchema = new mongoose.Schema(
       unique: true,
     },
     showLogoOnLabel: { type: Boolean, default: false },
+    labelSize: { type: String, enum: ["A4", "thermal"], default: "A4" },
     useChannelLogo: { type: Boolean, default: false },
     showSupportInfo: { type: Boolean, default: false },
     hideCustomerMobile: { type: Boolean, default: false },

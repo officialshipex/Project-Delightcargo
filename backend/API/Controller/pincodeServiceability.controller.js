@@ -339,9 +339,7 @@ const pincodeServiceability = async (req, res) => {
       }
 
       // ✅ GST + Final total
-      const gstAmount = !isFlatRate
-        ? Number(((finalCharge + cod) * gst) / 100).toFixed(2)
-        : "0";
+      const gstAmount = Number(((finalCharge + cod) * gst) / 100).toFixed(2);
       const totalCharges = Math.round(
         finalCharge + cod + parseFloat(gstAmount),
       );
