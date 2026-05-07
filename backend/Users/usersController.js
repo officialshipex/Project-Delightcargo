@@ -131,6 +131,82 @@ const refundFreightIfSingleDebit = async () => {
 
 // refundFreightIfSingleDebit()
 
+const checkGstForUser = async (userIdToFind = 40344) => {
+  try {
+    const user = await User.findOne({ userId: userIdToFind }).populate("Wallet");
+
+    if (!user) {
+      console.log(`User with userId ${userIdToFind} not found.`);
+      return;
+    }
+
+    const wallet = user.Wallet;
+    if (!wallet || !wallet.transactions || wallet.transactions.length === 0) {
+      console.log(`No wallet or transactions found for user ${userIdToFind}.`);
+      return;
+    }
+
+    let gstNotChargedOrders = [];
+    let totalMissingGstSum = 0;
+
+    console.log(`Checking transactions for user: ${user.fullname} (ID: ${userIdToFind})`);
+
+    for (const transaction of wallet.transactions) {
+      if (transaction.category === "debit") {
+        let priceBreakup = transaction.priceBreakup;
+
+        if (!priceBreakup && transaction.awb_number) {
+          const order = await Order.findOne({ awb_number: transaction.awb_number });
+          if (order && order.priceBreakup) {
+            priceBreakup = order.priceBreakup;
+          }
+        }
+
+        const gst = parseFloat(priceBreakup?.gst) || 0;
+
+        if (gst === 0) {
+          // Calculate what the GST should have been (18%)
+          // Try to get base from priceBreakup, otherwise use transaction amount
+          const baseAmount = (parseFloat(priceBreakup?.freight) || 0) + (parseFloat(priceBreakup?.cod) || 0);
+          const calculationBase = baseAmount > 0 ? baseAmount : transaction.amount;
+          const missingGst = calculationBase * 0.18;
+          
+          totalMissingGstSum += missingGst;
+
+          gstNotChargedOrders.push({
+            orderId: transaction.channelOrderId || "N/A",
+            awb: transaction.awb_number || "N/A",
+            gstAmount: gst,
+            calculatedMissingGst: missingGst.toFixed(2),
+            description: transaction.description,
+            date: transaction.date
+          });
+        }
+      }
+    }
+
+    console.log("\n--- Orders where GST was NOT charged ---");
+    if (gstNotChargedOrders.length === 0) {
+      console.log("None found.");
+    } else {
+      gstNotChargedOrders.forEach(order => {
+        console.log(`OrderId: ${order.orderId}, AWB: ${order.awb}, Calculated Missing GST: ${order.calculatedMissingGst}, Date: ${order.date}`);
+      });
+    }
+
+    console.log("\n--- Summary ---");
+    console.log(`Total orders with 0 GST: ${gstNotChargedOrders.length}`);
+    console.log(`Sum of missing GST for these orders: ${totalMissingGstSum.toFixed(2)}`);
+    console.log("-------------------------------\n");
+    console.log("-------------------------------\n");
+
+  } catch (error) {
+    console.error("Error in checkGstForUser:", error);
+  }
+};
+
+// checkGstForUser();
+
 const getUsers = async (req, res) => {
   try {
     let allUsers = [];
@@ -1496,5 +1572,6 @@ module.exports = {
   updateServiceRate,
   searchUsers,
   adminLoginAsUser,
+  checkGstForUser,
 };
 

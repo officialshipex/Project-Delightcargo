@@ -49,6 +49,7 @@ function allowedDescription(desc = "") {
     "rto freight charges applied",
     "auto-accepted weight dispute charge",
     "weight dispute charges applied",
+    "gst charges applied",
   ];
   return allowed.includes(normalized);
 }
@@ -125,11 +126,6 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
         doc.font("Helvetica-Bold").text("GSTIN:", { continued: true });
         doc.font("Helvetica").text(` ${company.gstin}`);
       }
-
-      // if (company.pan) {
-      //   doc.font("Helvetica-Bold").text("PAN:", { continued: true });
-      //   doc.font("Helvetica").text(` ${company.pan}`);
-      // }
 
       doc.lineGap(0);
 
@@ -696,7 +692,7 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     return { skipped: true, reason: "No chargeable transactions" };
   }
 
-  const invoiceNumber = await generateInvoiceNumber();
+  const invoiceNumber = await generateInvoiceNumber(periodEnd);
   console.log(
     `Generating invoice ${invoiceNumber} for user ${userId} for period:`,
     periodStart,
@@ -721,6 +717,7 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     userId,
     periodStart,
     periodEnd,
+    invoiceDate: periodEnd,
     invoiceNumber,
     totalAmount: total,
     taxableValue,
@@ -760,26 +757,42 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     pan: PAN?.pan || "N/A",
   };
 
+  // Determine Company Details based on date (April 2026 onwards)
+  const isNewBranding = new Date(periodEnd) >= new Date(2026, 3, 1);
+  const companyDetails = isNewBranding
+    ? {
+        name: "Quickpost360 Services Private Limited",
+        address:
+          "House No 87 Singhal Panna, Gali No2 Near Shiv Mandir, Badesera, Bhiwani, Bhiwani, Haryana, India, 127031",
+        phone: "+91- 9813981344",
+        email: "support@shipexindia.com",
+        gstin: "06AABCQ1885H1ZC",
+        cin: "U53200HR2025PTC138342",
+        bank: {
+          accountName: "Quickpost360 Services Private Limited",
+          accountNumber: "258800258800",
+          bankName: "Indusind Bank Limited",
+          ifsc: "INDB0000673",
+        },
+      }
+    : {
+        name: "Shipex India",
+        address:
+          "01, Basement, Biju Tower, Baba Nagar, Bhiwani, Haryana - 127021",
+        phone: "+91- 9813981344",
+        email: "support@shipexindia.com",
+        pan: "XXXAAABBB",
+        gstin: "06FKCPS6109D3Z7",
+        bank: {
+          accountName: "Shipex India",
+          accountNumber: "2258120020000251",
+          bankName: "Ujjivan Small Finance Bank",
+          ifsc: "UJVN0002258",
+        },
+      };
+
   // ---------------- FINAL INVOICE PDF ----------------
-  const pdfPath = await generateInvoicePDF(
-    invoice,
-    {
-      name: "Shipex India",
-      address:
-        "01, Basement, Biju Tower, Baba Nagar, Bhiwani, Haryana - 127021",
-      phone: "+91- 9813981344",
-      email: "support@shipexindia.com",
-      pan: "XXXAAABBB",
-      gstin: "06FKCPS6109D3Z7",
-      bank: {
-        accountName: "Shipex India",
-        accountNumber: "2258120020000251",
-        bankName: "Ujjivan Small Finance Bank",
-        ifsc: "UJVN0002258",
-      },
-    },
-    customerInfo,
-  );
+  const pdfPath = await generateInvoicePDF(invoice, companyDetails, customerInfo);
 
   const s3Key = `invoices/${userId}/${invoice.invoiceNumber}.pdf`;
   const s3Url = await uploadToS3(pdfPath, s3Key);
@@ -1117,7 +1130,7 @@ const adminGetInvoices = async (req, res) => {
       _id: inv._id,
       invoiceNumber: inv.invoiceNumber,
       totalShipments: inv.includedAwbs?.length || 0,
-      invoiceDate: inv.createdAt.toISOString().split("T")[0],
+      invoiceDate: (inv.invoiceDate || inv.createdAt).toISOString().split("T")[0],
       periodStart: inv.periodStart?.toISOString().split("T")[0] || null,
       periodEnd: inv.periodEnd?.toISOString().split("T")[0] || null,
       invoiceUrl: inv.s3Url || null,
@@ -1195,7 +1208,7 @@ const userGetInvoices = async (req, res) => {
       _id: inv._id,
       invoiceNumber: inv.invoiceNumber,
       totalShipments: inv.includedAwbs?.length || 0,
-      invoiceDate: inv.createdAt.toISOString().split("T")[0],
+      invoiceDate: (inv.invoiceDate || inv.createdAt).toISOString().split("T")[0],
       periodStart: inv.periodStart?.toISOString().split("T")[0] || null,
       periodEnd: inv.periodEnd?.toISOString().split("T")[0] || null,
       invoiceUrl: inv.s3Url || null,

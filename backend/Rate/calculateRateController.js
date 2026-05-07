@@ -112,8 +112,10 @@ const calculateRate = async (req, res) => {
         let boxdServiceable = boxdResult && boxdResult.success !== false;
         if (boxdServiceable && Array.isArray(boxdResult.courier_ids)) {
           const sName = rc.courierServiceName.toLowerCase();
-          if (sName.includes("surface")) {
-            boxdServiceable = boxdResult.courier_ids.includes(4) || boxdResult.courier_ids.includes(47);
+          if (sName.includes("flat")) {
+            boxdServiceable = boxdResult.courier_ids.includes(47);
+          } else if (sName.includes("surface")) {
+            boxdServiceable = boxdResult.courier_ids.includes(4);
           } else if (sName.includes("air")) {
             boxdServiceable = boxdResult.courier_ids.includes(6);
           }

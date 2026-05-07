@@ -98,7 +98,21 @@ const createBoxdLogisticsShipment = async ({
         // Step 6: Ship (assign courier)
         let shipRes;
         try {
-            const courierId = parseInt(courier) || 4;
+            let courierId = parseInt(courier);
+            if (!courierId) {
+                const sName = courierServiceName.toLowerCase();
+                if (sName.includes("flat")) {
+                    courierId = 47;
+                } else if (sName.includes("air")) {
+                    courierId = 6;
+                } else if (sName.includes("surface")) {
+                    courierId = 4;
+                }
+            }
+
+            if (!courierId) {
+                throw new Error("Courier ID is required for BoxdLogistics shipment");
+            }
             shipRes = await shipBoxdOrder(boxdOrderId, courierId);
             console.log("BoxdLogistics API ship response:", shipRes);
         } catch (err) {

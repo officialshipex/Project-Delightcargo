@@ -22,6 +22,7 @@ const InvoiceSchema = new mongoose.Schema(
     periodStart: Date,
     periodEnd: Date,
 
+    invoiceDate: Date,
     invoiceNumber: { type: String, required: true },
 
     totalAmount: { type: Number, required: true }, // taxable + tax

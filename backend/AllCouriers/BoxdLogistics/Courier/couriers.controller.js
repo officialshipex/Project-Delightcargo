@@ -204,6 +204,7 @@ const createBoxdOrder = async (currentOrder, courierServiceName) => {
 
 // ─── Helper: ship (assign courier) ───────────────────────────────────────────
 const shipBoxdOrder = async (boxdOrderId, courierId) => {
+    console.log("Booking payload", { order_id: boxdOrderId, courier_id: courierId });
     const response = await axios.post(
         `${BASE_URL}/order/ship/`,
         { order_id: boxdOrderId, courier_id: courierId },
@@ -214,7 +215,7 @@ const shipBoxdOrder = async (boxdOrderId, courierId) => {
             },
         }
     );
-    // console.log("ship order response",response.data)
+    console.log("ship order response",response.data)
     return response.data;
 };
 
@@ -249,7 +250,7 @@ const checkServiceabilityBoxdLogistics = async ({
         });
 
         const couriers = response.data || [];
-        // console.log("couriers",couriers)
+        // console.log("couriers", couriers)
         const matchedCouriers = couriers
             .filter((c) => c.courier_id === 4 || c.courier_id === 6 || c.courier_id === 47)
             .map((c) => c.courier_id);

@@ -173,8 +173,10 @@ const availableCourierService = async (req, res) => {
 
       if (provider === "BoxdLogistics" && isServiceable && Array.isArray(serviceable.courier_ids)) {
         const sName = rc.courierServiceName.toLowerCase();
-        if (sName.includes("surface")) {
-          isServiceable = serviceable.courier_ids.includes(4) || serviceable.courier_ids.includes(47);
+        if (sName.includes("flat")) {
+          isServiceable = serviceable.courier_ids.includes(47);
+        } else if (sName.includes("surface")) {
+          isServiceable = serviceable.courier_ids.includes(4);
         } else if (sName.includes("air")) {
           isServiceable = serviceable.courier_ids.includes(6);
         }

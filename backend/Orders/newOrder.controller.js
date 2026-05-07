@@ -1367,7 +1367,7 @@ const ShipeNowOrder = async (req, res) => {
           if (item.provider?.toLowerCase() === "boxdlogistics" && Array.isArray(result.courier_ids)) {
             // Determine which courierId this specific service name maps to
             const sName = item.name?.toLowerCase() || "";
-            const requiredCid = sName.includes("surface") ? 4 : sName.includes("air") ? 6 : null;
+            const requiredCid = sName.includes("flat") ? 47 : sName.includes("surface") ? 4 : sName.includes("air") ? 6 : null;
             if (requiredCid !== null && result.courier_ids.includes(requiredCid)) {
               return [{ item, courierId: requiredCid, virtualName: normalize(item.name) }];
             }

@@ -14,6 +14,7 @@ const { exceptionList,ndrCreate } = require("../Controller/NDR.controller");
 const createPickupAddress=require("../Controller/warehouseCreation.controller")
 const generateManifest=require("../Controller/manifestGeneration.controller")
 
+
 // Route to create a new order
 router.post("/external/createOrder", isAuthorized, orderCreationController);
 router.post("/external/generateToken", generateToken);
@@ -27,5 +28,6 @@ router.post("/external/generateManifest",isAuthorized,generateManifest)
 router.get("/external/exceptionList",isAuthorized,exceptionList)
 router.post("/external/ndr/create",isAuthorized,ndrCreate);
 router.post("/external/createPickupAddress",isAuthorized,createPickupAddress)
+
 
 module.exports = router;
