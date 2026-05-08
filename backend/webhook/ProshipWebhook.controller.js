@@ -103,7 +103,7 @@ const ProshipWebhook = async (req, res) => {
         continue;
       }
 
-      const oldStatus = order.status; // 🔹 Capture status before webhook updates
+      const oldStatus = order.status; // kept for logging
 
       // ── Duplicate Tracking Check ──
       const lastTracking = order.tracking[order.tracking.length - 1];
@@ -317,18 +317,9 @@ const ProshipWebhook = async (req, res) => {
             currentDate <= lastNdrDate
           ) {
             console.log(`Proship Webhook: Duplicate/older NDR for AWB ${awb}, skipping NDR push.`);
-            order.tracking.push({
-              Instructions: remark,
-              status: statusDescription,
-              StatusDateTime: timestamp,
-              StatusLocation: location,
-            });
-            await order.save();
-            continue;
-          }
-
-          // Valid new NDR
-          if (!lastNdrDate || currentDate > lastNdrDate) {
+            // We just fall through to the end of the loop where save/notify happens anyway
+          } else if (!lastNdrDate || currentDate > lastNdrDate) {
+            // Valid new NDR
             order.reattempt = true;
             order.ndrHistory.push({
               actions: [
@@ -348,6 +339,7 @@ const ProshipWebhook = async (req, res) => {
       /* ================================================================
          SAVE TRACKING ENTRY
       ================================================================ */
+      // Avoid pushing to tracking array twice if we already handled it above (though we didn't in this refactor)
       order.tracking.push({
         Instructions: remark,
         Status: statusDescription,
@@ -357,23 +349,19 @@ const ProshipWebhook = async (req, res) => {
 
       await order.save();
       
-      // 🔹 Trigger Notifications if status changed via Webhook
-      if (order.status !== oldStatus) {
-        console.log(`🔔 Webhook: Status changed from ${oldStatus} to ${order.status}. Sending notifications...`);
+      // 🔔 Trigger Notifications (unconditional — MessageLog handles dedup per awb+status)
+      if (order.status) {
+        console.log(`🔔 Proship Webhook: Sending notifications for AWB ${awb}, status: ${order.status}`);
         
         const notificationData = {
           userId: order.userId,
           awb_number: order.awb_number,
           status: order.status,
           date: new Date(),
-          mobile_number: order.receiverAddress?.phoneNumber, // 🔹 Corrected key
-          email: order.receiverAddress?.email,              // 🔹 Corrected key
-          
-          
-          
+          mobile_number: order.receiverAddress?.phoneNumber,
+          email: order.receiverAddress?.email,
         };
 
-        // Fire and forget - failures won't stop the webhook processing
         (async () => {
           try {
             await Promise.allSettled([
@@ -385,6 +373,22 @@ const ProshipWebhook = async (req, res) => {
             console.error("Proship Webhook Notification Error:", e.message);
           }
         })();
+
+        // Sync to WooCommerce if applicable
+        if (order.channel === "WooCommerce") {
+          (async () => {
+            try {
+              const AllChannelModel = require("../Channels/allChannel.model");
+              const { markWooOrderAsShipped } = require("../Channels/WooCommerce/woocommerce.controller");
+              const store = await AllChannelModel.findOne({ userId: order.userId, channel: "WooCommerce" });
+              if (store?.storeURL) {
+                await markWooOrderAsShipped(store.storeURL, order.orderId, order.awb_number, order.provider, order.status);
+              }
+            } catch (e) {
+              console.error(`⚠️ WooCommerce sync failed for AWB ${order.awb_number}:`, e.message);
+            }
+          })();
+        }
       }
       
       console.log(`Proship Webhook: AWB ${awb} updated → status=${order.status}`);

@@ -174,8 +174,8 @@ const wooCommerceWebhookHandler = async (req, res) => {
         const productInfo = await getWooCommerceProductDetails(
           item.product_id,
           storeURL,
-          store.storeClientId, // consumerKey
-          store.storeClientSecret // consumerSecret
+          store.storeClientId,
+          store.storeClientSecret
         );
 
         totalWeight +=
@@ -190,13 +190,30 @@ const wooCommerceWebhookHandler = async (req, res) => {
           parseFloat(productInfo.height) || 10
         );
 
-        return {
-          id: item?.id,
-          quantity: item?.quantity,
-          name: item?.name,
-          sku: item?.sku,
-          unitPrice: String(item.price), // always string
+        const total = parseFloat(item.total) || 0;
+        const totalTax = parseFloat(item.total_tax) || 0;
+        const subtotal = parseFloat(item.subtotal) || 0;
+        const subtotalTax = parseFloat(item.subtotal_tax) || 0;
+        const qty = parseInt(item.quantity) || 1;
+
+        // Calculate inclusive unit price (using subtotal to get the original price before discounts)
+        const unitPriceInclTax = (subtotal + subtotalTax) / qty;
+        
+        // Calculate discount per unit (if any)
+        const discountInclTax = (subtotal + subtotalTax - total - totalTax) / qty;
+
+        const productRow = {
+          id: item.product_id,
+          quantity: qty,
+          name: item.name,
+          unitPrice: unitPriceInclTax.toFixed(2),
+          discount: discountInclTax > 0 ? discountInclTax.toFixed(2) : "0",
+          sku: item.sku,
+          tax: String(totalTax),
         };
+
+        console.log(`Synced Product: ${item.name} | UnitPrice(Incl.Tax): ${productRow.unitPrice} | Discount: ${productRow.discount}`);
+        return productRow;
       })
     );
 
@@ -317,21 +334,77 @@ const getWooCommerceProductDetails = async (
   }
 };
 
+// Map Shipex internal status → WooCommerce order status
+// WooCommerce standard: pending, processing, on-hold, completed, cancelled
+// Stores with shipment plugins may also accept: shipped, in-transit, out-for-delivery, etc.
+const shipexToWooStatus = (shipexStatus) => {
+  const map = {
+    "Booked":           "processing",    // Courier booked, order being shipped
+    "Ready To Ship":    "processing",    // Ready for pickup
+    "Pickup Completed": "processing",    // Picked up by courier
+    "In-transit":       "on-hold",       // In transit (no native WC status; on-hold = awaiting shipment)
+    "Out for Delivery": "on-hold",       // Out for delivery
+    "Delivered":        "completed",     // Successfully delivered
+    "Cancelled":        "cancelled",     // Order cancelled
+    "RTO":              "on-hold",       // Return to origin initiated
+    "RTO In-transit":   "on-hold",       // Returning to origin
+    "RTO Delivered":    "on-hold",       // Returned to origin
+    "Undelivered":      "on-hold",       // Delivery attempt failed
+    "Lost":             "on-hold",       // Shipment lost
+  };
+  return map[shipexStatus] || null; // null = don't update WC status for unknown statuses
+};
+
 const markWooOrderAsShipped = async (
   storeUrl,
   orderId,
   trackingNumber,
-  courierName
+  courierName,
+  shipexStatus   // Shipex order status (e.g. "In-transit", "Delivered", "Booked")
 ) => {
   try {
     const baseUrl = storeUrl.replace(/\/$/, "");
-    console.log("baseUrl", baseUrl);
-    const store = await AllChannel.findOne({ storeURL: storeUrl });
+    const store = await AllChannel.findOne({ 
+      storeURL: { $regex: storeUrl.replace(/\/$/, ""), $options: "i" } 
+    });
+
+    if (!store) {
+      console.error(`❌ Store not found for URL: ${storeUrl}`);
+      return;
+    }
+
+    // 1. Resolve channelId (WC's internal ID) if our internal 6-digit ID was provided
+    let wcOrderId = orderId;
+    const dbOrder = await Order.findOne({ 
+      $or: [{ orderId: orderId }, { channelId: orderId }] 
+    });
+    
+    if (dbOrder && dbOrder.channel !== "WooCommerce") {
+      console.error(`❌ Order ${orderId} is a ${dbOrder.channel} order, not a WooCommerce order. Fulfillment skipped.`);
+      return;
+    }
+
+    if (dbOrder && dbOrder.channelId) {
+      wcOrderId = dbOrder.channelId;
+      console.log(`ℹ️ Resolved internal ID ${orderId} to WooCommerce ID ${wcOrderId}`);
+    }
+
+    // 2. Map Shipex status → WooCommerce status
+    const wcStatus = shipexToWooStatus(shipexStatus);
+    if (!wcStatus) {
+      console.log(`ℹ️ No WooCommerce status mapping for Shipex status: "${shipexStatus}". Skipping WC update.`);
+      return;
+    }
+
     const trackingUrl = `https://app.shipexindia.com/dashboard/order/tracking/${trackingNumber}`;
-    // 1. Update WooCommerce order status to "completed"
+
+    // 3. Update WooCommerce order status
     await axios.put(
-      `${baseUrl}/wp-json/wc/v3/orders/${orderId}`,
-      { status: "completed" },
+      `${baseUrl}/wp-json/wc/v3/orders/${wcOrderId}`,
+      { 
+        status: wcStatus,
+        customer_note: `Shipex Update: ${shipexStatus} | AWB: ${trackingNumber} | Courier: ${courierName || "N/A"}`,
+      },
       {
         auth: {
           username: store.storeClientId,
@@ -340,13 +413,14 @@ const markWooOrderAsShipped = async (
       }
     );
 
-    console.log(`✅ WooCommerce order ${orderId} marked as completed`);
+    console.log(`✅ WooCommerce order ${wcOrderId} status updated: ${shipexStatus} → ${wcStatus}`);
 
-    // 2. (Optional) Add tracking info if shipment tracking plugin is installed
-    if (trackingNumber) {
+    // 4. Add tracking info to WooCommerce (only when Booked / first shipment scan)
+    const addTrackingStatuses = ["Booked", "Ready To Ship", "Pickup Completed"];
+    if (trackingNumber && addTrackingStatuses.includes(shipexStatus)) {
       try {
         await axios.post(
-          `${baseUrl}/wp-json/wc-shipment-tracking/v3/orders/${orderId}/shipment-trackings`,
+          `${baseUrl}/wp-json/wc-shipment-tracking/v3/orders/${wcOrderId}/shipment-trackings`,
           {
             tracking_provider: courierName || "Custom Provider",
             tracking_number: trackingNumber,
@@ -355,17 +429,53 @@ const markWooOrderAsShipped = async (
           },
           {
             auth: {
-              username: consumerKey,
-              password: consumerSecret,
+              username: store.storeClientId,
+              password: store.storeClientSecret,
             },
           }
         );
-        console.log(`🚚 Tracking info added for WooCommerce order ${orderId}`);
+        console.log(`🚚 Tracking info added for WooCommerce order ${wcOrderId}`);
       } catch (err) {
         console.log(
-          `⚠️ Could not add tracking info: ${err.response?.data || err.message}`
+          `⚠️ Could not add tracking info (plugin may not be installed): ${err.response?.data?.message || err.message}`
         );
       }
+    }
+
+    // 5. Trigger Notifications to Customer (dedup handled by MessageLog in notification controller)
+    const orderForNotif = dbOrder;
+    if (orderForNotif && (orderForNotif.receiverAddress?.phoneNumber || orderForNotif.receiverAddress?.email)) {
+      const User = require("../../models/User.model");
+      const Wallet = require("../../models/wallet");
+      const userWithWallet = await User.findById(orderForNotif.userId).select("Wallet");
+      const wallet = userWithWallet?.Wallet ? await Wallet.findById(userWithWallet.Wallet) : null;
+
+      const notificationData = {
+        userId: orderForNotif.userId,
+        awb_number: trackingNumber,
+        status: shipexStatus,  // Use actual Shipex status, not hardcoded "Booked"
+        date: new Date(),
+        credit: wallet?.creditBalance || 0,
+        mobile_number: orderForNotif.receiverAddress?.phoneNumber,
+        email: orderForNotif.receiverAddress?.email,
+      };
+
+      console.log(`🔔 Sending fulfillment notifications for AWB: ${trackingNumber}, status: ${shipexStatus}`);
+      
+      // Fire and forget
+      (async () => {
+        try {
+          const { sendWhatsAppMessage, sendEmailMessage, sendSMSMessage } = require("../../notification/notification.controller");
+          await Promise.allSettled([
+            sendWhatsAppMessage(notificationData),
+            sendEmailMessage(notificationData),
+            sendSMSMessage(notificationData)
+          ]);
+          console.log(`✅ Notifications triggered for WooCommerce order ${wcOrderId}, status: ${shipexStatus}`);
+        } catch (e) {
+          console.error("⚠️ Fulfillment Notification Error:", e.message);
+        }
+      })();
     }
   } catch (error) {
     console.error(
@@ -374,6 +484,8 @@ const markWooOrderAsShipped = async (
     );
   }
 };
+
+// markWooOrderAsShipped("https://shop.teamworkarts.com/","576643","QPSP0000000209","Ekart")
 
 module.exports = { 
   markWooOrderAsShipped, 

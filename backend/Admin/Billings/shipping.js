@@ -136,6 +136,8 @@ const getAllShippingTransactions = async (req, res) => {
           productDetails: 1,
           packageDetails: 1,
           B2BPackageDetails: 1,
+          priceBreakup: 1,
+          rateBreakup: 1,
         },
       },
       

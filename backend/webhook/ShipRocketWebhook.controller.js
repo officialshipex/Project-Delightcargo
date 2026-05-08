@@ -110,7 +110,7 @@ const ShipRocketWebhook = async (req, res) => {
       return res.status(200).json({ success: true, message: "Order inactive" });
     }
 
-    const oldStatus = order.status;
+    const oldStatus = order.status; // kept for logging
 
     // ── Duplicate Tracking Check ──
     const lastTracking = order.tracking[order.tracking.length - 1];
@@ -312,8 +312,10 @@ const ShipRocketWebhook = async (req, res) => {
 
     await order.save();
 
-    // 🔹 Trigger Notifications if status changed
-    if (order.status !== oldStatus) {
+    // 🔔 Trigger Notifications (unconditional — MessageLog handles dedup per awb+status)
+    if (order.status) {
+      console.log(`🔔 ShipRocket Webhook: Sending notifications for AWB ${awb}, status: ${order.status}`);
+
       const notificationData = {
         userId: order.userId,
         awb_number: order.awb_number,
@@ -334,6 +336,22 @@ const ShipRocketWebhook = async (req, res) => {
           console.error("ShipRocket Webhook Notification Error:", e.message);
         }
       })();
+
+      // Sync to WooCommerce if applicable
+      if (order.channel === "WooCommerce") {
+        (async () => {
+          try {
+            const AllChannelModel = require("../Channels/allChannel.model");
+            const { markWooOrderAsShipped } = require("../Channels/WooCommerce/woocommerce.controller");
+            const store = await AllChannelModel.findOne({ userId: order.userId, channel: "WooCommerce" });
+            if (store?.storeURL) {
+              await markWooOrderAsShipped(store.storeURL, order.orderId, order.awb_number, order.provider, order.status);
+            }
+          } catch (e) {
+            console.error(`⚠️ WooCommerce sync failed for AWB ${order.awb_number}:`, e.message);
+          }
+        })();
+      }
     }
 
     return res.status(200).json({ success: true, message: "Webhook processed successfully" });

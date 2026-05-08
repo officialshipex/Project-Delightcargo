@@ -35,8 +35,6 @@ const ShreeMarutiWebhook = async (req, res) => {
       });
     }
 
-    const oldStatus = order.status; // 🔹 Capture status before webhook updates
-
     if (["new", "Cancelled"].includes(order.status)) {
       console.log(
         `Skipping Shree Maruti Webhook for AWB ${awb} because order status is "${order.status}"`
@@ -271,23 +269,19 @@ const ShreeMarutiWebhook = async (req, res) => {
 
     await order.save();
 
-    // 🔹 Trigger Notifications if status changed via Webhook
-    if (order.status !== oldStatus) {
-      console.log(`🔔 Webhook: Status changed from ${oldStatus} to ${order.status}. Sending notifications...`);
+    // 🔔 Trigger Notifications (unconditional — MessageLog handles dedup per awb+status)
+    if (order.status) {
+      console.log(`🔔 Shree Maruti Webhook: Sending notifications for AWB ${awb}, status: ${order.status}`);
 
       const notificationData = {
         userId: order.userId,
         awb_number: order.awb_number,
         status: order.status,
         date: new Date(),
-        mobile_number: order.receiverAddress?.phoneNumber, // 🔹 Corrected key
-        email: order.receiverAddress?.email,              // 🔹 Corrected key
-
-
-
+        mobile_number: order.receiverAddress?.phoneNumber,
+        email: order.receiverAddress?.email,
       };
 
-      // Fire and forget - failures won't stop the webhook processing
       (async () => {
         try {
           await Promise.allSettled([
@@ -299,6 +293,22 @@ const ShreeMarutiWebhook = async (req, res) => {
           console.error("Shree Maruti Webhook Notification Error:", e.message);
         }
       })();
+
+      // Sync to WooCommerce if applicable
+      if (order.channel === "WooCommerce") {
+        (async () => {
+          try {
+            const AllChannelModel = require("../Channels/allChannel.model");
+            const { markWooOrderAsShipped } = require("../Channels/WooCommerce/woocommerce.controller");
+            const store = await AllChannelModel.findOne({ userId: order.userId, channel: "WooCommerce" });
+            if (store?.storeURL) {
+              await markWooOrderAsShipped(store.storeURL, order.orderId, order.awb_number, order.provider, order.status);
+            }
+          } catch (e) {
+            console.error(`⚠️ WooCommerce sync failed for AWB ${order.awb_number}:`, e.message);
+          }
+        })();
+      }
     }
 
     return res.status(200).json({

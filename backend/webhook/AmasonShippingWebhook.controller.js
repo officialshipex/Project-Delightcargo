@@ -27,7 +27,7 @@ const AmazonShippingWebhook = async (req, res) => {
 
     if (["new", "Cancelled"].includes(order.status)) {
       console.log(
-        `Skipping Amazon Webhook for AWB ${awb} because order status is "${order.status}"`
+        `Skipping Amazon Webhook for AWB ${trackingId} because order status is "${order.status}"`
       );
       return res.status(200).send("Ignored (Order Not Yet Shipped)");
     }
@@ -154,7 +154,55 @@ const AmazonShippingWebhook = async (req, res) => {
         : "",
     });
 
-    // await order.save();
+    await order.save();
+
+    // 🔔 Trigger Notifications (unconditional — MessageLog handles dedup per awb+status)
+    if (order.status) {
+      console.log(`🔔 Amazon Webhook: Sending notifications for AWB ${trackingId}, status: ${order.status}`);
+
+      const {
+        sendWhatsAppMessage,
+        sendEmailMessage,
+        sendSMSMessage,
+      } = require("../notification/notification.controller");
+
+      const notificationData = {
+        userId: order.userId,
+        awb_number: order.awb_number,
+        status: order.status,
+        date: new Date(),
+        mobile_number: order.receiverAddress?.phoneNumber,
+        email: order.receiverAddress?.email,
+      };
+
+      (async () => {
+        try {
+          await Promise.allSettled([
+            sendWhatsAppMessage(notificationData),
+            sendEmailMessage(notificationData),
+            sendSMSMessage(notificationData)
+          ]);
+        } catch (e) {
+          console.error("Amazon Webhook Notification Error:", e.message);
+        }
+      })();
+
+      // Sync to WooCommerce if applicable
+      if (order.channel === "WooCommerce") {
+        (async () => {
+          try {
+            const AllChannelModel = require("../Channels/allChannel.model");
+            const { markWooOrderAsShipped } = require("../Channels/WooCommerce/woocommerce.controller");
+            const store = await AllChannelModel.findOne({ userId: order.userId, channel: "WooCommerce" });
+            if (store?.storeURL) {
+              await markWooOrderAsShipped(store.storeURL, order.orderId, order.awb_number, order.provider, order.status);
+            }
+          } catch (e) {
+            console.error(`⚠️ WooCommerce sync failed for AWB ${order.awb_number}:`, e.message);
+          }
+        })();
+      }
+    }
 
     return res.status(200).send("Webhook processed successfully");
   } catch (error) {

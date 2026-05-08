@@ -51,6 +51,7 @@ const {
   sendEmailMessage,
   sendSMSMessage,
 } = require("../notification/notification.controller");
+const { markWooOrderAsShipped } = require("../Channels/WooCommerce/woocommerce.controller");
 
 const statusMap = require("../statusMap/StatusMap.model");
 
@@ -67,7 +68,6 @@ const trackSingleOrder = async (order) => {
     // console.log("Tracking order:", order.awb_number);
     const { provider, awb_number, shipment_id, partner } = order;
     if (!provider || !awb_number) return;
-    const oldStatus = order.status; // 🔹 Store old status to detect changes
 
     const currentWallet = await Wallet.findById(
       (await User.findById((await Order.findOne({ awb_number })).userId))
@@ -1587,7 +1587,7 @@ const trackSingleOrder = async (order) => {
       await order.save();
       console.log(`Tracking history replaced for ${order.awb_number}`);
 
-      // 🔹 Trigger Notifications
+      // 🔹 Trigger Notifications (unconditional — MessageLog in notification controller handles dedup per awb+status)
       if (order.status) {
         console.log(`🔔 Preparing notifications for AWB: ${order.awb_number}, status: ${order.status}`);
 
@@ -1596,13 +1596,12 @@ const trackSingleOrder = async (order) => {
           awb_number: order.awb_number,
           status: order.status,
           date: new Date(),
-          credit: currentWallet?.creditBalance || 0, // 🔹 Pass credit balance for checks
+          credit: currentWallet?.creditBalance || 0,
           mobile_number: order.receiverAddress?.phoneNumber,
           email: order.receiverAddress?.email,
         };
 
-        console.log("Notification payload prepared:", notificationData);
-        // Fire and forget - failures won't stop the tracking update
+        // Fire and forget
         (async () => {
           try {
             await Promise.allSettled([
@@ -1610,10 +1609,34 @@ const trackSingleOrder = async (order) => {
               sendEmailMessage(notificationData),
               sendSMSMessage(notificationData)
             ]);
+            console.log(`✅ Notifications dispatched for AWB: ${order.awb_number}, status: ${order.status}`);
           } catch (e) {
             console.error("Notification trigger failed:", e.message);
           }
         })();
+
+        // 🔹 Sync status back to WooCommerce if this is a WooCommerce order
+        if (order.channel === "WooCommerce") {
+          (async () => {
+            try {
+              const AllChannelModel = require("../Channels/allChannel.model");
+              const store = await AllChannelModel.findOne({ userId: order.userId, channel: "WooCommerce" });
+              if (store?.storeURL) {
+                await markWooOrderAsShipped(
+                  store.storeURL,
+                  order.orderId,      // internal Shipex orderId
+                  order.awb_number,
+                  order.provider,     // courier provider name
+                  order.status
+                );
+              } else {
+                console.warn(`⚠️ No WooCommerce store found for userId: ${order.userId}`);
+              }
+            } catch (e) {
+              console.error(`⚠️ WooCommerce status sync failed for AWB ${order.awb_number}:`, e.message);
+            }
+          })();
+        }
       }
 
       console.log("saved");

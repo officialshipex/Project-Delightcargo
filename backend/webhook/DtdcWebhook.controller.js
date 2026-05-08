@@ -34,7 +34,7 @@ const DTDCWebhook = async (req, res) => {
       return res.status(404).send("Order not found");
     }
 
-    const oldStatus = order.status; // 🔹 Capture status before webhook updates
+    const oldStatus = order.status; // kept for logging only
 
     if (["new", "Cancelled"].includes(order.status)) {
       console.log(
@@ -185,23 +185,19 @@ const DTDCWebhook = async (req, res) => {
 
     await order.save();
 
-    // 🔹 Trigger Notifications if status changed via Webhook
-    if (order.status !== oldStatus) {
-      console.log(`🔔 Webhook: Status changed from ${oldStatus} to ${order.status}. Sending notifications...`);
-      
+    // 🔔 Trigger Notifications (unconditional — MessageLog handles dedup per awb+status)
+    if (order.status) {
+      console.log(`🔔 DTDC Webhook: Sending notifications for AWB ${awb}, status: ${order.status}`);
+
       const notificationData = {
         userId: order.userId,
         awb_number: order.awb_number,
         status: order.status,
         date: new Date(),
-        mobile_number: order.receiverAddress?.phoneNumber, // 🔹 Corrected key
-        email: order.receiverAddress?.email,              // 🔹 Corrected key
-        
-        
-        
+        mobile_number: order.receiverAddress?.phoneNumber,
+        email: order.receiverAddress?.email,
       };
 
-      // Fire and forget - failures won't stop the webhook processing
       (async () => {
         try {
           await Promise.allSettled([
@@ -213,6 +209,22 @@ const DTDCWebhook = async (req, res) => {
           console.error("DTDC Webhook Notification Error:", e.message);
         }
       })();
+
+      // Sync to WooCommerce if applicable
+      if (order.channel === "WooCommerce") {
+        (async () => {
+          try {
+            const AllChannelModel = require("../Channels/allChannel.model");
+            const { markWooOrderAsShipped } = require("../Channels/WooCommerce/woocommerce.controller");
+            const store = await AllChannelModel.findOne({ userId: order.userId, channel: "WooCommerce" });
+            if (store?.storeURL) {
+              await markWooOrderAsShipped(store.storeURL, order.orderId, order.awb_number, order.provider, order.status);
+            }
+          } catch (e) {
+            console.error(`⚠️ WooCommerce sync failed for AWB ${order.awb_number}:`, e.message);
+          }
+        })();
+      }
     }
 
     console.log("DTDC Webhook Processed for AWB:", awb);
