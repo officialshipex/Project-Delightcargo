@@ -196,13 +196,15 @@ const orderSchema = new mongoose.Schema(
 // Compound index
 orderSchema.index({ userId: 1, createdAt: -1 });
 
-const Shipment = mongoose.model("newOrder", orderSchema);
-
 // ── Auto NDR AI Calling Trigger ──────────────────────────────────────────
 orderSchema.pre("save", function (next) {
   // Check if ndrStatus changed to "Undelivered"
   if (this.isModified("ndrStatus") && this.ndrStatus === "Undelivered") {
     this._shouldAutoCallAiNdr = true;
+  }
+  // Check if status changed
+  if (this.isModified("status")) {
+    this._shouldTriggerStatusNotification = true;
   }
   next();
 });
@@ -210,15 +212,47 @@ orderSchema.pre("save", function (next) {
 orderSchema.post("save", async function (doc) {
   if (doc._shouldAutoCallAiNdr) {
     try {
-      // Lazy load to avoid potential circular dependencies
       const { autoTriggerNdrAiCall } = require("../aiCalling/autoNdrAiCall");
-      // Fire and forget (don't await to avoid blocking the save/response)
       autoTriggerNdrAiCall(doc, doc.ndrStatus);
     } catch (err) {
       console.error("AI NDR Hook error:", err);
     }
   }
+
+  if (doc._shouldTriggerStatusNotification) {
+    try {
+      const { triggerStatusNotification } = require("../utils/statusNotification");
+      triggerStatusNotification(doc);
+    } catch (err) {
+      console.error("Status Notification Hook error:", err);
+    }
+  }
 });
+
+// ── Centralized Trigger for findByIdAndUpdate / findOneAndUpdate ──────────
+orderSchema.post("findOneAndUpdate", async function (doc) {
+  try {
+    const update = this.getUpdate();
+    const status = update.$set?.status || update.status;
+
+    // If status is being updated, trigger notification
+    if (status) {
+      const { triggerStatusNotification } = require("../utils/statusNotification");
+      
+      const notificationDoc = doc ? (doc.toObject ? doc.toObject() : doc) : {};
+      if (update.$set) Object.assign(notificationDoc, update.$set);
+      else if (update.status) Object.assign(notificationDoc, { status: update.status });
+      
+      if (notificationDoc.status && notificationDoc.userId) {
+        triggerStatusNotification(notificationDoc);
+      }
+    }
+  } catch (err) {
+    console.error("findOneAndUpdate Notification Hook error:", err);
+  }
+});
+
+const Shipment = mongoose.model("newOrder", orderSchema);
 
 module.exports = Shipment;
 

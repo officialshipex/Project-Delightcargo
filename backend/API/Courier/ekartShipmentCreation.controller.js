@@ -400,10 +400,12 @@ const createEkartShipment = async ({
 
     // ── Auto-assign pickup manifest ──
     try {
-      const freshOrder = await Order.findById(currentOrder._id);
-      if (freshOrder) await assignPickupManifest(freshOrder);
+      const freshOrder = await Order.findById(id);
+      if (freshOrder) {
+        await assignPickupManifest(freshOrder);
+      }
     } catch (pErr) {
-      console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      console.error("[Pickup] failed:", pErr.message);
     }
 
     // 🔟 Wallet update (post-commit)

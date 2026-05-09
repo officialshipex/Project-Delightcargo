@@ -269,46 +269,21 @@ const ShreeMarutiWebhook = async (req, res) => {
 
     await order.save();
 
-    // 🔔 Trigger Notifications (unconditional — MessageLog handles dedup per awb+status)
-    if (order.status) {
-      console.log(`🔔 Shree Maruti Webhook: Sending notifications for AWB ${awb}, status: ${order.status}`);
-
-      const notificationData = {
-        userId: order.userId,
-        awb_number: order.awb_number,
-        status: order.status,
-        date: new Date(),
-        mobile_number: order.receiverAddress?.phoneNumber,
-        email: order.receiverAddress?.email,
-      };
-
+    // 🔔 Trigger Notifications are now handled automatically by the Order model hook (post-save)
+    // Sync to WooCommerce if applicable
+    if (order.channel === "WooCommerce") {
       (async () => {
         try {
-          await Promise.allSettled([
-            sendWhatsAppMessage(notificationData),
-            sendEmailMessage(notificationData),
-            sendSMSMessage(notificationData)
-          ]);
+          const AllChannelModel = require("../Channels/allChannel.model");
+          const { markWooOrderAsShipped } = require("../Channels/WooCommerce/woocommerce.controller");
+          const store = await AllChannelModel.findOne({ userId: order.userId, channel: "WooCommerce" });
+          if (store?.storeURL) {
+            await markWooOrderAsShipped(store.storeURL, order.orderId, order.awb_number, order.provider, order.status);
+          }
         } catch (e) {
-          console.error("Shree Maruti Webhook Notification Error:", e.message);
+          console.error(`⚠️ WooCommerce sync failed for AWB ${order.awb_number}:`, e.message);
         }
       })();
-
-      // Sync to WooCommerce if applicable
-      if (order.channel === "WooCommerce") {
-        (async () => {
-          try {
-            const AllChannelModel = require("../Channels/allChannel.model");
-            const { markWooOrderAsShipped } = require("../Channels/WooCommerce/woocommerce.controller");
-            const store = await AllChannelModel.findOne({ userId: order.userId, channel: "WooCommerce" });
-            if (store?.storeURL) {
-              await markWooOrderAsShipped(store.storeURL, order.orderId, order.awb_number, order.provider, order.status);
-            }
-          } catch (e) {
-            console.error(`⚠️ WooCommerce sync failed for AWB ${order.awb_number}:`, e.message);
-          }
-        })();
-      }
     }
 
     return res.status(200).json({

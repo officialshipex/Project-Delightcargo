@@ -289,14 +289,16 @@ const sendWhatsAppMessage = async ({
     const setting = await NotificationSetting.findOne({ userId }).lean();
 
     if (!setting) {
-      console.log(`❌ Notification settings not found for user: ${userId}`);
-      return { success: false };
+      const reason = `Notification settings not found for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     const checkLog = await MessageLog.findOne({ awb_number, status });
     if (checkLog?.isWhatsAppSent) {
-      console.log(`ℹ️ WhatsApp already sent for AWB: ${awb_number}, status: ${status}. Skipping.`);
-      return { success: true, alreadySent: true };
+      const reason = `WhatsApp already sent for AWB: ${awb_number}, status: ${status}. Skipping.`;
+      console.log(`ℹ️ ${reason}`);
+      return { success: true, alreadySent: true, reason };
     }
 
     const statusFieldMap = {
@@ -315,28 +317,32 @@ const sendWhatsAppMessage = async ({
 
     // Admin restrictions (Must be enabled by Admin default)
     if (setting.isAdminWhatsAppEnable === false) {
-      console.log(`❌ WhatsApp blocked by Admin for user: ${userId}`);
-      return { success: false };
+      const reason = `WhatsApp blocked by Admin for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     // User restrictions (Must be explicitly turned on by user)
     if (setting.isUserWhatsAppEnable === false) {
-      console.log(`❌ WhatsApp disabled by User for user: ${userId}`);
-      return { success: false };
+      const reason = `WhatsApp disabled by User for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
     if (!fieldName) {
       console.log(`❌ No WhatsApp status field mapping for status: ${status}`);
       return { success: false };
     }
     if (!setting[fieldName]) {
-      console.log(`❌ WhatsApp notification for ${status} is disabled in user settings.`);
-      return { success: false };
+      const reason = `WhatsApp notification for ${status} is disabled in user settings.`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     // Credit restriction
     if (!credit || credit <= 0) {
-      console.log(`❌ Insufficient credits for user: ${userId}`);
-      return { success: false };
+      const reason = `Insufficient credits for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     const matchedStatus = statuses.find((s) => s.key === status);
@@ -427,8 +433,9 @@ const sendEmailMessage = async ({
     // 🔹 Double Check Duplicate with MessageLog
     const checkLog = await MessageLog.findOne({ awb_number, status });
     if (checkLog?.isEmailSent) {
-      console.log(`ℹ️ Email already sent for AWB: ${awb_number}, status: ${status}. Skipping.`);
-      return { success: true, alreadySent: true };
+      const reason = `Email already sent for AWB: ${awb_number}, status: ${status}. Skipping.`;
+      console.log(`ℹ️ ${reason}`);
+      return { success: true, alreadySent: true, reason };
     }
 
     const statusFieldMap = {
@@ -447,28 +454,32 @@ const sendEmailMessage = async ({
 
     // Admin restrictions
     if (setting.isAdminEmailEnable === false) {
-      console.log(`❌ Email blocked by Admin for user: ${userId}`);
-      return { success: false };
+      const reason = `Email blocked by Admin for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     // User restrictions
     if (setting.isUserEmailEnable === false) {
-      console.log(`❌ Email disabled by User for user: ${userId}`);
-      return { success: false };
+      const reason = `Email disabled by User for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
     if (!fieldName) {
       console.log(`❌ No Email status field mapping for status: ${status}`);
       return { success: false };
     }
     if (!setting[fieldName]) {
-      console.log(`❌ Email notification for ${status} is disabled in user settings.`);
-      return { success: false };
+      const reason = `Email notification for ${status} is disabled in user settings.`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     // Credit restriction
     if (!credit || credit <= 0) {
-      console.log(`❌ Insufficient credits for user: ${userId}`);
-      return { success: false };
+      const reason = `Insufficient credits for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     const matchedStatus = statuses.find((s) => s.key === status);
@@ -548,8 +559,9 @@ const sendSMSMessage = async ({
     // 🔹 Double Check Duplicate with MessageLog
     const checkLog = await MessageLog.findOne({ awb_number, status });
     if (checkLog?.isSMSSent) {
-      console.log(`ℹ️ SMS already sent for AWB: ${awb_number}, status: ${status}. Skipping.`);
-      return { success: true, alreadySent: true };
+      const reason = `SMS already sent for AWB: ${awb_number}, status: ${status}. Skipping.`;
+      console.log(`ℹ️ ${reason}`);
+      return { success: true, alreadySent: true, reason };
     }
 
     const statusFieldMap = {
@@ -568,28 +580,32 @@ const sendSMSMessage = async ({
 
     // Admin restrictions
     if (setting.isAdminSMSEnable === false) {
-      console.log(`❌ SMS blocked by Admin for user: ${userId}`);
-      return { success: false };
+      const reason = `SMS blocked by Admin for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     // User restrictions
     if (setting.isUserSMSEnable === false) {
-      console.log(`❌ SMS disabled by User for user: ${userId}`);
-      return { success: false };
+      const reason = `SMS disabled by User for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
     if (!fieldName) {
       console.log(`❌ No SMS status field mapping for status: ${status}`);
       return { success: false };
     }
     if (!setting[fieldName]) {
-      console.log(`❌ SMS notification for ${status} is disabled in user settings.`);
-      return { success: false };
+      const reason = `SMS notification for ${status} is disabled in user settings.`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     // Credit restriction
     if (!credit || credit <= 0) {
-      console.log(`❌ Insufficient credits for user: ${userId}`);
-      return { success: false };
+      const reason = `Insufficient credits for user: ${userId}`;
+      console.log(`❌ ${reason}`);
+      return { success: false, reason };
     }
 
     const matchedStatus = statuses.find((s) => s.key === status);

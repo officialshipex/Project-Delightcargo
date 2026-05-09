@@ -477,9 +477,11 @@ const orderCreationEkart = async (req, res) => {
     // ── Auto-assign pickup manifest ──
     try {
       const freshOrder = await Order.findById(id);
-      if (freshOrder) await assignPickupManifest(freshOrder);
+      if (freshOrder) {
+        await assignPickupManifest(freshOrder);
+      }
     } catch (pErr) {
-      console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      console.error("[Pickup] error:", pErr.message);
     }
 
     res.status(200).json({

@@ -442,41 +442,8 @@ const markWooOrderAsShipped = async (
       }
     }
 
-    // 5. Trigger Notifications to Customer (dedup handled by MessageLog in notification controller)
-    const orderForNotif = dbOrder;
-    if (orderForNotif && (orderForNotif.receiverAddress?.phoneNumber || orderForNotif.receiverAddress?.email)) {
-      const User = require("../../models/User.model");
-      const Wallet = require("../../models/wallet");
-      const userWithWallet = await User.findById(orderForNotif.userId).select("Wallet");
-      const wallet = userWithWallet?.Wallet ? await Wallet.findById(userWithWallet.Wallet) : null;
-
-      const notificationData = {
-        userId: orderForNotif.userId,
-        awb_number: trackingNumber,
-        status: shipexStatus,  // Use actual Shipex status, not hardcoded "Booked"
-        date: new Date(),
-        credit: wallet?.creditBalance || 0,
-        mobile_number: orderForNotif.receiverAddress?.phoneNumber,
-        email: orderForNotif.receiverAddress?.email,
-      };
-
-      console.log(`🔔 Sending fulfillment notifications for AWB: ${trackingNumber}, status: ${shipexStatus}`);
-      
-      // Fire and forget
-      (async () => {
-        try {
-          const { sendWhatsAppMessage, sendEmailMessage, sendSMSMessage } = require("../../notification/notification.controller");
-          await Promise.allSettled([
-            sendWhatsAppMessage(notificationData),
-            sendEmailMessage(notificationData),
-            sendSMSMessage(notificationData)
-          ]);
-          console.log(`✅ Notifications triggered for WooCommerce order ${wcOrderId}, status: ${shipexStatus}`);
-        } catch (e) {
-          console.error("⚠️ Fulfillment Notification Error:", e.message);
-        }
-      })();
-    }
+    // 5. Trigger Notifications to Customer are now handled automatically by the Order model hook (post-save)
+    // No manual calls needed here.
   } catch (error) {
     console.error(
       `❌ Error fulfilling WooCommerce order ${orderId}:`,
