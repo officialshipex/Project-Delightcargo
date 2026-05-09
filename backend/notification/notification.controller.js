@@ -475,12 +475,8 @@ const sendEmailMessage = async ({
       return { success: false, reason };
     }
 
-    // Credit restriction
-    if (!credit || credit <= 0) {
-      const reason = `Insufficient credits for user: ${userId}`;
-      console.log(`❌ ${reason}`);
-      return { success: false, reason };
-    }
+    // Email is free, so we skip the credit restriction check here.
+
 
     const matchedStatus = statuses.find((s) => s.key === status);
     if (!matchedStatus) return { success: false };
@@ -505,25 +501,8 @@ const sendEmailMessage = async ({
     });
     console.log("email response", info)
     if (info && info.messageId) {
-      // 🔹 Debit logic: Deduct 1 credit for success
-      const User = require("../models/User.model");
-      const userWithWallet = await User.findById(userId).select("Wallet");
-      if (userWithWallet?.Wallet) {
-        const Wallet = require("../models/wallet");
-        const wallet = await Wallet.findById(userWithWallet.Wallet);
-        if (wallet) {
-          wallet.creditBalance = Math.max(0, wallet.creditBalance - 1);
-          wallet.notificationTransactions.push({
-            channelOrderId: awb_number, // 🔹 Map AWB as Order ID
-            category: "debit",
-            amount: 1,
-            description: `Notification Debit - Email (${status})`,
-            balanceAfterTransaction: wallet.creditBalance,
-            date: new Date(),
-          });
-          await wallet.save();
-        }
-      }
+      // Email is free, so we don't debit any credits.
+
 
       // 🔹 Update MessageLog
       await MessageLog.updateOne(
