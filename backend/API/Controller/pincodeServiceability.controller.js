@@ -290,6 +290,7 @@ const pincodeServiceability = async (req, res) => {
       let isServiceable = serviceable && serviceable.success !== false;
 
       if (provider.toLowerCase() === "boxdlogistics" && isServiceable && Array.isArray(serviceable.courier_ids)) {
+        const sName = rc.courierServiceName.toLowerCase();
         if (sName.includes("flat")) {
           isServiceable = serviceable.courier_ids.includes(47);
         } else if (sName.includes("surface")) {
