@@ -1,6 +1,7 @@
 const axios = require("axios");
 const Order = require("../../models/newOrder.model");
-const AllChannel = require("../allChannel.model"); // Adjust path if necessary
+const AllChannel = require("../allChannel.model");
+const PickupAddress = require("../../models/pickupAddress.model");
 
 // const storeURL = "https://www.mahadevrediments.in/";
 // const consumerKey = "ck_167c49505d20d4ec91bc4bb73459df2c4e7fc489";
@@ -231,6 +232,12 @@ const wooCommerceWebhookHandler = async (req, res) => {
       amount: parseFloat(orderData.total) || 0,
     };
 
+    // Fetch primary pickup address for this user
+    const primaryPickup = await PickupAddress.findOne({ 
+      userId: store.userId, 
+      isPrimary: true 
+    }).lean();
+
     // Prepare order payload
     const orderPayload = {
       userId: store.userId, // from the store record
@@ -239,15 +246,6 @@ const wooCommerceWebhookHandler = async (req, res) => {
       channelId: orderData.id,
       channel: "WooCommerce",
       storeUrl: storeURL,
-      pickupAddress: {
-        contactName: "Default Name",
-        email: "default@email.com",
-        phoneNumber: "9999999999",
-        address: "Default Warehouse Address",
-        pinCode: "000000",
-        city: "Default City",
-        state: "Default State",
-      },
       receiverAddress: {
         contactName: `${orderData.shipping.first_name} ${orderData.shipping.last_name}`,
         email: orderData.billing.email,
@@ -270,6 +268,19 @@ const wooCommerceWebhookHandler = async (req, res) => {
       paymentDetails,
       status: "new",
     };
+
+    // Only add pickupAddress if a primary one was found
+    if (primaryPickup && primaryPickup.pickupAddress) {
+      orderPayload.pickupAddress = {
+        contactName: primaryPickup.pickupAddress.contactName,
+        email: primaryPickup.pickupAddress.email,
+        phoneNumber: primaryPickup.pickupAddress.phoneNumber,
+        address: primaryPickup.pickupAddress.address,
+        pinCode: primaryPickup.pickupAddress.pinCode,
+        city: primaryPickup.pickupAddress.city,
+        state: primaryPickup.pickupAddress.state,
+      };
+    }
 
     try {
       await Order.create(orderPayload);

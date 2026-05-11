@@ -48,7 +48,6 @@ const aiCallLogSchema = new mongoose.Schema(
 
 // Index for fast lookups
 aiCallLogSchema.index({ userId: 1, createdAt: -1 });
-aiCallLogSchema.index({ callId: 1 });
 
 const AiCallLog = mongoose.model("AiCallLog", aiCallLogSchema);
 

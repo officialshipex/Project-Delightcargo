@@ -544,10 +544,10 @@ const generateShippingLabel = async (req, res) => {
 
 const createPickupRequest = async (warehouse_name, awb, pickupAddress = null, apiKey) => {
   const result = getCurrentDateTime();
-  
+
   if (!apiKey) {
-      const order = await Order.findOne({ awb_number: awb });
-      apiKey = order ? await getDelhiveryApiKey(order.courierName || order.provider) : await getDelhiveryApiKey();
+    const order = await Order.findOne({ awb_number: awb });
+    apiKey = order ? await getDelhiveryApiKey(order.courierName || order.provider) : await getDelhiveryApiKey();
   }
 
   const finalWarehouseName = pickupAddress ? getUniqueWarehouseName(pickupAddress) : warehouse_name;
