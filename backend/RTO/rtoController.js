@@ -12,14 +12,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const rtoCharges = async () => {
+const rtoCharges = async (specificOrderId = null) => {
   try {
     const gstRate = 18;
 
-    const orders = await Order.find({
+    const query = {
       status: "RTO Delivered",
-      RTOCharges: { $exists: false },
-    });
+      $or: [
+        { RTOCharges: { $exists: false } },
+        { RTOCharges: "0" },
+        { RTOCharges: 0 },
+      ],
+    };
+
+    if (specificOrderId) {
+      query._id = specificOrderId;
+    }
+
+    const orders = await Order.find(query);
 
     console.log("Total RTO Orders Found:", orders.length);
 
@@ -39,33 +49,46 @@ const rtoCharges = async () => {
         const planData = await Plan.findOne({ userId: item.userId }).session(session);
 
         // ✅ Get user-specific rate card from the plan's embedded array
-        const embeddedRateCard = planData?.rateCard?.find(
-          (r) => r.courierServiceName === item.courierServiceName
+        const userPlan = await Plan.findOne({ userId: item.userId }).session(session);
+
+        const embeddedRateCard = userPlan?.rateCard?.find(
+          (rc) => rc.courierServiceName === item.courierServiceName
         );
 
         if (!embeddedRateCard) {
-          console.warn(
-            `No rate card for courier ${item.courierServiceName} in user plan, skipping AWB ${item.awb_number}`
-          );
+          console.log(`⚠️ No matching RateCard found in plan for AWB ${item.awb_number}`);
           await session.abortTransaction();
           session.endSession();
           continue;
         }
 
-        // ✅ Fetch isFlatRate by _id from RateCard collection (user-specific, _id-based)
-        const rateCardDoc = await rateCards.findById(embeddedRateCard._id).session(session);
-        const isFlatRate = rateCardDoc?.isFlatRate === true;
+        // ✅ Use isFlatRate directly from the Plan snapshot
+        const isFlatRate = embeddedRateCard.isFlatRate === true;
 
         // 2️⃣ Calculate charges
+        const applicableWeight = item.packageDetails?.applicableWeight || 0.5;
+        const chargedWeight = applicableWeight * 1000;
+
         let charges = 0;
         let gstAmount = 0;
         let totalChargesReverse = 0;
         let codCharges = 0;
 
-        // RTO charges are no longer required (set to 0)
-        charges = 0;
-        gstAmount = 0;
-        totalChargesReverse = 0;
+        if (!isFlatRate) {
+          const basicWeight = embeddedRateCard.weightPriceBasic[0]?.weight || 500;
+          const addWeight = embeddedRateCard.weightPriceAdditional[0]?.weight || 500;
+          const basicCharge = parseFloat(embeddedRateCard.weightPriceBasic[0]?.[currentZone] || 0);
+          const addCharge = parseFloat(embeddedRateCard.weightPriceAdditional[0]?.[currentZone] || 0);
+
+          if (chargedWeight <= basicWeight) {
+            charges = basicCharge;
+          } else {
+            const extraUnits = Math.ceil((chargedWeight - basicWeight) / addWeight);
+            charges = basicCharge + (addCharge * extraUnits);
+          }
+          gstAmount = parseFloat(((charges * 18) / 100).toFixed(2));
+          totalChargesReverse = parseFloat((charges + gstAmount).toFixed(2));
+        }
 
         if (item.paymentDetails?.method === "COD") {
           codCharges = Math.max(
@@ -100,60 +123,24 @@ const rtoCharges = async () => {
         const codDescription = "COD Charges Received";
         const rtoDescription = "RTO Freight Charges Applied";
 
-        // 4️⃣ If there are existing transactions for this AWB, compute net effect and revert it BEFORE removing them
-        const existingTxs = (userWallet.transactions || []).filter(
+        // 4️⃣ Check for duplicate transactions to avoid balance mismatch
+        const existingTxs = userWallet.transactions || [];
+        const hasCodTx = existingTxs.some(
           (t) =>
             t.awb_number === awb &&
-            (t.description === codDescription ||
-              t.description === rtoDescription)
+            t.description === codDescription &&
+            t.category === "credit"
+        );
+        const hasRtoTx = existingTxs.some(
+          (t) =>
+            t.awb_number === awb &&
+            t.description === rtoDescription &&
+            t.category === "debit"
         );
 
-        if (existingTxs.length > 0) {
-          // compute net amount (credit positive, debit negative)
-          let netAmount = 0;
-          for (const t of existingTxs) {
-            const amt = parseFloat(t.amount) || 0;
-            if (String(t.category).toLowerCase() === "credit") netAmount += amt;
-            else netAmount -= amt; // debit
-          }
-
-          // If there is a net effect, revert it from wallet.balance
-          if (Math.abs(netAmount) > 0.0001) {
-            // revert by applying -(netAmount)
-            const revertInc = -netAmount;
-            const reverted = await wallet
-              .findOneAndUpdate(
-                { _id: userWallet._id },
-                { $inc: { balance: revertInc } },
-                { new: true, session }
-              )
-              .lean();
-
-            console.log(
-              `🔁 Reverted existing TXs for AWB ${awb}: netAmount=${netAmount}, applied revertInc=${revertInc}, newBalance=${reverted.balance}`
-            );
-          } else {
-            console.log(
-              `🔁 Found existing transactions for AWB ${awb} but netAmount is 0 — removing records without balance change.`
-            );
-          }
-
-          // Now remove the old transactions (we already applied balance revert)
-          await wallet.updateOne(
-            { _id: userWallet._id },
-            {
-              $pull: {
-                transactions: {
-                  awb_number: awb,
-                  description: { $in: [codDescription, rtoDescription] },
-                },
-              },
-            },
-            { session }
-          );
-
-          // Important: refresh userWallet variable to reflect reverted balance for later ops
-          // (we'll re-fetch before applying new increments)
+        if (hasCodTx && hasRtoTx) {
+          console.log(`ℹ️ Both COD and RTO transactions already exist for AWB ${awb}, checking if order needs update.`);
+          // If transactions exist but order wasn't updated, we still proceed to Step 7
         }
 
         // Helper: atomically apply an increment and return new wallet doc
@@ -173,8 +160,8 @@ const rtoCharges = async () => {
           .findById(userWallet._id)
           .session(session);
 
-        // 5️⃣ Apply COD credit first (if applicable) — atomic increment then push transaction using returned balance
-        if (codCharges > 0) {
+        // 5️⃣ Apply COD credit first (if applicable) — skip if duplicate
+        if (codCharges > 0 && !hasCodTx) {
           const upd = await applyIncAndGet(userWallet._id, codCharges);
           const balanceAfter = parseFloat((upd.balance || 0).toFixed(2));
 
@@ -199,12 +186,14 @@ const rtoCharges = async () => {
           console.log(
             `➕ COD applied for AWB ${awb}: +${codCharges}, balanceAfter=${balanceAfter}`
           );
+        } else if (hasCodTx) {
+          console.log(`ℹ️ Skipping COD credit for AWB ${awb} (Duplicate)`);
         }
 
-        // 6️⃣ Apply RTO debit (only if charges > 0)
+        // 6️⃣ Apply RTO debit (only if charges > 0 and not duplicate)
         let finalBalanceForOrder = userWallet.balance;
 
-        if (totalChargesReverse > 0) {
+        if (totalChargesReverse > 0 && !hasRtoTx) {
           const updAfterDebit = await applyIncAndGet(
             userWallet._id,
             -totalChargesReverse
@@ -235,6 +224,9 @@ const rtoCharges = async () => {
             },
             { session }
           );
+          console.log(`➖ RTO debit applied for AWB ${awb}: -${totalChargesReverse}, balanceAfter=${balanceAfterDebit}`);
+        } else if (hasRtoTx) {
+          console.log(`ℹ️ Skipping RTO debit for AWB ${awb} (Duplicate)`);
         } else {
           console.log(`ℹ️ Skipping RTO debit for AWB ${awb} (Flat Rate or Zero Charges)`);
         }
@@ -278,34 +270,15 @@ const rtoCharges = async () => {
   }
 };
 
-const startRtoLoop = async () => {
-  try {
-    const now = new Date();
-    const currentHour = now.getHours(); // 0 - 23
+module.exports = { rtoCharges };
 
-    // Run only between 7 AM and 11 PM
-    if (currentHour >= 7 && currentHour <= 23) {
-      console.log("⏰ Running RTO Charges at", now.toLocaleTimeString());
-      await rtoCharges(); // your async function
-
-      console.log("✅ RTO Charges completed. Next run after 3 hour...");
-      setTimeout(startRtoLoop, 3 * 60 * 60 * 1000); // wait 3 hour after finish
-    } else {
-      console.log(
-        "🌙 Outside allowed hours, will retry in 3 hour:",
-        now.toLocaleTimeString()
-      );
-      setTimeout(startRtoLoop, 3 * 60 * 60 * 1000); // check again in 3 hour
-    }
-  } catch (error) {
-    console.error("❌ Error in RTO loop:", error);
-    setTimeout(startRtoLoop, 3 * 60 * 60 * 1000); // retry in 15 min if error
-  }
-};
-
-// start the loop once
-// startRtoLoop();
-
+// Optimized Background Task: Run once a day at 1 AM
+// This reduces AWS billing/database load compared to polling every 3 hours.
 if (process.env.NODE_ENV === "production") {
-  startRtoLoop();
+  console.log("📅 RTO Background Task Scheduled: Once a day at 1:00 AM");
+  cron.schedule("0 1 * * *", async () => {
+    console.log("⏰ Running Daily RTO Charges cleanup...");
+    await rtoCharges();
+    console.log("✅ Daily RTO Charges completed.");
+  });
 }

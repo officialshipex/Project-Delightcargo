@@ -1682,18 +1682,42 @@ const trackOrders = async () => {
     const pLimit = await import("p-limit").then((mod) => mod.default);
     const limit = pLimit(10); // Max 10 concurrent executions
 
+    const now = new Date();
+    const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000); // For urgent updates
+    const threeHoursAgo = new Date(now.getTime() - 3 * 60 * 60 * 1000); // For general updates fallback
+
+    // Find orders that are due for tracking (polling as a fallback to webhooks)
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery", "Ekart"] },
-      // partner:{$nin:["Proship"]}
-      // ndrStatus: "Undelivered",
-      // status:"Out for Delivery",
-      // provider: "Delhivery",
-      // awb_number: "SF3252087373PRZ",
-      // partner:"BoxdLogistics"
+      $or: [
+        { lastTrackedAt: { $exists: false } },
+        { lastTrackedAt: null },
+        {
+          $and: [
+            { status: "Out for Delivery" },
+            { lastTrackedAt: { $lt: twoHoursAgo } },
+          ],
+        },
+        {
+          $and: [
+            { status: { $ne: "Out for Delivery" } },
+            { lastTrackedAt: { $lt: threeHoursAgo } },
+          ],
+        },
+      ],
     });
 
     console.log(`📦 Found ${allOrders.length} orders to track`);
+
+    // Bulk update lastTrackedAt for the whole batch to avoid redundant polling
+    if (allOrders.length > 0) {
+      const orderIds = allOrders.map((o) => o._id);
+      await Order.updateMany(
+        { _id: { $in: orderIds } },
+        { $set: { lastTrackedAt: new Date() } }
+      );
+    }
 
     const limitedTrack = limiter.wrap(trackSingleOrder); // apply rate limiter
 
@@ -1709,39 +1733,19 @@ const trackOrders = async () => {
   }
 };
 
-const startTrackingLoop = async () => {
-  try {
-    // Get current time in IST
-    const istDate = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
-    );
-    const currentHour = istDate.getHours();
-
-    if (currentHour >= 6 && currentHour <= 22) {
-      console.log(
-        "🕒 Starting Order Tracking at",
-        istDate.toLocaleTimeString("en-IN"),
-      );
-      await trackOrders();
-      console.log("✅ Tracking completed. Next run after 2 hour...");
-      setTimeout(startTrackingLoop, 2 * 60 * 60 * 1000); // 2 hour
-    } else {
-      console.log(
-        "🌙 Outside tracking window, will retry in 1 hour:",
-        istDate.toLocaleTimeString("en-IN"),
-      );
-      setTimeout(startTrackingLoop, 60 * 60 * 1000);
-    }
-  } catch (error) {
-    console.error("❌ Error in tracking loop:", error);
-    // setTimeout(startTrackingLoop, 15 * 60 * 1000); // retry after 15 min
-  }
-};
-
-// startTrackingLoop();
-
+// Optimized Background Task: Scheduled tracking loop using node-cron
+// This is more scalable and cost-effective for AWS than setTimeout polling.
 if (process.env.NODE_ENV === "production") {
-  startTrackingLoop();
+  console.log("📅 Order Tracking Scheduled: Hourly check for due orders");
+  // Run every hour, but internally it only picks orders due for tracking (2h/6h)
+  cron.schedule("0 * * * *", async () => {
+    const currentHour = new Date().getHours();
+    // Run only during active business hours (6 AM to 10 PM IST)
+    if (currentHour >= 6 && currentHour <= 22) {
+      console.log("🕒 Starting scheduled Order Tracking...");
+      await trackOrders();
+    }
+  });
 }
 
 const mapTrackingResponse = (data, provider, remark) => {
@@ -2167,7 +2171,6 @@ function isReAttemptEligible(order, normalizedData) {
 
 module.exports = {
   trackSingleOrder,
-  startTrackingLoop,
   formatShreeMarutiDate,
   updateNdrHistoryByAwb,
   formatAmazonDate,

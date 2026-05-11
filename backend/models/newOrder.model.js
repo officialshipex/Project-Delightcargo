@@ -180,6 +180,7 @@ const orderSchema = new mongoose.Schema(
     invoiceDate: { type: Date },//exact pickup date
     pickupDate: { type: Date },//estimated pickup date
     pickupId: { type: String, default: null },  // auto-assigned pickup manifest ID
+    lastTrackedAt: { type: Date }, // 🕒 Tracks the last time polling occurred
 
     tracking: [
       {
@@ -196,16 +197,30 @@ const orderSchema = new mongoose.Schema(
 // Compound index
 orderSchema.index({ userId: 1, createdAt: -1 });
 
-// ── Auto NDR AI Calling Trigger ──────────────────────────────────────────
+// ── Auto NDR AI Calling Trigger & LastTrackedAt Update ──────────────────
 orderSchema.pre("save", function (next) {
-  // Check if ndrStatus changed to "Undelivered"
-  if (this.isModified("ndrStatus") && this.ndrStatus === "Undelivered") {
-    this._shouldAutoCallAiNdr = true;
+  // Always update lastTrackedAt when saving an order (fresh poll or webhook)
+  this.lastTrackedAt = new Date();
+
+  // Check if order became eligible for AI NDR calling (Undelivered + Reattempt)
+  if (this.ndrStatus === "Undelivered" && this.reattempt === true) {
+    if (this.isModified("ndrStatus") || this.isModified("reattempt")) {
+      this._shouldAutoCallAiNdr = true;
+    }
   }
   // Check if status changed
   if (this.isModified("status")) {
     this._shouldTriggerStatusNotification = true;
   }
+  next();
+});
+
+// ── Auto Update lastTrackedAt for direct updates ─────────────────────────
+orderSchema.pre(["findOneAndUpdate", "updateOne", "updateMany"], function (next) {
+  const update = this.getUpdate();
+  // Ensure lastTrackedAt is updated on any change, especially status updates
+  if (!update.$set) update.$set = {};
+  update.$set.lastTrackedAt = new Date();
   next();
 });
 
@@ -223,8 +238,13 @@ orderSchema.post("save", async function (doc) {
     try {
       const { triggerStatusNotification } = require("../utils/statusNotification");
       triggerStatusNotification(doc);
+
+      if (doc.status === "RTO Delivered") {
+        const { rtoCharges } = require("../RTO/rtoController");
+        rtoCharges(doc._id);
+      }
     } catch (err) {
-      console.error("Status Notification Hook error:", err);
+      console.error("Status Notification/RTO Hook error:", err);
     }
   }
 });
@@ -245,6 +265,34 @@ orderSchema.post("findOneAndUpdate", async function (doc) {
       
       if (notificationDoc.status && notificationDoc.userId) {
         triggerStatusNotification(notificationDoc);
+      }
+
+      // 🚚 Trigger RTO charges processing in real-time
+      if (notificationDoc.status === "RTO Delivered") {
+        try {
+          const { rtoCharges } = require("../RTO/rtoController");
+          rtoCharges(notificationDoc._id);
+        } catch (err) {
+          console.error("Real-time RTO Charge processing error:", err);
+        }
+      }
+
+      // 🤖 Trigger AI NDR call in real-time
+      const ndrStatus = update.$set?.ndrStatus || update.ndrStatus;
+      const reattempt = update.$set?.reattempt || update.reattempt;
+
+      if (ndrStatus || reattempt !== undefined) {
+        const finalNdrStatus = ndrStatus || doc.ndrStatus;
+        const finalReattempt = reattempt !== undefined ? reattempt : doc.reattempt;
+
+        if (finalNdrStatus === "Undelivered" && finalReattempt === true) {
+          try {
+            const { autoTriggerNdrAiCall } = require("../aiCalling/autoNdrAiCall");
+            autoTriggerNdrAiCall(doc, finalNdrStatus);
+          } catch (err) {
+            console.error("Real-time AI NDR trigger error:", err);
+          }
+        }
       }
     }
   } catch (err) {
