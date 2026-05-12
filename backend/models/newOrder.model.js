@@ -212,6 +212,10 @@ orderSchema.pre("save", function (next) {
   if (this.isModified("status")) {
     this._shouldTriggerStatusNotification = true;
   }
+  // Check if tracking array grew (new entry added)
+  if (this.isModified("tracking")) {
+    this._shouldTriggerTrackWebhook = true;
+  }
   next();
 });
 
@@ -245,6 +249,19 @@ orderSchema.post("save", async function (doc) {
       }
     } catch (err) {
       console.error("Status Notification/RTO Hook error:", err);
+    }
+  }
+
+  // 🔔 Dispatch track_update webhook when tracking is modified
+  if (doc._shouldTriggerTrackWebhook) {
+    try {
+      const { dispatchTrackWebhook } = require("../utils/dispatchTrackWebhook");
+      const latestTracking = Array.isArray(doc.tracking) && doc.tracking.length > 0
+        ? doc.tracking[doc.tracking.length - 1]
+        : null;
+      dispatchTrackWebhook(doc.toObject(), latestTracking);
+    } catch (err) {
+      console.error("Track Webhook Hook error:", err);
     }
   }
 });
@@ -293,6 +310,26 @@ orderSchema.post("findOneAndUpdate", async function (doc) {
             console.error("Real-time AI NDR trigger error:", err);
           }
         }
+      }
+    }
+
+    // 🔔 Dispatch track_update webhook when $push.tracking is used
+    const pushedTracking = update.$push?.tracking;
+    if (pushedTracking && doc) {
+      try {
+        const { dispatchTrackWebhook } = require("../utils/dispatchTrackWebhook");
+        // Merge the latest tracking into the order snapshot for the payload
+        const orderSnapshot = doc.toObject ? doc.toObject() : { ...doc };
+        // The pushed entry is the latest tracking event
+        const latestTracking = pushedTracking;
+        // Append it to tracking history for the payload
+        if (!Array.isArray(orderSnapshot.tracking)) orderSnapshot.tracking = [];
+        orderSnapshot.tracking = [...orderSnapshot.tracking, latestTracking];
+        // Reflect any status change in snapshot
+        if (update.$set?.status) orderSnapshot.status = update.$set.status;
+        dispatchTrackWebhook(orderSnapshot, latestTracking);
+      } catch (err) {
+        console.error("Track Webhook (findOneAndUpdate) error:", err);
       }
     }
   } catch (err) {
