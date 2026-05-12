@@ -22,6 +22,9 @@ router.get("/generate-pdf/:id", async (req, res) => {
     const barcodeBuffer1 = await bwipjs.toBuffer({
       bcid: "code128",
       text: String(orderData.orderId),
+      alttext: orderData.channelId
+        ? `${orderData.orderId} / ${orderData.channelId}`
+        : String(orderData.orderId),
       scale: 3,
       height: 10,
       includetext: true,
@@ -136,20 +139,21 @@ router.get("/generate-pdf/:id", async (req, res) => {
     doc.font("Helvetica-Bold").text(`Invoice No: `, { continued: true });
     doc.font("Helvetica").text(orderData.orderId);
     if (!labelSettings?.warehouseSettings?.hideGstNumber) {
-      doc.font("Helvetica-Bold").text(`GSTIN No: `, { continued: true });
-      doc.font("Helvetica").text(orderData.otherDetails?.gstin || "");
+      doc.font("Helvetica-Bold").text(`GSTIN No: ${orderData.otherDetails?.gstin || ""}`);
     }
 
     // Order barcode
+    let barcodeBottom = doc.y;
     if (!labelSettings?.hideOrderBarcode) {
       const bW = isThermal ? 80 : 120;
       const bH = isThermal ? 30 : 50;
       const bX = pageWidth - MARGIN - bW;
       const bY = isThermal ? orderInfoYStart : doc.y - 40;
       doc.image(barcodeBuffer1, bX, bY, { width: bW, height: bH });
+      barcodeBottom = bY + bH;
     }
 
-    doc.moveDown(isThermal ? 1.5 : 0.5);
+    doc.y = Math.max(doc.y, barcodeBottom) + (isThermal ? 5 : 10);
     const line2Y = doc.y;
     doc.moveTo(MARGIN, line2Y).lineTo(pageWidth - MARGIN, line2Y).stroke();
     doc.y = line2Y + (isThermal ? 10 : 15);
