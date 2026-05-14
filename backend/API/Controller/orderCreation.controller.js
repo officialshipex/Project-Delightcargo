@@ -96,7 +96,7 @@ const orderCreationController = async (req, res) => {
     } = value;
 
     const userId = req.user?._id || "external";
-    
+
     // 💰 Calculate and validate total amount based on products
     const calculatedTotalAmount = productDetails.reduce((acc, item) => {
       return acc + (item.unitPrice * item.quantity);
@@ -117,7 +117,7 @@ const orderCreationController = async (req, res) => {
       });
     }
 
-    if (!currentUser.kycDone ) {
+    if (!currentUser.kycDone) {
       return res.status(403).json({
         success: false,
         message: "KYC not completed. Please verify your KYC before creating an order.",
@@ -159,9 +159,10 @@ const orderCreationController = async (req, res) => {
       channelId: shipmentId,
       tracking: [
         {
-          status: "Created",
+          status: "new",
+          StatusLocation: pickupAddress.city || "N/A",
           StatusDateTime: new Date(),
-          Instructions: "Order created",
+          Instructions: "Order created successfully via API",
         },
       ],
     });

@@ -267,6 +267,14 @@ const wooCommerceWebhookHandler = async (req, res) => {
       },
       paymentDetails,
       status: "new",
+      tracking: [
+        {
+          status: "new",
+          StatusLocation: orderData.shipping.city || "N/A",
+          StatusDateTime: new Date(),
+          Instructions: "Order synced from WooCommerce",
+        },
+      ],
     };
 
     // Only add pickupAddress if a primary one was found

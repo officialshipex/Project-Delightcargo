@@ -140,8 +140,10 @@ const newOrder = async (req, res) => {
       // commodityId: commodityId,
       tracking: [
         {
-          title: "Created",
-          descriptions: "Order created",
+          status: "new",
+          StatusLocation: pickupAddress.city || "N/A",
+          StatusDateTime: new Date(),
+          Instructions: "Order created successfully",
         },
       ],
     });
@@ -1367,7 +1369,7 @@ const ShipeNowOrder = async (req, res) => {
           if (item.provider?.toLowerCase() === "boxdlogistics" && Array.isArray(result.courier_ids)) {
             // Determine which courierId this specific service name maps to
             const sName = item.name?.toLowerCase() || "";
-            const requiredCid = sName.includes("flat") ? 47 : sName.includes("surface") ? 4 : sName.includes("air") ? 6 : null;
+            const requiredCid = sName.includes("flat") ? 7 : sName.includes("surface") ? 4 : sName.includes("air") ? 6 : null;
             if (requiredCid !== null && result.courier_ids.includes(requiredCid)) {
               return [{ item, courierId: requiredCid, virtualName: normalize(item.name) }];
             }

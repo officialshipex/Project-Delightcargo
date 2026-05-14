@@ -60,7 +60,7 @@ const createOrderBoxdLogistics = async (
         // console.log("serviceDetails",serviceDetails)
         // Step 2: Ship (assign courier_id)
         // courier_id should be stored in serviceDetails or fallback to 3
-        const courierId = parseInt(serviceDetails?.courierId) || 4;
+        const courierId = parseInt(serviceDetails?.courierId);
         let shipRes;
         try {
             shipRes = await shipBoxdOrder(boxdOrderId, courierId);

@@ -226,6 +226,14 @@ const fetchExistingOrders = async (req, res) => {
               : parseFloat(order.total_price || 0),
         },
         status: "new",
+        tracking: [
+          {
+            status: "new",
+            StatusLocation: order.shipping_address?.city || "N/A",
+            StatusDateTime: new Date(),
+            Instructions: "Order fetched from Shopify",
+          },
+        ],
       });
 
       await newOrder.save();
@@ -358,6 +366,14 @@ const webhookhandler = async (req, res) => {
             : shopifyOrder.total_price,
       },
       status: "new",
+      tracking: [
+        {
+          status: "new",
+          StatusLocation: shopifyOrder.shipping_address?.city || "N/A",
+          StatusDateTime: new Date(),
+          Instructions: "Order synced from Shopify",
+        },
+      ],
     });
 
     await newOrder.save();

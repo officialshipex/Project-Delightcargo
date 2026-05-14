@@ -102,7 +102,7 @@ const createBoxdLogisticsShipment = async ({
             if (!courierId) {
                 const sName = courierServiceName.toLowerCase();
                 if (sName.includes("flat")) {
-                    courierId = 47;
+                    courierId = 7;
                 } else if (sName.includes("air")) {
                     courierId = 6;
                 } else if (sName.includes("surface")) {
