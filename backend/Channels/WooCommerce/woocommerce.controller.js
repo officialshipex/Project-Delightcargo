@@ -384,7 +384,7 @@ const markWooOrderAsShipped = async (
       return;
     }
 
-    // 1. Resolve channelId (WC's internal ID) if our internal 6-digit ID was provided
+    // 3. Resolve channelId (WC's internal ID) if our internal 6-digit ID was provided
     let wcOrderId = orderId;
     const dbOrder = await Order.findOne({ 
       $or: [{ orderId: orderId }, { channelId: orderId }] 
@@ -400,43 +400,39 @@ const markWooOrderAsShipped = async (
       console.log(`ℹ️ Resolved internal ID ${orderId} to WooCommerce ID ${wcOrderId}`);
     }
 
-    // 2. Map Shipex status → WooCommerce status
+    // 4. Map Shipex status → WooCommerce status
     const wcStatus = shipexToWooStatus(shipexStatus);
     if (!wcStatus) {
       console.log(`ℹ️ No WooCommerce status mapping for Shipex status: "${shipexStatus}". Skipping WC update.`);
       return;
     }
 
-    const trackingUrl = `https://app.shipexindia.com/dashboard/order/tracking/${trackingNumber}`;
-
-    // 3. Update WooCommerce order status
-    await axios.put(
-      `${baseUrl}/wp-json/wc/v3/orders/${wcOrderId}`,
-      { 
-        status: wcStatus,
-        customer_note: `Shipex Update: ${shipexStatus} | AWB: ${trackingNumber} | Courier: ${courierName || "N/A"}`,
-      },
-      {
+    // 5. Fetch current WooCommerce order to avoid redundant updates
+    let currentWCOrder;
+    try {
+      const response = await axios.get(`${baseUrl}/wp-json/wc/v3/orders/${wcOrderId}`, {
         auth: {
           username: store.storeClientId,
           password: store.storeClientSecret,
         },
-      }
-    );
+      });
+      currentWCOrder = response.data;
+    } catch (err) {
+      console.error(`❌ Error fetching WooCommerce order ${wcOrderId}:`, err.response?.data?.message || err.message);
+      return;
+    }
 
-    console.log(`✅ WooCommerce order ${wcOrderId} status updated: ${shipexStatus} → ${wcStatus}`);
+    const trackingUrl = `https://app.shipexindia.com/dashboard/order/tracking/${trackingNumber}`;
+    const newNote = `Shipex Update: ${shipexStatus} | AWB: ${trackingNumber} | Courier: ${courierName || "N/A"}`;
 
-    // 4. Add tracking info to WooCommerce (only when Booked / first shipment scan)
-    const addTrackingStatuses = ["Booked", "Ready To Ship", "Pickup Completed"];
-    if (trackingNumber && addTrackingStatuses.includes(shipexStatus)) {
+    // 6. Update WooCommerce order status (only if status changed or note is different)
+    if (currentWCOrder.status !== wcStatus || currentWCOrder.customer_note !== newNote) {
       try {
-        await axios.post(
-          `${baseUrl}/wp-json/wc-shipment-tracking/v3/orders/${wcOrderId}/shipment-trackings`,
-          {
-            tracking_provider: courierName || "Custom Provider",
-            tracking_number: trackingNumber,
-            date_shipped: new Date().toISOString(),
-            tracking_url: trackingUrl || "",
+        await axios.put(
+          `${baseUrl}/wp-json/wc/v3/orders/${wcOrderId}`,
+          { 
+            status: wcStatus,
+            customer_note: newNote,
           },
           {
             auth: {
@@ -445,11 +441,59 @@ const markWooOrderAsShipped = async (
             },
           }
         );
-        console.log(`🚚 Tracking info added for WooCommerce order ${wcOrderId}`);
+        console.log(`✅ WooCommerce order ${wcOrderId} updated: ${shipexStatus} → ${wcStatus}`);
       } catch (err) {
-        console.log(
-          `⚠️ Could not add tracking info (plugin may not be installed): ${err.response?.data?.message || err.message}`
+        console.error(`❌ Error updating status for WC order ${wcOrderId}:`, err.response?.data?.message || err.message);
+      }
+    } else {
+      console.log(`ℹ️ WooCommerce order ${wcOrderId} already has status "${wcStatus}" and same note. Skipping status update.`);
+    }
+
+    // 7. Add tracking info to WooCommerce (only when Booked / first shipment scan)
+    const addTrackingStatuses = ["Booked", "Ready To Ship", "Pickup Completed"];
+    if (trackingNumber && addTrackingStatuses.includes(shipexStatus)) {
+      try {
+        // Check if tracking number is already added to avoid duplicates
+        const trackingListResponse = await axios.get(
+          `${baseUrl}/wp-json/wc-shipment-tracking/v3/orders/${wcOrderId}/shipment-trackings`,
+          {
+            auth: {
+              username: store.storeClientId,
+              password: store.storeClientSecret,
+            },
+          }
         );
+
+        const existingTrackings = Array.isArray(trackingListResponse.data) ? trackingListResponse.data : [];
+        const isAlreadyAdded = existingTrackings.some(t => t.tracking_number === trackingNumber);
+
+        if (!isAlreadyAdded) {
+          await axios.post(
+            `${baseUrl}/wp-json/wc-shipment-tracking/v3/orders/${wcOrderId}/shipment-trackings`,
+            {
+              tracking_provider: courierName || "Custom Provider",
+              tracking_number: trackingNumber,
+              date_shipped: new Date().toISOString(),
+              tracking_url: trackingUrl || "",
+            },
+            {
+              auth: {
+                username: store.storeClientId,
+                password: store.storeClientSecret,
+              },
+            }
+          );
+          console.log(`🚚 Tracking info added for WooCommerce order ${wcOrderId}`);
+        } else {
+          console.log(`ℹ️ Tracking ${trackingNumber} already exists for WooCommerce order ${wcOrderId}. Skipping duplicate add.`);
+        }
+      } catch (err) {
+        // If the tracking plugin is missing, it will return 404 or similar
+        if (err.response?.status !== 404) {
+          console.log(
+            `⚠️ Could not manage tracking info for WC order ${wcOrderId}: ${err.response?.data?.message || err.message}`
+          );
+        }
       }
     }
 

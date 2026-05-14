@@ -1549,6 +1549,41 @@ const adminLoginAsUser = async (req, res) => {
   }
 };
 
+const updateKycStatus = async (req, res) => {
+  try {
+    const { userId, kycStatus } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Update KYC status
+    user.kycDone = kycStatus;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: `KYC status has been ${
+        kycStatus ? "verified" : "unverified"
+      } successfully.`,
+      user,
+    });
+  } catch (error) {
+    console.error("Error updating user KYC status:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while updating user KYC status.",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getUsers,
   getUserDetails,
@@ -1560,6 +1595,7 @@ module.exports = {
   changeUser,
   getUserById,
   updateBlockStatus,
+  updateKycStatus,
   updateApiAccess,
   updateProfile,
   updateReferralCommission,

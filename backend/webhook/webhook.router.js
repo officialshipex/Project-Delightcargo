@@ -31,7 +31,7 @@ webhookRouter.post("/delhivery/manifest", delhiveryManifestCallback)
 webhookRouter.use("/manage", outgoingWebhookRouter);
 
 // ── Test receiver endpoint — used to verify outgoing webhook connectivity ──
-// Users configure https://api.shipexindia.com/webhook/shipex as their test URL.
+// Users configure https://api.shipexindia.com/v1/webhook/shipex as their test URL.
 webhookRouter.post("/shipex", (req, res) => {
   const eventTopic = req.headers["x-shipex-event"] || "unknown";
   const webhookId = req.headers["x-shipex-webhook-id"] || "unknown";
