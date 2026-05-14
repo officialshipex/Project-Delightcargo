@@ -1958,8 +1958,17 @@ const CodRemittanceOrder = async (req, res) => {
     const allOrders = await CodRemittanceOrdersModel.aggregate([
       { $match: matchStage },
       {
+        $lookup: {
+          from: "users",
+          localField: "userId",
+          foreignField: "_id",
+          as: "userInfo",
+        },
+      },
+      {
         $addFields: {
           codAmountNum: { $toDouble: { $ifNull: ["$CODAmount", 0] } },
+          userId: { $ifNull: [{ $arrayElemAt: ["$userInfo.userId", 0] }, "$userId"] },
         },
       },
       { $sort: { _id: -1 } },
