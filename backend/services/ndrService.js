@@ -43,6 +43,27 @@ const callShiprocketNdrApi = async (orderDetails) => {
       "https://api.shiprocket.in/v1/external/ndr",
       orderDetails
     );
+
+    if (response.data && response.data.status_code === 200) {
+      const order = await Order.findById(orderDetails._id);
+      if (order) {
+        order.ndrStatus = "Action_Requested";
+        order.reattempt = false;
+        
+        const entry = {
+          action: "NDR_ACTION",
+          actionBy: "ShipexIndia",
+          remark: "NDR Action Requested (Shiprocket)",
+          source: "ShipexIndia",
+          date: new Date(),
+        };
+
+        if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
+        order.ndrHistory.push({ actions: [entry] });
+        await order.save();
+      }
+    }
+
     return response.data;
   } catch (error) {
     throw new Error("Error calling Shiprocket NDR API");
@@ -56,6 +77,27 @@ const callNimbustNdrApi = async (orderDetails) => {
       "https://api.nimbust.com/v1/ndr",
       orderDetails
     );
+
+    if (response.data && (response.data.status === true || response.data.status === 200)) {
+      const order = await Order.findById(orderDetails._id);
+      if (order) {
+        order.ndrStatus = "Action_Requested";
+        order.reattempt = false;
+        
+        const entry = {
+          action: "NDR_ACTION",
+          actionBy: "ShipexIndia",
+          remark: "NDR Action Requested (NimbusPost)",
+          source: "ShipexIndia",
+          date: new Date(),
+        };
+
+        if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
+        order.ndrHistory.push({ actions: [entry] });
+        await order.save();
+      }
+    }
+
     return response.data;
   } catch (error) {
     throw new Error("Error calling Nimbust NDR API");
@@ -93,16 +135,9 @@ const callEcomExpressNdrApi = async (
     };
     const order = await Order.findOne({ awb_number });
     if (action === "RE-ATTEMPT") {
-      if (!scheduled_delivery_date || !scheduled_delivery_slot) {
-        return {
-          success: false,
-          error:
-            "For 'RE-ATTEMPT', 'scheduled_delivery_date' and 'scheduled_delivery_slot' are required",
-        };
-      }
+      if (scheduled_delivery_date) shipment.scheduled_delivery_date = scheduled_delivery_date;
+      if (scheduled_delivery_slot) shipment.scheduled_delivery_slot = scheduled_delivery_slot;
 
-      shipment.scheduled_delivery_date = scheduled_delivery_date;
-      shipment.scheduled_delivery_slot = scheduled_delivery_slot;
       console.log("consignement address", consignee_address);
 
       // Fallback to order.receiverAddress if not provided in the API call

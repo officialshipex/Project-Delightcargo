@@ -358,16 +358,16 @@ const getWooCommerceProductDetails = async (
 // Stores with shipment plugins may also accept: shipped, in-transit, out-for-delivery, etc.
 const shipexToWooStatus = (shipexStatus) => {
   const map = {
-    "Booked":           "processing",    // Courier booked, order being shipped
-    "Ready To Ship":    "processing",    // Ready for pickup
-    "Pickup Completed": "processing",    // Picked up by courier
-    "In-transit":       "on-hold",       // In transit (no native WC status; on-hold = awaiting shipment)
-    "Out for Delivery": "on-hold",       // Out for delivery
-    "Delivered":        "completed",     // Successfully delivered
+    "Booked":           "shipped",    // Courier booked, order being shipped
+    "Ready To Ship":    "shipped",    // Ready for pickup
+    "Pickup Completed": "in transit",    // Picked up by courier
+    "In-transit":       "in transit",       // In transit (no native WC status; on-hold = awaiting shipment)
+    "Out for Delivery": "out for delivery",       // Out for delivery
+    "Delivered":        "delivered",     // Successfully delivered
     "Cancelled":        "cancelled",     // Order cancelled
-    "RTO":              "on-hold",       // Return to origin initiated
-    "RTO In-transit":   "on-hold",       // Returning to origin
-    "RTO Delivered":    "on-hold",       // Returned to origin
+    "RTO":              "refunded",       // Return to origin initiated
+    "RTO In-transit":   "refunded",       // Returning to origin
+    "RTO Delivered":    "refunded",       // Returned to origin
     "Undelivered":      "on-hold",       // Delivery attempt failed
     "Lost":             "on-hold",       // Shipment lost
   };

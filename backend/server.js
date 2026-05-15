@@ -17,6 +17,8 @@ const delhiveryRouter = require("./AllCouriersRoutes/delhivery.router");
 const otpRouter = require("./auth/auth.otp");
 const emailOtpRouter = require("./notification/emailOtpVerification");
 const { resetPassword } = require("./notification/resetPassword");
+require("./cron/ndrCron"); // Initialize NDR cron jobs
+
 const {
   loadCourierPincodes,
 } = require("./checkPincodeServiceability/checkPincodeServiceability.controller");

@@ -777,7 +777,7 @@ const trackEkartShipment = async (id) => {
   }
 };
 
-// trackEkartShipment("LUAP0000813357")
+// trackEkartShipment("QPSC0000000192")
 
 module.exports = {
   checkEkartServiceability,

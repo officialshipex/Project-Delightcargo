@@ -11,9 +11,13 @@ const exceptionList = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Fetch all Undelivered orders for this user
+    // Fetch orders that specifically require action (Action Required logic)
     const orders = await Order.find(
-      { userId, status: "Undelivered" },
+      { 
+        userId, 
+        ndrStatus: "Undelivered",
+        reattempt: true 
+      },
       {
         awb_number: 1,
         courier: 1,
@@ -27,17 +31,11 @@ const exceptionList = async (req, res) => {
     if (!orders || orders.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No exception found for this user",
+        message: "No shipments requiring NDR action found for this user",
       });
     }
 
-    // Filter orders: For DTDC → also require reattempt = true
-    const filteredOrders = orders.filter((order) => {
-      if (order.courier === "DTDC") {
-        return order.reattempt === true; // ✅ Only DTDC check reattempt
-      }
-      return true; // ✅ Other couriers only check status
-    });
+    const filteredOrders = orders; // No need for extra courier filtering if we use ndrStatus/reattempt
 
     if (filteredOrders.length === 0) {
       return res.status(404).json({
@@ -71,150 +69,92 @@ const exceptionList = async (req, res) => {
 
 const ndrCreate = async (req, res) => {
   try {
-    const {
-      courierId,
-      awb_number,
-      action,
-      comments,
-      scheduled_delivery_date,
-      scheduled_delivery_slot,
-      mobile,
-      consignee_address,
-    //   customer_code,
-    //   remarks,
-      next_attempt_date,
-      phone,
-    } = req.body;
-
+    const { awb_number } = req.body;
     const userId = req.user._id;
 
-    // ✅ Required fields check
-    if (!courierId || !awb_number) {
+    if (!awb_number) {
       return res.status(400).json({
         success: false,
-        message: "courierId and awb_number are required",
+        message: "awb_number is required",
       });
     }
 
-    if (action && !["RE-ATTEMPT", "RTO"].includes(action.toUpperCase())) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid action. Allowed values are 'RE-ATTEMPT' or 'RTO'.",
-      });
-    }
-
-    // Fetch order for reference (optional, but keeps consistency)
-    const order = await Order.findOne({
+    // Fetch order for reference
+    const orderDetails = await Order.findOne({
       userId,
       awb_number,
-      status: "Undelivered",
+      ndrStatus: "Undelivered", // Only allowed for undelivered orders
     });
 
-    if (!order) {
+    if (!orderDetails) {
       return res.status(404).json({
         success: false,
-        message:
-          "No pending delivery found for the provided AWB number. Reattempt or RTO cannot be initiated.",
+        message: "No undelivered order found for the provided AWB number.",
       });
     }
 
-    let response;
+    const { runNdrTask } = require("../../utils/ndrTaskRunner");
+    const FailedNdrAction = require("../../models/FailedNdrAction.model");
 
-    // ✅ Process based on courierId
-    switch (courierId) {
-      //   case "01": // EcomExpress
-      //     if (!action || !comments) {
-      //       return res.status(400).json({
-      //         success: false,
-      //         message: "action and comments are required for EcomExpress",
-      //       });
-      //     }
-      //     response = await callEcomExpressNdrApi(
-      //       awb_number,
-      //       action,
-      //       comments,
-      //       scheduled_delivery_date,
-      //       scheduled_delivery_slot,
-      //       mobile,
-      //       consignee_address
-      //     );
-      //     break;
+    // Standardize payload for runNdrTask
+    const taskPayload = {
+      ...req.body,
+      remarks: req.body.remarks || req.body.comments || "Kindly Reattempt on priority basis.",
+      comments: req.body.comments || req.body.remarks || "Kindly Reattempt on priority basis.",
+      scheduledDate: req.body.scheduledDate || req.body.scheduled_delivery_date || req.body.next_attempt_date,
+      phone: req.body.phone || req.body.mobile,
+      address1: req.body.address1 || req.body.consignee_address,
+    };
 
-      case "02": // Delhivery
-        if (!action) {
-          return res.status(400).json({
-            success: false,
-            message: `action is required for courierId ${courierId}`,
-          });
-        }
-        response = await handleDelhiveryNdrAction(awb_number, action);
-        break;
+    const response = await runNdrTask(orderDetails._id, taskPayload);
 
-      case "03": // DTDC
-        if (!action || !comments) {
-          return res.status(400).json({
-            success: false,
-            message: `action, and comments are required for courierId ${courierId}`,
-          });
-        }
-        response = await submitNdrToDtdc(
-          awb_number,
-          customer_code="123",
-          action,
-          comments
-        );
-        break;
+    if (response.success) {
+      return res.status(200).json({
+        success: true,
+        message: "NDR request processed successfully",
+        data: response.data || response,
+      });
+    } else {
+      console.warn(`External API NDR failed for ${awb_number}, queuing: ${response.message || response.error}`);
 
-      case "04": // Smartship
-        if (!action || !comments || !next_attempt_date || !phone) {
-          return res.status(400).json({
-            success: false,
-            message: `action, comments, next_attempt_date, and phone are required for courierId ${courierId}`,
-          });
-        }
-        response = await callSmartshipNdrApi(
-          awb_number,
-          action,
-          comments,
-          next_attempt_date,
-          phone
-        );
-        break;
+      // Sync with new workflow: Move to Action_Requested even if it failed and queued
+      orderDetails.ndrStatus = "Action_Requested";
+      orderDetails.status = "Action_Requested";
+      if (!Array.isArray(orderDetails.ndrHistory)) orderDetails.ndrHistory = [];
 
-      case "05": // Amazon
-        if (!action || !comments || !scheduled_delivery_date) {
-          return res.status(400).json({
-            success: false,
-            message: `action, comments, and scheduled_delivery_date are required for courierId ${courierId}`,
-          });
-        }
-        response = await submitNdrToAmazon(
-          awb_number,
-          action,
-          comments,
-          scheduled_delivery_date
-        );
-        break;
+      const queuedEntry = {
+        action: req.body.action || "RE-ATTEMPT",
+        actionBy: "ShipexIndia",
+        remark: taskPayload.remarks,
+        source: "ShipexIndia",
+        date: new Date(),
+      };
+      orderDetails.ndrHistory.push({ actions: [queuedEntry] });
+      await orderDetails.save();
 
-      default:
-        return res.status(400).json({
-          success: false,
-          message: "Invalid courierId provided",
-        });
+      // Queue for 6 AM retry
+      await FailedNdrAction.create({
+        orderId: orderDetails._id,
+        awb_number: awb_number,
+        action: req.body.action || "RE-ATTEMPT",
+        payload: taskPayload,
+        lastError: response.message || response.error || "Initial API attempt failed",
+        lastAttemptAt: new Date(),
+        status: "failed",
+      });
+
+      return res.status(202).json({
+        success: true,
+        message: "NDR action received and queued for processing.",
+        status: "Action_Requested"
+      });
     }
-
-    return res.status(200).json({
-      success: true,
-      message: "NDR request processed successfully",
-      data: response,
-    });
   } catch (error) {
-    console.error("Error in ndrCreate:", error);
-
+    console.error("Error in ndrCreate API:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error while processing NDR",
-      error: error?.response?.data || error.message,
+      error: error.message,
     });
   }
 };

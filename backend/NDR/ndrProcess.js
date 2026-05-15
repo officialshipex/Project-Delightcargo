@@ -12,151 +12,90 @@ const {
   submitNdrToEkart,
   submitNdrToBoxdLogistics,
 } = require("../services/ndrService");
+const { runNdrTask } = require("../utils/ndrTaskRunner");
+const FailedNdrAction = require("../models/FailedNdrAction.model");
 const Order = require("../models/newOrder.model");
 
 const ndrProcessController = async (req, res) => {
-  const {
-    awb_number,
-    action,
-    comments,
-    scheduled_delivery_date,
-    scheduled_delivery_slot,
-    mobile,
-    consignee_address,
-    consignee_address2,
-    customer_code,
-    remarks,
-    next_attempt_date,
-    phone,
-    customer_name,
-    // Change Address fields
-    new_address,
-    new_address2,
-    new_phone,
-    new_pincode,
-    // BoxdLogistics specific
-    updated_city,
-    updated_state,
-    action_date,
-    links,
-  } = req.body;
+  const { awb_number } = req.body;
 
-  // console.log("awb",awb_number)
   const orderDetails = await Order.findOne({ awb_number: awb_number });
-  // console.log("dtdc", req.body);
-  // const orderDetails = getOrderDetails(orderId);
-
   if (!orderDetails) {
     return res.status(404).json({ error: "Order not found" });
   }
-  // console.log("ordrer",orderDetails)
+
   try {
-    let response;
-    if (orderDetails.platform === "shiprocket") {
-      response = await callShiprocketNdrApi(orderDetails);
-    } else if (orderDetails.platform === "nimbust") {
-      response = await callNimbustNdrApi(orderDetails);
-    } else if (orderDetails.provider === "EcomExpress") {
-      response = await callEcomExpressNdrApi(
-        awb_number,
-        action,
-        comments,
-        scheduled_delivery_date,
-        scheduled_delivery_slot,
-        mobile,
-        consignee_address
-      );
-    } else if (orderDetails.provider === "Delhivery") {
-      response = await handleDelhiveryNdrAction(awb_number, action, comments);
-    } else if (orderDetails.provider === "Dtdc") {
-      response = await submitNdrToDtdc(
-        awb_number,
-        customer_code,
-        action,
-        comments
-      );
-    } else if (orderDetails.provider === "Amazon Shipping") {
-      response = await submitNdrToAmazon(
-        awb_number,
-        action,
-        comments,
-        scheduled_delivery_date
-      );
-      // console.log("re", response);
-    } else if (orderDetails.provider === "Smartship") {
-      // console.log("smartship");
-      response = await callSmartshipNdrApi(
-        awb_number,
-        action,
-        comments,
-        next_attempt_date,
-        phone
-      );
-    } else if (orderDetails.provider === "Shree Maruti") {
-      const payload = {
-        awb_number,
-        actionType: action,
-        remarks: comments,
-        consignee_address: new_address || consignee_address,
-        phone: new_phone || phone,
-      };
-      response = await submitNdrToShreeMaruti(payload);
-    } else if (orderDetails.provider === "Ekart") {
-      response = await submitNdrToEkart({
-        awb_number,
-        action,
-        comments,
-        new_address,
-        new_address2,
-        customer_name,
-        new_phone,
-        new_pincode,
-        scheduled_delivery_date,
-        links,
-      });
-    } else if (orderDetails.partner === "ZipyPost") {
-      const payload = {
-        action,
-        seller_remark: remarks,
-        contact_number: phone,
-        customer_name,
-        address1: consignee_address,
-        address2: consignee_address2,
-        provider: orderDetails.provider,
-      };
-      response = await submitNdrToZipypost(awb_number, payload);
-    } else if (orderDetails.partner === "BoxdLogistics") {
-      response = await submitNdrToBoxdLogistics({
-        awb_number,
-        action,
-        remarks: remarks || comments,
-        action_date,
-        updated_address_line1: new_address || consignee_address,
-        updated_address_line2: new_address2 || consignee_address2,
-        updated_city,
-        updated_state,
-        updated_pincode: new_pincode,
-        updated_mobile: new_phone || phone,
+    const response = await runNdrTask(orderDetails._id, req.body);
+
+    if (response.success) {
+      return res.json({
+        success: true,
+        message: response.message || "NDR action processed successfully",
+        data: response.data,
       });
     } else {
-      return res.status(400).json({ error: "Unsupported platform" });
+      console.warn(`Immediate NDR failed for ${awb_number}, queuing for retry: ${response.message || response.error}`);
+      
+      // Move to Action_Requested even if it failed and queued, so user doesn't see it in Action Required
+      orderDetails.ndrStatus = "Action_Requested";
+      orderDetails.status = "Action_Requested";
+      if (!Array.isArray(orderDetails.ndrHistory)) orderDetails.ndrHistory = [];
+      
+      const queuedEntry = {
+        action: req.body.action,
+        actionBy: "ShipexIndia",
+        remark: req.body.remarks || req.body.comments || "Action Requested (Queued)",
+        source: "ShipexIndia",
+        date: new Date(),
+      };
+      orderDetails.ndrHistory.push({ actions: [queuedEntry] });
+      await orderDetails.save();
+
+      await FailedNdrAction.create({
+        orderId: orderDetails._id,
+        awb_number: awb_number,
+        action: req.body.action,
+        payload: req.body,
+        lastError: response.message || response.error || "Initial attempt failed",
+        lastAttemptAt: new Date(),
+        status: "failed",
+      });
+
+      return res.json({
+        success: true,
+        message: "Action submitted successfully and queued for background processing.",
+      });
     }
-    // console.log("resererer", response.failedOrders);
-    res.json({ success: response.success, data: response.error });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ data: error.response.error });
+    console.error("NDR Controller Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error in NDR processing",
+    });
   }
 };
 
 const ndrBulkProcessController = async (req, res) => {
   try {
-    const { payloads } = req.body;
-    // console.log("Bulk NDR Payloads:", payloads);
+    let payloads = req.body.payloads;
+
+    // Support both wrapped { payloads: [] } and direct array [ ... ]
+    if (!payloads && Array.isArray(req.body)) {
+      payloads = req.body;
+    }
+
+    console.log("Bulk NDR Request Body:", JSON.stringify(req.body, null, 2));
+    console.log("Extracted Payloads:", payloads);
+
     if (!payloads || !Array.isArray(payloads) || payloads.length === 0) {
+      console.error("Validation failed: payloads is empty or not an array");
       return res
         .status(400)
-        .json({ success: false, message: "No NDR payloads provided" });
+        .json({
+          success: false,
+          message: "No NDR payloads provided",
+          receivedBody: req.body
+        });
     }
 
     let results = [];
@@ -167,168 +106,83 @@ const ndrBulkProcessController = async (req, res) => {
 
     // Loop through each order payload
     for (const p of payloads) {
-      const {
-        orderId,
-        action,
-        remarks,
-        comments,
-        scheduledDate,
-        scheduled_delivery_date,
-        deliverySlot,
-        phone,
-        customer_name,
-        address1,
-        address2,
-      } = p;
-
+      const { orderId } = p;
       const order = await Order.findById(orderId);
 
       if (!order) {
         failedCount++;
         failedOrders.push(orderId);
-
-        results.push({
-          orderId,
-          awb: null,
-          provider: null,
-          success: false,
-          message: "Order not found",
-        });
+        results.push({ orderId, success: false, message: "Order not found" });
         continue;
       }
 
-      let awb_number = order.awb_number;
-      let provider = order.provider;
-      let partner = order.partner;
-      let platform = order.platform;
-
-      let apiResponse;
-
       try {
-        /** ---------------- PROVIDER-WISE BULK NDR PROCESS ---------------- **/
-
-        if (platform === "shiprocket") {
-          apiResponse = await callShiprocketNdrApi(order);
-        } else if (platform === "nimbust") {
-          apiResponse = await callNimbustNdrApi(order);
-        } else if (provider === "EcomExpress") {
-          apiResponse = await callEcomExpressNdrApi(
-            awb_number,
-            action,
-            remarks || comments,
-            scheduled_delivery_date || scheduledDate,
-            deliverySlot,
-            phone,
-            null
-          );
-        } else if (provider === "Delhivery") {
-          apiResponse = await handleDelhiveryNdrAction(
-            awb_number,
-            action,
-            remarks || comments
-          );
-        } else if (provider === "Dtdc") {
-          apiResponse = await submitNdrToDtdc(
-            awb_number,
-            order.orderId,
-            action,
-            remarks
-          );
-        } else if (provider === "Amazon Shipping") {
-          apiResponse = await submitNdrToAmazon(
-            awb_number,
-            action,
-            remarks || comments,
-            scheduled_delivery_date || scheduledDate
-          );
-        } else if (provider === "Smartship") {
-          apiResponse = await callSmartshipNdrApi(
-            awb_number,
-            action,
-            remarks,
-            scheduledDate,
-            phone
-          );
-        } else if (provider === "Shree Maruti") {
-          const payload = {
-            awb_number,
-            actionType: action,
-            remarks: remarks,
-            consignee_address: address1,
-            phone,
-          };
-          apiResponse = await submitNdrToShreeMaruti(payload);
-        } else if (partner === "ZipyPost") {
-          const customAction =
-            action === "RE-ATTEMPT"
-              ? "Re-Attempt"
-              : action === "CHANGE CONTACT"
-                ? "Change Contact"
-                : action === "CHANGE ADDRESS"
-                  ? "Change Address"
-                  : action;
-          const payload = {
-            action: customAction,
-            seller_remark: remarks,
-            contact_number: phone,
-            customer_name,
-            address1,
-            address2,
-            provider,
-          };
-          apiResponse = await submitNdrToZipypost(awb_number, payload);
-        } else if (partner === "BoxdLogistics") {
-          apiResponse = await submitNdrToBoxdLogistics({
-            awb_number,
-            action,
-            remarks,
-            action_date: null,
-            updated_address_line1: address1,
-            updated_address_line2: address2,
-            updated_city: p.updated_city || null,
-            updated_state: p.updated_state || null,
-            updated_pincode: p.new_pincode || null,
-            updated_mobile: phone,
-          });
-        } else {
-          apiResponse = { success: false, message: "Unsupported provider" };
-        }
-
-        /** ---------------- STORE RESULT ---------------- **/
-
+        // Trigger initial API call
+        const apiResponse = await runNdrTask(order._id, p);
         const isSuccess = apiResponse?.success === true;
 
         if (isSuccess) {
           successCount++;
           successfulOrders.push(orderId);
+          results.push({
+            orderId,
+            awb: order.awb_number,
+            success: true,
+            message: apiResponse?.message || "Processed successfully",
+          });
         } else {
-          failedCount++;
-          failedOrders.push(orderId);
-        }
+          // If immediate API call fails, queue for background retry
+          console.warn(`Bulk NDR failed for ${order.awb_number}, queuing: ${apiResponse?.message || apiResponse?.error}`);
+          
+          // Move to Action_Requested even if it failed and queued
+          order.ndrStatus = "Action_Requested";
+          order.status="Action_Requested";
+          if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
+          
+          const queuedEntry = {
+            action: p.action,
+            actionBy: "ShipexIndia",
+            remark: p.remarks || p.comments || "Action Requested (Queued)",
+            source: "ShipexIndia",
+            date: new Date(),
+          };
+          order.ndrHistory.push({ actions: [queuedEntry] });
+          await order.save();
 
-        results.push({
-          orderId,
-          awb: awb_number,
-          provider,
-          success: isSuccess,
-          message: apiResponse?.message || apiResponse?.error || "Completed",
-        });
+          await FailedNdrAction.create({
+            orderId: order._id,
+            awb_number: order.awb_number,
+            action: p.action,
+            payload: p,
+            lastError: apiResponse?.message || apiResponse?.error || "Initial attempt failed",
+            lastAttemptAt: new Date(),
+            status: "failed",
+          });
+
+          // We count it as "processed" (queued) for the user to avoid "error" panic
+          successCount++;
+          successfulOrders.push(orderId);
+          results.push({
+            orderId,
+            awb: order.awb_number,
+            success: true,
+            message: "Queued for background processing",
+          });
+        }
       } catch (err) {
+        console.error("Bulk NDR item error:", err);
         failedCount++;
         failedOrders.push(orderId);
-
-        console.error("NDR bulk error:", err);
-
         results.push({
           orderId,
-          awb: awb_number,
-          provider,
+          awb: order.awb_number,
           success: false,
-          message: err?.response?.data?.error || err.message || "Failed",
+          message: err.message || "Failed",
         });
       }
     }
-    const summaryMessage = `Bulk NDR Process Completed:\n✔ Successfully processed: ${successCount}\n✖ Failed to process: ${failedCount}\n\nPlease review failed shipments for more details.`;
+
+    const summaryMessage = `Bulk NDR Process Completed:\n✔ Actions processed/queued: ${successCount}\n✖ Failed to identify: ${failedCount}`;
 
     return res.json({
       success: true,
