@@ -9,6 +9,11 @@ const { runNdrTask } = require("../utils/ndrTaskRunner");
  * 2. Retries failed actions from the previous day.
  */
 cron.schedule("0 6 * * *", async () => {
+  if (process.env.NODE_ENV !== "production") {
+    console.log("NDR Cron Job skipped: Not in production environment.");
+    return;
+  }
+
   console.log("Running Consolidated Daily 6 AM NDR Job...");
 
   // --- PART 1: Retry previously failed actions ---
@@ -107,4 +112,4 @@ cron.schedule("0 6 * * *", async () => {
   }
 });
 
-console.log("NDR Cron Jobs Scheduled.");
+
