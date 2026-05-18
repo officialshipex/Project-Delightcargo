@@ -1465,7 +1465,7 @@ const ShipeNowOrder = async (req, res) => {
             pickupDate.setDate(now.getDate() + 1);
           }
         }
-// console.log("matchedRate",matchedRate)
+        // console.log("matchedRate",matchedRate)
         return {
           ...matchedRate,
           provider: service.item.provider,
@@ -1811,7 +1811,7 @@ const passbook = async (req, res) => {
       return res.status(400).json({ message: "User ID is required" });
     }
 
-    const currentUser = await user.findById(userId).select("_id Wallet");
+    const currentUser = await user.findById(userId).select("_id Wallet").lean();
     if (!currentUser || !currentUser.Wallet) {
       return res.status(404).json({ message: "Wallet not found" });
     }
@@ -1819,88 +1819,87 @@ const passbook = async (req, res) => {
     const parsedLimit = limit === "all" ? 0 : Number(limit);
     const skip = (Number(page) - 1) * parsedLimit;
 
-    // Build filters for transactions
-    const matchFilters = {};
+    // Build server-side $filter conditions for MongoDB to run on the single Wallet document
+    const filterConditions = [];
     if (fromDate && toDate) {
-      matchFilters["wallet.transactions.date"] = {
-        $gte: new Date(new Date(fromDate).setHours(0, 0, 0, 0)),
-        $lte: new Date(new Date(toDate).setHours(23, 59, 59, 999)),
-      };
+      const from = new Date(new Date(fromDate).setHours(0, 0, 0, 0));
+      const to = new Date(new Date(toDate).setHours(23, 59, 59, 999));
+      filterConditions.push({ $gte: ["$$t.date", from] });
+      filterConditions.push({ $lte: ["$$t.date", to] });
     }
-    if (category) matchFilters["wallet.transactions.category"] = category;
-    if (description) matchFilters["wallet.transactions.description"] = description;
-    if (awbNumber) matchFilters["wallet.transactions.awb_number"] = awbNumber;
-    if (orderId) matchFilters["wallet.transactions.channelOrderId"] = orderId;
+    if (category) filterConditions.push({ $eq: ["$$t.category", category] });
+    if (description) filterConditions.push({ $eq: ["$$t.description", description] });
+    if (awbNumber) filterConditions.push({ $eq: ["$$t.awb_number", awbNumber] });
+    if (orderId) filterConditions.push({ $eq: ["$$t.channelOrderId", orderId] });
 
-    const pipeline = [
-      { $match: { _id: currentUser._id } },
+    const filterExpr = filterConditions.length > 0 ? { $and: filterConditions } : true;
+
+    // Run extremely fast aggregation targeting only a SINGLE Wallet document by _id
+    // Since input is exactly 1 document, this has zero MongoDB memory limit risks (no global unwinding)
+    const result = await Wallet.aggregate([
+      { $match: { _id: new mongoose.Types.ObjectId(currentUser.Wallet) } },
       {
-        $lookup: {
-          from: "wallets",
-          localField: "Wallet",
-          foreignField: "_id",
-          as: "wallet",
+        $project: {
+          transactions: {
+            $filter: {
+              input: "$transactions",
+              as: "t",
+              cond: filterExpr,
+            },
+          },
         },
       },
-      { $unwind: "$wallet" },
-      { $unwind: "$wallet.transactions" },
-      { $match: matchFilters },
+      { $unwind: "$transactions" },
+      { $sort: { "transactions.date": -1 } },
       {
         $facet: {
           metadata: [{ $count: "total" }],
           data: [
-            { $sort: { "wallet.transactions.date": -1 } },
             ...(parsedLimit > 0 ? [{ $skip: skip }, { $limit: parsedLimit }] : []),
-            {
-              $lookup: {
-                from: "neworders",
-                let: { txnAwb: "$wallet.transactions.awb_number" },
-                pipeline: [
-                  {
-                    $match: {
-                      $expr: {
-                        $and: [
-                          { $ne: ["$$txnAwb", null] },
-                          { $eq: [{ $toString: "$awb_number" }, { $toString: "$$txnAwb" }] }
-                        ]
-                      }
-                    }
-                  },
-                  { $limit: 1 },
-                  { $project: { courierServiceName: 1, priceBreakup: 1, rateBreakup: 1, orderType: 1, _id: 0 } }
-                ],
-                as: "orderInfo"
-              }
-            },
-            {
-              $project: {
-                _id: { $toString: "$wallet.transactions._id" },
-                id: { $toString: "$wallet.transactions._id" },
-                category: "$wallet.transactions.category",
-                amount: "$wallet.transactions.amount",
-                balanceAfterTransaction: "$wallet.transactions.balanceAfterTransaction",
-                date: "$wallet.transactions.date",
-                awb_number: "$wallet.transactions.awb_number",
-                orderId: "$wallet.transactions.channelOrderId",
-                description: "$wallet.transactions.description",
-                courierServiceName: { $arrayElemAt: ["$orderInfo.courierServiceName", 0] },
-                priceBreakup: { $ifNull: ["$wallet.transactions.priceBreakup", { $arrayElemAt: ["$orderInfo.priceBreakup", 0] }] },
-                rateBreakup: { $arrayElemAt: ["$orderInfo.rateBreakup", 0] },
-                orderType: { $arrayElemAt: ["$orderInfo.orderType", 0] }
-              }
-            }
-          ]
-        }
-      }
-    ];
+          ],
+        },
+      },
+    ]);
 
-    const result = await user.aggregate(pipeline);
     const totalCount = result[0]?.metadata[0]?.total || 0;
+    const paginated = result[0]?.data.map(d => d.transactions) || [];
     const totalPages = parsedLimit === 0 ? 1 : Math.ceil(totalCount / parsedLimit);
+
+    // Enrich only the 20 paginated records with order details (high-performance bulk lookup)
+    const awbsToLookup = [...new Set(paginated.map((t) => t.awb_number).filter(Boolean))];
+    const orderInfoMap = {};
+    if (awbsToLookup.length > 0) {
+      const orders = await Order.find(
+        { awb_number: { $in: awbsToLookup } },
+        { awb_number: 1, courierServiceName: 1, priceBreakup: 1, rateBreakup: 1, orderType: 1 }
+      ).lean();
+      for (const o of orders) {
+        orderInfoMap[String(o.awb_number)] = o;
+      }
+    }
+
+    const results = paginated.map((t) => {
+      const info = orderInfoMap[String(t.awb_number)] || {};
+      return {
+        _id: String(t._id),
+        id: String(t._id),
+        category: t.category,
+        amount: t.amount,
+        balanceAfterTransaction: t.balanceAfterTransaction,
+        date: t.date,
+        awb_number: t.awb_number,
+        orderId: t.channelOrderId,
+        description: t.description,
+        courierServiceName: info.courierServiceName || null,
+        priceBreakup: t.priceBreakup || info.priceBreakup || null,
+        rateBreakup: info.rateBreakup || null,
+        orderType: info.orderType || null,
+      };
+    });
 
     return res.status(200).json({
       message: "Passbook fetched successfully",
-      results: result[0]?.data || [],
+      results,
       totalCount,
       page: totalPages,
       currentPage: Number(page),
