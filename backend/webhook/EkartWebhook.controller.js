@@ -28,6 +28,9 @@ const EkartWebhook = async (req, res) => {
       wbn, // AWB number
       edd,
       ctime,
+      latestNdrStatus,
+      ndrDesc,
+      ndrCtime,
     } = body;
 
     if (!wbn) {
@@ -61,6 +64,43 @@ const EkartWebhook = async (req, res) => {
       StrRemarks: desc,
       StatusDateTime: ekartEpochToISTDate(ctime),
     };
+
+    // ------------------------------------------------
+    // DUPLICATE TRACKING CHECK (More robust)
+    // ------------------------------------------------
+    const isDuplicate = order.tracking.some((t) => {
+      if (!t.StatusDateTime) return false;
+
+      const tTime = new Date(t.StatusDateTime).getTime();
+      const normTime = new Date(normalizedData.StatusDateTime).getTime();
+
+      // 1. Time must match exactly
+      if (tTime !== normTime) return false;
+
+      // 2. If time matches, check if status, instructions or location matches (case-insensitive)
+      const normStatus = (normalizedData.Status || "").toLowerCase().trim();
+      const tStatus = (t.status || t.Status || "").toLowerCase().trim();
+
+      const normInstr = (normalizedData.Instructions || "").toLowerCase().trim();
+      const tInstr = (t.Instructions || "").toLowerCase().trim();
+
+      const normLoc = (location || "").toLowerCase().trim();
+      const tLoc = (t.StatusLocation || "").toLowerCase().trim();
+
+      return (
+        normStatus === tStatus ||
+        normInstr === tInstr ||
+        (normLoc && normLoc === tLoc)
+      );
+    });
+
+    if (isDuplicate) {
+      console.log(`Duplicate tracking entry for AWB ${wbn} at ${normalizedData.StatusDateTime}. Skipping update.`);
+      return res.status(200).json({
+        success: true,
+        message: "Duplicate tracking entry, update skipped",
+      });
+    }
 
     const currentStatus = normalizedData.Status;
 
@@ -128,13 +168,42 @@ const EkartWebhook = async (req, res) => {
 
 
     /* ========================================================
-         UNDELIVERED → NDR LOGIC
+         UNDELIVERED → NDR LOGIC (Triggered by latestNdrStatus)
     ======================================================== */
-    if (currentStatus === "Undelivered") {
+    const EKART_NDR_STATUSES = [
+      "Unknown Exception",
+      "Customer Unavailable",
+      "Rejected by Customer",
+      "Delivery Rescheduled",
+      "Pickup Rescheduled",
+      "Customer Unreachable",
+      "Address Issue",
+      "Payment Issue",
+      "Out Of Delivery Area",
+      "Order Already Cancelled",
+      "Self Collect",
+      "Shipment Seized By Customer",
+      "Dispute",
+      "Maximum Attempt Reached",
+      "Not Attempted",
+      "OTP Not Received/OTP Mismatch",
+      "OTP Verified Cancellation",
+      "On Hold",
+      "RTO Delivery Failed"
+    ];
+
+    const normalizedNdrStatuses = EKART_NDR_STATUSES.map(s => s.toLowerCase().trim());
+    const isEligibleForNdr =
+      latestNdrStatus &&
+      normalizedNdrStatuses.includes(latestNdrStatus.toLowerCase().trim());
+
+    if (isEligibleForNdr) {
       order.status = "Undelivered";
       order.ndrStatus = "Undelivered";
 
-      const currentDate = normalizedData.StatusDateTime.getTime();
+      const ndrDate = ndrCtime ? ekartEpochToISTDate(ndrCtime) : normalizedData.StatusDateTime;
+      const ndrReasonText = ndrDesc || latestNdrStatus || normalizedData.StrRemarks || "";
+      const currentDate = ndrDate.getTime();
 
       // last NDR date
       let lastNdrDate = null;
@@ -148,8 +217,8 @@ const EkartWebhook = async (req, res) => {
 
       // store NDR reason
       order.ndrReason = {
-        date: normalizedData.StatusDateTime,
-        reason: normalizedData.StrRemarks,
+        date: ndrDate,
+        reason: ndrReasonText,
       };
 
       /* ───────────────────────────────────────────────
@@ -160,8 +229,7 @@ const EkartWebhook = async (req, res) => {
         lastNdrDate &&
         currentDate <= lastNdrDate
       ) {
-        console.log("NDR IGNORE: Duplicate or older Ekart UNDELIVERED");
-        // Fall through to standard tracking push and save
+        console.log("NDR IGNORE: Duplicate or older Ekart UNDELIVERED based on ndrCtime");
       } else if (!lastNdrDate || currentDate > lastNdrDate) {
         /* ───────────────────────────────────────────────
            VALID NDR CASE
@@ -173,9 +241,9 @@ const EkartWebhook = async (req, res) => {
             {
               action: `NDR ${attemptCount} Raised`,
               actionBy: order.provider,
-              remark: normalizedData.StrRemarks,
+              remark: ndrReasonText,
               source: order.provider,
-              date: normalizedData.StatusDateTime,
+              date: ndrDate,
             },
           ],
         });

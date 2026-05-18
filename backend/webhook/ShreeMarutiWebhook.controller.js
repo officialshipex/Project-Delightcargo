@@ -55,13 +55,31 @@ const ShreeMarutiWebhook = async (req, res) => {
     // ------------------------------------------------
     // DUPLICATE TRACKING CHECK (More robust)
     // ------------------------------------------------
-    const isDuplicate = order.tracking.some(
-      (t) =>
-        t.StatusDateTime &&
-        new Date(t.StatusDateTime).getTime() ===
-        new Date(normalizedData.StatusDateTime).getTime() &&
-        t.Instructions === normalizedData.Instructions
-    );
+    const isDuplicate = order.tracking.some((t) => {
+      if (!t.StatusDateTime) return false;
+
+      const tTime = new Date(t.StatusDateTime).getTime();
+      const normTime = new Date(normalizedData.StatusDateTime).getTime();
+
+      // 1. Time must match exactly
+      if (tTime !== normTime) return false;
+
+      // 2. If time matches, check if status, instructions or location matches (case-insensitive)
+      const normStatus = (normalizedData.Status || "").toLowerCase().trim();
+      const tStatus = (t.status || t.Status || "").toLowerCase().trim();
+
+      const normInstr = (normalizedData.Instructions || "").toLowerCase().trim();
+      const tInstr = (t.Instructions || "").toLowerCase().trim();
+
+      const normLoc = (data.location || "").toLowerCase().trim();
+      const tLoc = (t.StatusLocation || "").toLowerCase().trim();
+
+      return (
+        normStatus === tStatus ||
+        normInstr === tInstr ||
+        (normLoc && normLoc === tLoc)
+      );
+    });
 
     if (isDuplicate) {
       console.log(`Duplicate tracking entry for AWB ${awb} at ${normalizedData.StatusDateTime}. Skipping update.`);
