@@ -22,9 +22,15 @@ const {
   exportOrderInRemittance,
   validateCODTransfer,
   getCODTransferData,
-  transferCOD
+  transferCOD,
+  exportBankTemplate,
+  uploadBankResponse,
+  getBankExportBatches,
+  validateExportedStatus,
 } = require("./cod.controller");
 const { isAuthorized } = require("../middleware/auth.middleware");
+router.get("/getBankExportBatches", getBankExportBatches);
+router.post("/validateExportedStatus", validateExportedStatus);
 router.post("/codPlanUpdate", codPlanUpdate);
 router.get("/codRemittanceData", codRemittanceData);
 router.get("/getCodRemitance", getCodRemitance);
@@ -43,5 +49,7 @@ router.get("/exportOrderInRemittance",exportOrderInRemittance)
 router.post("/validateCODTransfer",validateCODTransfer)
 router.get("/getCODTransferData/:id",getCODTransferData)
 router.post("/transferCOD/:id",transferCOD)
+router.get("/exportBankTemplate", exportBankTemplate)
+router.post("/uploadBankResponse", uploadBankResponse)
 
 module.exports = router;

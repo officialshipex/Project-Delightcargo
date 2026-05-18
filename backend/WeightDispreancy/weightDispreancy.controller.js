@@ -925,7 +925,10 @@ const autoAcceptDiscrepancies = async () => {
 
 // Schedule job to run every day at midnight
 if (process.env.NODE_ENV === "production") {
-  cron.schedule("0 0 * * *", autoAcceptDiscrepancies);
+  cron.schedule("0 0 * * *", autoAcceptDiscrepancies, {
+    scheduled: true,
+    timezone: "Asia/Kolkata"
+  });
 }
 
 // autoAcceptDiscrepancies()

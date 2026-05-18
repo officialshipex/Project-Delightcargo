@@ -358,18 +358,18 @@ const getWooCommerceProductDetails = async (
 // Stores with shipment plugins may also accept: shipped, in-transit, out-for-delivery, etc.
 const shipexToWooStatus = (shipexStatus) => {
   const map = {
-    "Booked":           "shipped",    // Courier booked, order being shipped
-    "Ready To Ship":    "shipped",    // Ready for pickup
-    "Pickup Completed": "in transit",    // Picked up by courier
-    "In-transit":       "in transit",       // In transit (no native WC status; on-hold = awaiting shipment)
-    "Out for Delivery": "out for delivery",       // Out for delivery
-    "Delivered":        "delivered",     // Successfully delivered
-    "Cancelled":        "cancelled",     // Order cancelled
-    "RTO":              "refunded",       // Return to origin initiated
-    "RTO In-transit":   "refunded",       // Returning to origin
-    "RTO Delivered":    "refunded",       // Returned to origin
-    "Undelivered":      "on-hold",       // Delivery attempt failed
-    "Lost":             "on-hold",       // Shipment lost
+    "Booked":           "wc-ready-to-ship", // maps to "Ready To Ship"
+    "Ready To Ship":    "wc-ready-to-ship", // maps to "Ready To Ship"
+    "Pickup Completed": "wc-in-transit",    // maps to "In Transit"
+    "In-transit":       "wc-in-transit",    // maps to "In Transit"
+    "Out for Delivery": "wc-out-for-delivery", // maps to "Out for Delivery"
+    "Delivered":        "wc-delivered",     // maps to "Delivered"
+    "Cancelled":        "cancelled",        // standard WooCommerce cancelled status
+    "RTO":              "refunded",         // standard WooCommerce refunded status
+    "RTO In-transit":   "refunded",         // standard WooCommerce refunded status
+    "RTO Delivered":    "refunded",         // standard WooCommerce refunded status
+    "Undelivered":      "on-hold",          // standard WooCommerce on-hold status
+    "Lost":             "on-hold",          // standard WooCommerce on-hold status
   };
   return map[shipexStatus] || null; // null = don't update WC status for unknown statuses
 };

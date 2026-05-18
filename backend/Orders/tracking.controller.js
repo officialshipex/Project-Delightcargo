@@ -1737,14 +1737,13 @@ const trackOrders = async () => {
 // This is more scalable and cost-effective for AWS than setTimeout polling.
 if (process.env.NODE_ENV === "production") {
   console.log("📅 Order Tracking Scheduled: Hourly check for due orders");
-  // Run every hour, but internally it only picks orders due for tracking (2h/6h)
-  cron.schedule("0 * * * *", async () => {
-    const currentHour = new Date().getHours();
-    // Run only during active business hours (6 AM to 10 PM IST)
-    if (currentHour >= 6 && currentHour <= 22) {
-      console.log("🕒 Starting scheduled Order Tracking...");
-      await trackOrders();
-    }
+  // Run every hour during active business hours (6 AM to 10 PM IST)
+  cron.schedule("0 6-22 * * *", async () => {
+    console.log("🕒 Starting scheduled Order Tracking...");
+    await trackOrders();
+  }, {
+    scheduled: true,
+    timezone: "Asia/Kolkata"
   });
 }
 

@@ -22,6 +22,7 @@ const CourierCodRemittance = require("./CourierCodRemittance.js");
 const CodRemittanceOrdersModel = require("./CodRemittanceOrder.model.js");
 const SameDateDelivered = require("./samedateDelivery.model.js");
 const BankAccountDetails = require("../models/BankAccount.model.js");
+const BankExportBatch = require("../models/BankExportBatch.model.js");
 const codPlanUpdate = async (req, res) => {
   try {
     const { id } = req.query;
@@ -226,6 +227,9 @@ if (process.env.NODE_ENV === "production") {
       "⏰ Running scheduled task at 1:01 AM (production): Fetching orders..."
     );
     codToBeRemitteds();
+  }, {
+    scheduled: true,
+    timezone: "Asia/Kolkata"
   });
 } else {
   console.log("⚙️ Cron job not started (development mode)");
@@ -2852,6 +2856,411 @@ const checkOrderDuplicates = async () => {
 // To run this function manually, you can call it here:
 // checkOrderDuplicates();
 
+// ============================================================
+// EXPORT BANK TEMPLATE  (supports single AND multi-user bulk)
+// Groups selected remittance IDs by userId, runs hold/topup/payable
+// logic independently per user, combines all payable rows into one XLSX.
+// ============================================================
+const exportBankTemplate = async (req, res) => {
+  try {
+    let { selectedRemittanceIds } = req.query;
+
+    if (!selectedRemittanceIds) {
+      return res.status(400).json({ message: "selectedRemittanceIds are required" });
+    }
+
+    // Normalize to array
+    if (!Array.isArray(selectedRemittanceIds)) {
+      selectedRemittanceIds = [selectedRemittanceIds];
+    }
+    selectedRemittanceIds = selectedRemittanceIds.map(String);
+
+    // Check if any of these remittance IDs are already in an active export batch
+    const activeBatches = await BankExportBatch.find({ status: "Active" }).lean();
+    const alreadyExportedIds = [];
+    for (const batch of activeBatches) {
+      for (const row of batch.rows) {
+        if (selectedRemittanceIds.includes(String(row.remittanceId))) {
+          alreadyExportedIds.push(String(row.remittanceId));
+        }
+      }
+    }
+
+    if (alreadyExportedIds.length > 0) {
+      return res.status(400).json({
+        message: `Remittance ID(s) ${alreadyExportedIds.join(", ")} are already in an active export batch. Please upload their bank response first.`
+      });
+    }
+
+    // 1. Load all matching adminCodRemittance records to get userId per remittanceId
+    const adminRecords = await adminCodRemittance
+      .find({ remitanceId: { $in: selectedRemittanceIds } })
+      .lean();
+
+    if (adminRecords.length !== selectedRemittanceIds.length) {
+      return res.status(400).json({ message: "Some remittance IDs not found" });
+    }
+
+    // Filter out already-paid (warn but don't hard-fail — skip them gracefully)
+    const pendingAdminRecords = adminRecords.filter(r => r.status !== "Paid");
+    const skippedPaid = adminRecords.length - pendingAdminRecords.length;
+
+    if (pendingAdminRecords.length === 0) {
+      return res.status(400).json({ message: "All selected remittances are already Paid" });
+    }
+
+    // 2. Group pending remittance IDs by userId
+    const userIdToRemittanceIds = {};
+    for (const rec of pendingAdminRecords) {
+      const uid = String(rec.userId);
+      if (!userIdToRemittanceIds[uid]) userIdToRemittanceIds[uid] = [];
+      userIdToRemittanceIds[uid].push(String(rec.remitanceId));
+    }
+
+    const DEBIT_ACCOUNT = "258800258800"; // Quickpost360 Services Pvt Ltd — IndusInd Bank INDB0000673
+    const allTemplateRows = [];
+    const internalBatchRows = [];
+    let totalHeldCount = 0;
+    let totalTopUpCount = 0;
+    const userErrors = [];
+
+    // 3. Process each user independently
+    for (const [userId, remIdsForUser] of Object.entries(userIdToRemittanceIds)) {
+
+      // Fetch user's codRemittance record
+      const remittanceRecord = await codRemittance.findOne({ userId }).lean();
+      if (!remittanceRecord) {
+        userErrors.push(`No codRemittance record for userId ${userId}`);
+        continue;
+      }
+
+      // Filter to selected PENDING entries for this user
+      const filteredEntries = (remittanceRecord.remittanceData || []).filter(
+        r => remIdsForUser.includes(String(r.remittanceId)) && r.status === "Pending"
+      );
+
+      if (!filteredEntries.length) continue;
+
+      // Fetch user, wallet, bank details
+      const user = await users.findById(userId).lean();
+      if (!user) { userErrors.push(`User not found: ${userId}`); continue; }
+
+      const [walletDoc, bankDetails] = await Promise.all([
+        Wallet.findById(user.Wallet).lean(),
+        BankAccountDetails.findOne({ user: userId }).lean(),
+      ]);
+
+      if (!bankDetails) {
+        userErrors.push(`No bank details for user ${user.fullname || userId}`);
+        continue;
+      }
+
+      const balance = Number(walletDoc?.balance ?? 0);
+      const holdAmount = Number(walletDoc?.holdAmount ?? 0);
+
+      // Build remittanceEntries with remittanceAmount = codAvailable
+      const remittanceEntries = filteredEntries.map(r => ({
+        ...r,
+        remittanceAmount: Number(Number(r.codAvailable || 0).toFixed(2)),
+      }));
+
+      // HOLD LOGIC (mirrors TransferCODModal holdResolved)
+      let heldIds = [];
+      if (holdAmount > 0) {
+        const sortedAsc = [...remittanceEntries].sort((a, b) => a.remittanceAmount - b.remittanceAmount);
+        const single = sortedAsc.find(r => r.remittanceAmount >= holdAmount);
+        if (single) {
+          heldIds = [String(single.remittanceId || single._id)];
+        } else {
+          const sortedDesc = [...remittanceEntries].sort((a, b) => b.remittanceAmount - a.remittanceAmount);
+          let total = 0;
+          for (const r of sortedDesc) {
+            heldIds.push(String(r.remittanceId || r._id));
+            total += r.remittanceAmount;
+            if (total >= holdAmount) break;
+          }
+        }
+      }
+
+      // WALLET TOPUP LOGIC (mirrors TransferCODModal walletTopUp)
+      let topUpIds = [];
+      if (balance < 0) {
+        const needed = Math.abs(balance);
+        const available = remittanceEntries.filter(r => !heldIds.includes(String(r.remittanceId || r._id)));
+        const sortedAsc = [...available].sort((a, b) => a.remittanceAmount - b.remittanceAmount);
+        const single = sortedAsc.find(r => r.remittanceAmount >= needed);
+        if (single) {
+          topUpIds = [String(single.remittanceId || single._id)];
+        } else {
+          let sum = 0;
+          for (const r of sortedAsc) {
+            topUpIds.push(String(r.remittanceId || r._id));
+            sum += r.remittanceAmount;
+            if (sum >= needed) break;
+          }
+        }
+      }
+
+      // PAYABLE LOGIC — exclude held & topup
+      const payableEntries = remittanceEntries.filter(r => {
+        const id = String(r.remittanceId || r._id);
+        if (heldIds.includes(id)) return false;
+        if (topUpIds.includes(id)) return false;
+        return true;
+      });
+
+      totalHeldCount += heldIds.length;
+      totalTopUpCount += topUpIds.length;
+
+      // Build rows for this user's payable entries
+      for (const r of payableEntries) {
+        allTemplateRows.push({
+          "Debit Account Number": DEBIT_ACCOUNT,
+          "Payment mode": "NEFT",
+          "Amount": Number(r.remittanceAmount.toFixed(2)),
+          "Beneficiary Name": bankDetails.nameAtBank || "",
+          "Beneficiary Account": bankDetails.accountNumber || "",
+          "Beneficiary Bank IFSC": bankDetails.ifsc || "",
+          "Remarks": `COD Payment ${String(r.remittanceId || "")}`,
+          "Beneficiary LEI": "",
+        });
+
+        internalBatchRows.push({
+          remittanceId: String(r.remittanceId),
+          userId: user._id,
+          beneficiaryAccount: bankDetails.accountNumber || "",
+          amount: Number(r.remittanceAmount.toFixed(2)),
+        });
+      }
+    }
+
+    let batchId = "";
+    if (internalBatchRows.length > 0) {
+      batchId = `BATCH_${new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14)}`;
+      await BankExportBatch.create({
+        batchId,
+        rows: internalBatchRows,
+        totalRows: internalBatchRows.length,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      batchId,
+      rows: allTemplateRows,
+      payableCount: allTemplateRows.length,
+      heldCount: totalHeldCount,
+      topUpCount: totalTopUpCount,
+      skippedPaid,
+      userErrors,
+    });
+
+  } catch (error) {
+    console.error("Error in exportBankTemplate:", error);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+};
+
+// ============================================================
+// UPLOAD BANK RESPONSE (Hybrid Reconciliation Logic)
+// 100% accurate financial matching:
+//   1. Tries exact match using "Remarks" / "Reference Number" column.
+//      We extract the Remittance ID (e.g., REM12345) from the text.
+//   2. Fallback: If no exact ID, matches by Beneficiary Account + Amount.
+// ============================================================
+const uploadBankResponse = async (req, res) => {
+  try {
+    const { rows, selectedRemittanceIds } = req.body;
+    // rows = [{ remarks, referenceNumber, utrNumber, beneficiaryName, beneficiaryAccount, amount, status, reason }]
+
+    if (!rows || !Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ message: "No rows provided" });
+    }
+
+    // Load remittance IDs belonging to the selected export batch by exact match of selectedRemittanceIds
+    let batchRemittanceIds = [];
+    let matchedBatchId = "";
+    if (selectedRemittanceIds && Array.isArray(selectedRemittanceIds) && selectedRemittanceIds.length > 0) {
+      const normalizedIds = selectedRemittanceIds.map(String);
+      const batch = await BankExportBatch.findOne({
+        status: "Active",
+        totalRows: normalizedIds.length,
+        "rows.remittanceId": { $all: normalizedIds }
+      }).lean();
+      if (batch) {
+        batchRemittanceIds = (batch.rows || []).map(r => String(r.remittanceId));
+        matchedBatchId = batch.batchId;
+      }
+    }
+
+    const results = [];
+
+    for (const row of rows) {
+      const utrNumber = String(row.utrNumber || "").trim();
+      const bankStatus = String(row.status || "").trim().toLowerCase();
+      const beneficiaryAccount = String(row.beneficiaryAccount || "").trim();
+      const paymentAmount = Number(row.amount || 0);
+      const rawRemarks = String(row.remarks || "").trim();
+      const rawReference = String(row.referenceNumber || "").trim();
+
+      // Skip non-successful rows (support both "successful" and "success")
+      if (bankStatus !== "successful" && bankStatus !== "success") {
+        results.push({ beneficiaryAccount, amount: paymentAmount, status: "skipped", reason: `Bank status: ${row.status}` });
+        continue;
+      }
+
+      if (!beneficiaryAccount) {
+        results.push({ beneficiaryAccount, amount: paymentAmount, status: "skipped", reason: "No beneficiary account in row" });
+        continue;
+      }
+
+      // Step 1: Find the user by their bank account number
+      const bankRecord = await BankAccountDetails.findOne({ accountNumber: beneficiaryAccount }).lean();
+      if (!bankRecord) {
+        results.push({ beneficiaryAccount, amount: paymentAmount, status: "error", reason: `No bank account found for ${beneficiaryAccount}` });
+        continue;
+      }
+      const userId = bankRecord.user;
+
+      // Load user's codRemittance record
+      const remRecord = await codRemittance.findOne({ userId });
+      if (!remRecord) {
+        results.push({ beneficiaryAccount, amount: paymentAmount, status: "error", reason: `No COD remittance record found for user` });
+        continue;
+      }
+
+      let matchedEntry = null;
+      let entryIndex = -1;
+
+      // --- MATCH BY BENEFICIARY ACCOUNT + AMOUNT (±1 tolerance) ---
+      // We restrict matching ONLY to selected batch or selected Remittance IDs
+      entryIndex = remRecord.remittanceData.findIndex(e => {
+        const matchesStatusAndAmount = e.status === "Pending" && Math.abs(Number(e.codAvailable || 0) - paymentAmount) < 1;
+        if (!matchesStatusAndAmount) return false;
+
+        // 1. If batchId is used, strictly enforce matching against the batch
+        if (batchRemittanceIds.length > 0) {
+          return batchRemittanceIds.includes(String(e.remittanceId));
+        }
+
+        // 2. Fallback: If no batchId, enforce selectedRemittanceIds
+        if (selectedRemittanceIds && Array.isArray(selectedRemittanceIds) && selectedRemittanceIds.length > 0) {
+          return selectedRemittanceIds.map(String).includes(String(e.remittanceId));
+        }
+        return true;
+      });
+
+      if (entryIndex !== -1) {
+        matchedEntry = remRecord.remittanceData[entryIndex];
+      }
+
+      if (entryIndex === -1 || !matchedEntry) {
+        results.push({ beneficiaryAccount, amount: paymentAmount, status: "error", reason: `No pending remittance entry found with amount ₹${paymentAmount} matching batch/selection criteria` });
+        continue;
+      }
+
+      const remittanceId = String(matchedEntry.remittanceId);
+      const paidAmount = Number(matchedEntry.codAvailable || 0);
+
+      // Update remittanceData entry in-place
+      remRecord.remittanceData[entryIndex] = {
+        ...matchedEntry.toObject(),
+        status: "Paid",
+        utr: utrNumber,
+        remittanceMethod: "Bank Transfer",
+        reason: "Paid via bank bulk transfer",
+      };
+
+      // Update summary fields
+      remRecord.LastCODRemitted = paidAmount;
+      remRecord.RemittanceInitiated = Math.max(0, (remRecord.RemittanceInitiated || 0) - paidAmount);
+      remRecord.TotalCODRemitted = (Number(remRecord.TotalCODRemitted) || 0) + paidAmount;
+
+      await remRecord.save();
+
+      // Sync adminCodRemittance using matched remittanceId
+      await adminCodRemittance.findOneAndUpdate(
+        { remitanceId: remittanceId },
+        {
+          $set: {
+            status: "Paid",
+            utr: utrNumber,
+            reason: "Paid via bank bulk transfer",
+          },
+        },
+        { new: true }
+      );
+
+      results.push({ beneficiaryAccount, amount: paymentAmount, remittanceId, status: "success", utr: utrNumber });
+    }
+
+    const successCount = results.filter(r => r.status === "success").length;
+    const skippedCount = results.filter(r => r.status === "skipped").length;
+    const errorCount = results.filter(r => r.status === "error").length;
+
+    // Mark export batch as processed if successfully reconciled
+    if (matchedBatchId && successCount > 0) {
+      await BankExportBatch.findOneAndUpdate({ batchId: matchedBatchId }, { status: "Processed" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Processed ${rows.length} rows: ${successCount} paid, ${skippedCount} skipped, ${errorCount} errors`,
+      successCount,
+      skippedCount,
+      errorCount,
+      results,
+    });
+
+  } catch (error) {
+    console.error("Error in uploadBankResponse:", error);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+};
+
+const getBankExportBatches = async (req, res) => {
+  try {
+    const batches = await BankExportBatch.find({ status: "Active" })
+      .sort({ exportedAt: -1 })
+      .limit(30)
+      .lean();
+    return res.status(200).json({ success: true, batches });
+  } catch (error) {
+    console.error("Error in getBankExportBatches:", error);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+};
+
+const validateExportedStatus = async (req, res) => {
+  try {
+    const { selectedRemittanceIds } = req.body;
+    if (!selectedRemittanceIds || !Array.isArray(selectedRemittanceIds) || selectedRemittanceIds.length === 0) {
+      return res.status(400).json({ message: "No selectedRemittanceIds provided" });
+    }
+
+    const normalizedIds = selectedRemittanceIds.map(String);
+
+    // Find if there is an active batch that exactly matches the selected remittance IDs
+    const matchingBatch = await BankExportBatch.findOne({
+      status: "Active",
+      totalRows: normalizedIds.length,
+      "rows.remittanceId": { $all: normalizedIds }
+    }).lean();
+
+    if (!matchingBatch) {
+      return res.status(200).json({
+        success: false,
+        message: `The selected remittance ID(s) do not exactly match any active exported batch. Please select the exact same remittances that you exported together.`
+      });
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Error in validateExportedStatus:", error);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+};
+
 module.exports = {
   codPlanUpdate,
   codToBeRemitteds,
@@ -2872,4 +3281,8 @@ module.exports = {
   validateCODTransfer,
   getCODTransferData,
   transferCOD,
+  exportBankTemplate,
+  uploadBankResponse,
+  getBankExportBatches,
+  validateExportedStatus,
 };

@@ -82,6 +82,7 @@ const callNimbustNdrApi = async (orderDetails) => {
       const order = await Order.findById(orderDetails._id);
       if (order) {
         order.ndrStatus = "Action_Requested";
+        order.status="Action_Requested";
         order.reattempt = false;
         
         const entry = {
@@ -230,6 +231,7 @@ const callEcomExpressNdrApi = async (
       };
 
       order.ndrStatus = "Action_Requested";
+      order.status="Action_Requested";
       order.ndrHistory.push(ndrHistoryEntry);
       await order.save();
     }
@@ -349,6 +351,7 @@ const submitNdrToAmazon = async (
       }
       order.reattempt = false;
       order.ndrStatus = "Action_Requested";
+      order.status="Action_Requested";
       await order.save();
     }
 
@@ -428,7 +431,7 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
 
       freshOrder.manualRTOStatus = "Action_Requested";
       freshOrder.ndrStatus = "Action_Requested";
-      freshOrder.status = "Undelivered";
+      freshOrder.status = "Action_Requested";
       freshOrder.reattempt = false;
       await freshOrder.save();
 
@@ -649,7 +652,7 @@ const submitNdrToDtdc = async (
 
       // --- Update order status ---
       orderInDb.ndrStatus = "Action_Requested";
-      orderInDb.status = "Undelivered";
+      orderInDb.status = "Action_Requested";
       orderInDb.reattempt = false;
       await orderInDb.save();
 
@@ -832,7 +835,7 @@ const submitNdrToShreeMaruti = async ({
       }
 
       orderInDb.ndrStatus = "Action_Requested";
-      orderInDb.status = "Undelivered";
+      orderInDb.status = "Action_Requested";
       orderInDb.reattempt = false;
       await orderInDb.save();
 
@@ -947,7 +950,7 @@ const callSmartshipNdrApi = async (
 
       // --- Update order status ---
       currentOrder.ndrStatus = "Action_Requested";
-      currentOrder.status = "Undelivered";
+      currentOrder.status = "Action_Requested";
       currentOrder.reattempt = false;
       await currentOrder.save();
 
@@ -1096,7 +1099,7 @@ const submitNdrToZipypost = async (awb, payload) => {
 
     // --- Update status fields ---
     orderInDb.ndrStatus = "Action_Requested";
-    orderInDb.status = "Undelivered";
+    orderInDb.status = "Action_Requested";
     orderInDb.reattempt = false;
     await orderInDb.save();
 
@@ -1401,7 +1404,7 @@ const submitNdrToBoxdLogistics = async ({
     }
 
     orderInDb.ndrStatus = actionUpper === "RTO" ? "RTO" : "Action_Requested";
-    orderInDb.status = "Undelivered";
+    orderInDb.status = "Action_Requested";
     orderInDb.reattempt = false;
     await orderInDb.save();
 

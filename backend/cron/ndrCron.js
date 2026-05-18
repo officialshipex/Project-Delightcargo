@@ -8,7 +8,10 @@ const { runNdrTask } = require("../utils/ndrTaskRunner");
  * 1. Automatically triggers re-attempts for "Undelivered" shipments.
  * 2. Retries failed actions from the previous day.
  */
+console.log("NDR Cron Jobs Initialized: 6 AM Consolidated Job.");
+
 cron.schedule("0 6 * * *", async () => {
+
   if (process.env.NODE_ENV !== "production") {
     console.log("NDR Cron Job skipped: Not in production environment.");
     return;
@@ -82,6 +85,11 @@ cron.schedule("0 6 * * *", async () => {
       console.log(`Triggering daily re-attempt for AWB: ${order.awb_number}`);
       const result = await runNdrTask(order._id, actionDetails);
 
+      // Always set reattempt to false once processed (successfully or queued)
+      order.reattempt = false;
+      await order.save();
+
+
       if (!result.success) {
         order.ndrStatus = "Action_Requested";
         order.status = "Action_Requested";
@@ -110,6 +118,10 @@ cron.schedule("0 6 * * *", async () => {
   } catch (error) {
     console.error("Error during new daily re-attempts:", error);
   }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
 });
+
 
 

@@ -280,5 +280,8 @@ if (process.env.NODE_ENV === "production") {
     console.log("⏰ Running Daily RTO Charges cleanup...");
     await rtoCharges();
     console.log("✅ Daily RTO Charges completed.");
+  }, {
+    scheduled: true,
+    timezone: "Asia/Kolkata"
   });
 }
