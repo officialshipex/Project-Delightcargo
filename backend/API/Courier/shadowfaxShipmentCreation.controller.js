@@ -234,13 +234,14 @@ const createShadowfaxShipment = async ({
     await session.commitTransaction();
     session.endSession();
 
-    // Auto-assign pickup manifest
-    try {
-      const freshOrder = await Order.findById(id);
-      if (freshOrder) await assignPickupManifest(freshOrder);
-    } catch (pErr) {
-      console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-    }
+    // Auto-assign pickup manifest (non-blocking)
+    Order.findById(id)
+      .then((freshOrder) => {
+        if (freshOrder) assignPickupManifest(freshOrder);
+      })
+      .catch((pErr) => {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      });
 
     return {
       success: true,

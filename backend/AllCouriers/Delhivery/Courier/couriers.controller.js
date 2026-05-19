@@ -13,6 +13,8 @@ const plan = require("../../../models/Plan.model");
 const CourierService = require("../../../models/CourierService.Schema");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
+const createdDelhiveryWarehouses = new Set();
+
 // HELPER FUNCTIONS
 const getCurrentDateTime = () => {
   const now = new Date();
@@ -24,9 +26,14 @@ const getCurrentDateTime = () => {
 
 // Helper function to generate a unique warehouse name for Delhivery
 const getUniqueWarehouseName = (payload) => {
-  if (!payload || !payload.address)
-    return payload?.contactName || "Default Warehouse";
-  const addressKey = `${payload.address}-${payload.pinCode}-${payload.phoneNumber}`
+  const address = payload?.address || payload?.addressLine1 || "";
+  const pinCode = payload?.pinCode || "";
+  const phoneNumber = payload?.phoneNumber || payload?.contactNo || "";
+  const contactName = payload?.contactName || "Default Warehouse";
+
+  if (!address) return contactName;
+
+  const addressKey = `${address}-${pinCode}-${phoneNumber}`
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
   const hash = crypto
@@ -34,7 +41,7 @@ const getUniqueWarehouseName = (payload) => {
     .update(addressKey)
     .digest("hex")
     .substring(0, 6);
-  return `${payload.contactName.substring(0, 30)}-${hash}`.trim();
+  return `${contactName.substring(0, 30)}-${hash}`.trim();
 };
 
 const createClientWarehouse = async (payload, apiKey) => {
@@ -44,15 +51,28 @@ const createClientWarehouse = async (payload, apiKey) => {
 
   const uniqueName = getUniqueWarehouseName(payload);
 
+  // Check cache
+  if (createdDelhiveryWarehouses.has(uniqueName)) {
+    return {
+      success: true,
+      message: "Warehouse already exists (cached), proceeding",
+      name: uniqueName,
+    };
+  }
+
+  const email = payload.email || payload.supportEmail || "";
+  const phone = payload.phoneNumber || payload.contactNo || "";
+  const address = payload.address || payload.addressLine1 || "";
+
   const warehouseDetails = {
     name: uniqueName,
-    email: payload.email,
-    phone: payload.phoneNumber,
-    address: payload.address,
+    email: email,
+    phone: phone,
+    address: address,
     pin: payload.pinCode,
     city: payload.city,
     state: payload.state,
-    return_address: payload.address,
+    return_address: address,
     return_pin: payload.pinCode,
     return_city: payload.city,
     return_state: payload.state,
@@ -73,6 +93,7 @@ const createClientWarehouse = async (payload, apiKey) => {
     );
 
     if (response.data.success) {
+      createdDelhiveryWarehouses.add(uniqueName);
       return {
         success: true,
         message: "Warehouse created successfully",
@@ -83,6 +104,7 @@ const createClientWarehouse = async (payload, apiKey) => {
       const errorMessage = response.data.error?.[0] || "";
       if (errorMessage.includes("already exists")) {
         // Warehouse already exists, we can continue
+        createdDelhiveryWarehouses.add(uniqueName);
         return {
           success: true,
           message: "Warehouse already exists, proceeding",
@@ -104,6 +126,7 @@ const createClientWarehouse = async (payload, apiKey) => {
     const errorMessage = error.response?.data?.error?.[0] || "";
 
     if (errorMessage.includes("already exists")) {
+      createdDelhiveryWarehouses.add(uniqueName);
       return {
         success: true,
         message: "Warehouse already exists, proceeding",
@@ -178,34 +201,32 @@ const createOrder = async (req, res) => {
     // Fetch API key for the specific account
     const apiKey = await getDelhiveryApiKey(internalCourierName);
 
-    // Step 3️⃣ Get waybills & zone in parallel
-    const [waybills, zone] = await Promise.all([
+    // Step 3️⃣ Get waybills, zone & create warehouse in parallel
+    const [waybills, zone, warehouseCreationResult] = await Promise.all([
       fetchBulkWaybills(1, apiKey),
       getZone(
         currentOrder.pickupAddress.pinCode,
         currentOrder.receiverAddress.pinCode,
       ),
+      createClientWarehouse(
+        currentOrder.pickupAddress,
+        apiKey,
+      ),
     ]);
 
-    if (!waybills.length || !zone) {
+    if (!waybills || !waybills.length || !zone) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
         success: false,
-        message: !waybills.length
+        message: (!waybills || !waybills.length)
           ? "No Waybill Available"
           : "Pincode not serviceable",
       });
     }
 
-    // Step 4️⃣ Create warehouse
-    const warehouseCreationResult = await createClientWarehouse(
-      currentOrder.pickupAddress,
-      apiKey,
-    );
-
-    if (!warehouseCreationResult.success) {
+    if (!warehouseCreationResult || !warehouseCreationResult.success) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();

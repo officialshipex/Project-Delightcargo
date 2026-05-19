@@ -303,13 +303,14 @@ const createZipypostShipment = async ({
     await session.commitTransaction();
     session.endSession();
 
-    // ── Auto-assign pickup manifest ──
-    try {
-      const freshOrder = await Order.findById(currentOrder._id);
-      if (freshOrder) await assignPickupManifest(freshOrder);
-    } catch (pErr) {
-      console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-    }
+    // ── Auto-assign pickup manifest (non-blocking) ──
+    Order.findById(currentOrder._id)
+      .then((freshOrder) => {
+        if (freshOrder) assignPickupManifest(freshOrder);
+      })
+      .catch((pErr) => {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      });
 
     return {
       success: true,

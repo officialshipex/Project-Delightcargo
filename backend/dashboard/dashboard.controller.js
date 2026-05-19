@@ -271,14 +271,14 @@ const getBusinessInsights = async (req, res) => {
     // moment().utcOffset('+05:30') anchors calculations to IST regardless of server TZ.
     const IST = '+05:30';
 
-    const startOfToday      = moment().utcOffset(IST).startOf('day').utc().toDate();
-    const last30Days        = moment().utcOffset(IST).subtract(30, 'days').startOf('day').utc().toDate();
-    const prev30Days        = moment().utcOffset(IST).subtract(60, 'days').startOf('day').utc().toDate();
-    const startOfWeek       = moment().utcOffset(IST).startOf('week').utc().toDate();
-    const startOfLastWeek   = moment().utcOffset(IST).subtract(1, 'weeks').startOf('week').utc().toDate();
-    const startOfMonth      = moment().utcOffset(IST).startOf('month').utc().toDate();
-    const startOfLastMonth  = moment().utcOffset(IST).subtract(1, 'months').startOf('month').utc().toDate();
-    const startOfQuarter    = moment().utcOffset(IST).startOf('quarter').utc().toDate();
+    const startOfToday = moment().utcOffset(IST).startOf('day').utc().toDate();
+    const last30Days = moment().utcOffset(IST).subtract(30, 'days').startOf('day').utc().toDate();
+    const prev30Days = moment().utcOffset(IST).subtract(60, 'days').startOf('day').utc().toDate();
+    const startOfWeek = moment().utcOffset(IST).startOf('week').utc().toDate();
+    const startOfLastWeek = moment().utcOffset(IST).subtract(1, 'weeks').startOf('week').utc().toDate();
+    const startOfMonth = moment().utcOffset(IST).startOf('month').utc().toDate();
+    const startOfLastMonth = moment().utcOffset(IST).subtract(1, 'months').startOf('month').utc().toDate();
+    const startOfQuarter = moment().utcOffset(IST).startOf('quarter').utc().toDate();
     const startOfLastQuarter = moment().utcOffset(IST).subtract(1, 'quarters').startOf('quarter').utc().toDate();
 
     let baseMatch = {};
@@ -538,9 +538,9 @@ const getBusinessInsights = async (req, res) => {
     const quarterGrowth =
       lastQuarterCount > 0
         ? (
-            ((quarterCount - lastQuarterCount) / lastQuarterCount) *
-            100
-          ).toFixed(2)
+          ((quarterCount - lastQuarterCount) / lastQuarterCount) *
+          100
+        ).toFixed(2)
         : "0.00";
 
     const weekValueGrowth =
@@ -556,13 +556,13 @@ const getBusinessInsights = async (req, res) => {
     const quarterValueGrowth =
       lastQuarterValue > 0
         ? (
-            ((quarterValue - lastQuarterValue) / lastQuarterValue) *
-            100
-          ).toFixed(2)
+          ((quarterValue - lastQuarterValue) / lastQuarterValue) *
+          100
+        ).toFixed(2)
         : "0.00";
 
     const startOfYesterday = moment().utcOffset(IST).subtract(1, 'days').startOf('day').utc().toDate();
-    const endOfYesterday   = moment().utcOffset(IST).subtract(1, 'days').endOf('day').utc().toDate();
+    const endOfYesterday = moment().utcOffset(IST).subtract(1, 'days').endOf('day').utc().toDate();
 
     const [yesterdayOrders] = await Order.aggregate([
       {
@@ -651,12 +651,12 @@ const getDashboardOverview = async (req, res) => {
     // If not provided, take today's date in IST
     if (!startDate || !endDate) {
       startDate = moment().utcOffset(IST).subtract(29, 'days').startOf('day').utc().toDate();
-      endDate   = moment().utcOffset(IST).endOf('day').utc().toDate();
+      endDate = moment().utcOffset(IST).endOf('day').utc().toDate();
     }
 
     // ✅ Define yesterday range for comparison
     const yesterdayStart = moment(startDate).subtract(1, 'days').toDate();
-    const yesterdayEnd   = moment(endDate).subtract(1, 'days').toDate();
+    const yesterdayEnd = moment(endDate).subtract(1, 'days').toDate();
 
     const userData = await User.findById(userId);
     const isAdminView = userData?.isAdmin && userData?.adminTab;
@@ -854,8 +854,8 @@ const getDashboardOverview = async (req, res) => {
       ...(isAdminView && searchId
         ? { userId: new mongoose.Types.ObjectId(searchId) }
         : !isAdminView
-        ? { userId: new mongoose.Types.ObjectId(userId) }
-        : {}),
+          ? { userId: new mongoose.Types.ObjectId(userId) }
+          : {}),
     };
 
     // Aggregate all NDR first
@@ -1428,8 +1428,8 @@ const getOrderSummary = async (req, res) => {
           (statusMap["Not Picked"] || 0),
         percent: getPercent(
           (statusMap["Ready To Ship"] || 0) +
-            (statusMap["Booked"] || 0) +
-            (statusMap["Not Picked"] || 0)
+          (statusMap["Booked"] || 0) +
+          (statusMap["Not Picked"] || 0)
         ),
       },
 
@@ -1941,7 +1941,7 @@ const getWeightDisputeData = async (req, res) => {
     const userId = req.user._id;
     const searchId = req.query.userId;
 
-    const userData = await User.findById(userId);
+    const userData = await User.findById(userId).select("isAdmin adminTab").lean();
     // Check if admin and has adminTab access
     const isAdminView = userData?.isAdmin && userData?.adminTab;
 
@@ -1949,46 +1949,58 @@ const getWeightDisputeData = async (req, res) => {
     let baseMatch = {};
     if (!isAdminView) {
       // Normal user → only their disputes
-      baseMatch.userId = userId;
+      baseMatch.userId = new mongoose.Types.ObjectId(userId);
     } else if (searchId) {
       // Admin with a selected user → that user's disputes
-      baseMatch.userId = new mongoose.Types.ObjectId(searchId);
+      if (mongoose.Types.ObjectId.isValid(searchId)) {
+        baseMatch.userId = new mongoose.Types.ObjectId(searchId);
+      }
     }
 
-    // Fetch disputes based on filter
-    const allDisputes = await WeightDispute.find(baseMatch)
-      .populate("orderId")
-      .populate("userId")
-      .sort({ createdAt: -1 })
-      .lean();
+    // Ultra-fast aggregation to get only the status counts from the database directly
+    const countsAggregation = await WeightDispute.aggregate([
+      { $match: baseMatch },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+        },
+      },
+    ]);
 
-    if (!allDisputes || allDisputes.length === 0) {
+    let total = 0;
+    // Initializing with both key formats to fix frontend bugs while maintaining backward compatibility
+    const counts = { New: 0, Accepted: 0, "Discrepancy Raised": 0, "DiscrepancyRaised": 0 };
+
+    countsAggregation.forEach(({ _id, count }) => {
+      total += count;
+      const status = _id || "Unknown";
+
+      if (status === "new") {
+        counts.New += count;
+      } else if (status === "Accepted") {
+        counts.Accepted += count;
+      } else if (status === "Discrepancy Raised") {
+        counts["Discrepancy Raised"] += count;
+        counts["DiscrepancyRaised"] += count; // keep both formats
+      }
+    });
+
+    if (total === 0) {
       return res.status(404).json({
         success: false,
         message: "No weight disputes found.",
         data: [],
-        counts: { New: 0, Accepted: 0, "Discrepancy Raised": 0 },
+        counts,
       });
     }
-
-    // Count by status (only New, Accepted, Discrepancy Raised)
-    const counts = allDisputes.reduce(
-      (acc, dispute) => {
-        const status = dispute.status || "Unknown";
-        if (status === "new") acc.New++;
-        else if (status === "Accepted") acc.Accepted++;
-        else if (status === "Discrepancy Raised") acc["DiscrepancyRaised"]++;
-        return acc;
-      },
-      { New: 0, Accepted: 0, DiscrepancyRaised: 0 }
-    );
 
     return res.status(200).json({
       success: true,
       message: "Weight dispute data retrieved successfully.",
-      total: allDisputes.length,
+      total,
       counts,
-      data: allDisputes,
+      data: [], // Removed massive array response to eliminate network payload bloat
     });
   } catch (error) {
     console.error("Error fetching weight dispute data:", error);

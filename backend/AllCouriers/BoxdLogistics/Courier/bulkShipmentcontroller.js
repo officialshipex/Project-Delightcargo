@@ -104,12 +104,14 @@ const createOrderBoxdLogistics = async (
 
         await currentOrder.save();
 
-        // ── Auto-assign pickup manifest ──
-        try {
-            await assignPickupManifest(currentOrder);
-        } catch (pErr) {
-            console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-        }
+        // ── Auto-assign pickup manifest (non-blocking) ──
+        Order.findById(currentOrder._id)
+            .then((freshOrder) => {
+                if (freshOrder) assignPickupManifest(freshOrder);
+            })
+            .catch((pErr) => {
+                console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+            });
 
         // Deduct wallet
         await Wallet.findOneAndUpdate(

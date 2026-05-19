@@ -92,4 +92,61 @@ const generateToken = async (req, res) => {
   }
 };
 
-module.exports = generateToken;
+const generateTokenWithoutPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    if (!validateEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email format",
+      });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const payload = {
+      user: {
+        id: user._id,
+        email: user.email,
+        fullname: user.fullname,
+        kyc: user.kycDone,
+        isAdmin: user.isAdmin,
+        isEmployee: false,
+      },
+    };
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, {
+      expiresIn: "1d",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Token generated successfully without password",
+      data: {
+        token,
+      },
+    });
+  } catch (error) {
+    console.error("Token generation error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+module.exports = { generateToken, generateTokenWithoutPassword };

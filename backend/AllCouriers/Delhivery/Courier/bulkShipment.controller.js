@@ -26,30 +26,39 @@ const createShipmentFunctionDelhivery = async (
 
   try {
     const currentOrder = await Order.findById(id);
-    
+
     // Fetch API Key for the specific account
     const apiKey = await getDelhiveryApiKey(selectedServiceDetails.courier || selectedServiceDetails.provider);
 
-    const warehouseCreationResult = await createClientWarehouse(
-      currentOrder.pickupAddress,
-      apiKey
-    );
+    // Parallelize fetch bulk waybills, getZone and createClientWarehouse
+    const [warehouseCreationResult, zone, waybills] = await Promise.all([
+      createClientWarehouse(currentOrder.pickupAddress, apiKey),
+      getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode),
+      fetchBulkWaybills(1, apiKey),
+    ]);
 
-    // if (currentOrder.status !== "new") {
-    //   return {
-    //     status: 400,
-    //     success: false,
-    //     message: `Shipment cannot be created because order status is '${currentOrder.status}'.`,
-    //   };
-    // }
-
-    const zone = await getZone(
-      currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode
-      // res
-    );
     if (!zone) {
-      return res.status(400).json({ message: "Pincode not serviceable" });
+      return {
+        status: 400,
+        success: false,
+        message: "Pincode not serviceable",
+      };
+    }
+
+    if (!waybills || !waybills.length) {
+      return {
+        status: 400,
+        success: false,
+        message: "No Waybill Available",
+      };
+    }
+
+    if (!warehouseCreationResult || !warehouseCreationResult.success) {
+      return {
+        status: 400,
+        success: false,
+        message: "Failed to create or fetch pickup warehouse",
+      };
     }
 
     const eddData = await estimatedDeliveryDate.findOne({
@@ -75,8 +84,6 @@ const createShipmentFunctionDelhivery = async (
         estimateDate.setDate(estimateDate.getDate() + deliveryDays);
       }
     }
-
-    const waybills = await fetchBulkWaybills(1, apiKey);
 
     const payment_type =
       currentOrder.paymentDetails.method === "COD" ? "COD" : "Prepaid";

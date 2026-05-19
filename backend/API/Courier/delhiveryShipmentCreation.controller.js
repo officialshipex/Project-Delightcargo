@@ -65,33 +65,32 @@ const createDelhiveryShipment = async ({
     // Fetch API Key for the specific account
     const apiKey = await getDelhiveryApiKey(courierName || provider);
 
-    // Step 3️⃣ Fetch waybills & zone in parallel
-    const [waybills, zone] = await Promise.all([
+    // Step 3️⃣ Get waybills, zone & create warehouse in parallel
+    const [waybills, zone, warehouseCreationResult] = await Promise.all([
       fetchBulkWaybills(1, apiKey),
       getZone(
         currentOrder.pickupAddress.pinCode,
         currentOrder.receiverAddress.pinCode
       ),
+      createClientWarehouse(
+        currentOrder.pickupAddress,
+        apiKey
+      ),
     ]);
 
-    if (!waybills.length || !zone) {
+    if (!waybills || !waybills.length || !zone) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return {
         success: false,
-        message: !waybills.length
+        message: (!waybills || !waybills.length)
           ? "No Waybill Available"
           : "Pincode not serviceable",
       };
     }
 
-    // Step 4️⃣ Create warehouse
-    const warehouseCreationResult = await createClientWarehouse(
-      currentOrder.pickupAddress,
-      apiKey
-    );
-    if (!warehouseCreationResult.success) {
+    if (!warehouseCreationResult || !warehouseCreationResult.success) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
@@ -264,13 +263,14 @@ const createDelhiveryShipment = async ({
     await session.commitTransaction();
     session.endSession();
 
-    // ── Auto-assign pickup manifest ──
-    try {
-      const freshOrder = await Order.findById(id);
-      if (freshOrder) await assignPickupManifest(freshOrder);
-    } catch (pErr) {
-      console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-    }
+    // ── Auto-assign pickup manifest (non-blocking) ──
+    Order.findById(id)
+      .then((freshOrder) => {
+        if (freshOrder) assignPickupManifest(freshOrder);
+      })
+      .catch((pErr) => {
+        console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+      });
 
     return {
       success: true,

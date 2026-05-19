@@ -101,7 +101,9 @@ const createBoxdLogisticsShipment = async ({
             let courierId = parseInt(courier);
             if (!courierId) {
                 const sName = courierServiceName.toLowerCase();
-                if (sName.includes("flat")) {
+                if (sName.includes("flat 0.5kg") || sName.includes("flat 0.5")) {
+                    courierId = 47;
+                } else if (sName.includes("flat 2kg")) {
                     courierId = 7;
                 } else if (sName.includes("air")) {
                     courierId = 6;
@@ -193,13 +195,14 @@ const createBoxdLogisticsShipment = async ({
         await session.commitTransaction();
         session.endSession();
 
-        // ── Auto-assign pickup manifest ──
-        try {
-            const freshOrder = await Order.findById(currentOrder._id);
-            if (freshOrder) await assignPickupManifest(freshOrder);
-        } catch (pErr) {
-            console.error("[Pickup] assignPickupManifest failed:", pErr.message);
-        }
+        // ── Auto-assign pickup manifest (non-blocking) ──
+        Order.findById(currentOrder._id)
+            .then((freshOrder) => {
+                if (freshOrder) assignPickupManifest(freshOrder);
+            })
+            .catch((pErr) => {
+                console.error("[Pickup] assignPickupManifest failed:", pErr.message);
+            });
 
         return {
             success: true,

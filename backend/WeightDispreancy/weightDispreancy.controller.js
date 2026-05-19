@@ -293,16 +293,11 @@ const AllDiscrepancy = async (req, res) => {
       },
     ]);
 
-    // Optional: also return full data if needed
-    const allDiscrepancies = await WeightDiscrepancy.find({}, null, {
-      lean: true,
-    });
-
     res.status(200).json({
       success: true,
       data: {
         statusCounts, // e.g., [{ status: "Resolved", count: 4 }, ...]
-        discrepancies: allDiscrepancies,
+        discrepancies: [], // Removed massive global fetch, frontend paginated tables handle data independently
       },
     });
   } catch (error) {
