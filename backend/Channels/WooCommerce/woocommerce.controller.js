@@ -375,12 +375,12 @@ const getWooCommerceProductDetails = async (
 // Stores with shipment plugins may also accept: shipped, in-transit, out-for-delivery, etc.
 const shipexToWooStatus = (shipexStatus) => {
   const map = {
-    "Booked":           "wc-shipped",
-    "Ready To Ship":    "wc-ready-to-ship",
-    "Pickup Completed": "wc-in-transit",
-    "In-transit":       "wc-in-transit",
-    "Out for Delivery": "wc-out-for-delivery",
-    "Delivered":        "wc-delivered",
+    "Booked":           "ready-to-ship",
+    "Ready To Ship":    "ready-to-ship",
+    "Pickup Completed": "in-transit",
+    "In-transit":       "in-transit",
+    "Out for Delivery": "out-for-delivery",
+    "Delivered":        "delivered",
     "Cancelled":        "cancelled",
     "RTO":              "refunded",
     "RTO In-transit":   "refunded",
