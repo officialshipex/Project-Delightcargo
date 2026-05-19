@@ -13,6 +13,7 @@ const {
   fetchBulkWaybills,
   getDelhiveryApiKey,
 } = require("../../AllCouriers/Delhivery/Authorize/saveCourierContoller");
+const { getWaybill } = require("../../AllCouriers/Delhivery/Authorize/waybillPool");
 const url = process.env.DELHIVERY_URL;
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
@@ -65,9 +66,9 @@ const createDelhiveryShipment = async ({
     // Fetch API Key for the specific account
     const apiKey = await getDelhiveryApiKey(courierName || provider);
 
-    // Step 3️⃣ Get waybills, zone & create warehouse in parallel
+    // Step 3️⃣ Get waybills (from pool cache), zone & create warehouse in parallel
     const [waybills, zone, warehouseCreationResult] = await Promise.all([
-      fetchBulkWaybills(1, apiKey),
+      getWaybill(apiKey),
       getZone(
         currentOrder.pickupAddress.pinCode,
         currentOrder.receiverAddress.pinCode

@@ -30,10 +30,14 @@ const ZONE_E_STATES = [
 ];
 
 let pinCodeData = {};
-const getpinCodeData = async () => {
-  const csvFilePath = path.join(__dirname, "../data/pincodes.csv");
+let isPinCodeDataLoading = null;
 
-  return new Promise((resolve, reject) => {
+const getpinCodeData = async () => {
+  if (Object.keys(pinCodeData).length > 0) return;
+  if (isPinCodeDataLoading) return isPinCodeDataLoading;
+
+  isPinCodeDataLoading = new Promise((resolve, reject) => {
+    const csvFilePath = path.join(__dirname, "../data/pincodes.csv");
     fs.createReadStream(csvFilePath)
       .pipe(csvParser({ separator: "\t" })) // ✅ set tab as separator
       .on("data", (row) => {
@@ -43,8 +47,6 @@ const getpinCodeData = async () => {
             city: row.city.trim(),
             state: row.state.trim(),
           };
-        } else {
-          console.log("Invalid CSV row:", row);
         }
       })
       .on("end", () => {
@@ -56,6 +58,8 @@ const getpinCodeData = async () => {
         reject(error);
       });
   });
+
+  return isPinCodeDataLoading;
 };
 
 const getPinCodeDetails = async (pincode) => {

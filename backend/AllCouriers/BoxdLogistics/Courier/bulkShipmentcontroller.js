@@ -19,10 +19,20 @@ const createOrderBoxdLogistics = async (
         const currentOrder = await Order.findById(orderId);
         if (!currentOrder) return { success: false, message: "Order not found" };
 
-        const user = await User.findById(currentOrder.userId);
-        if (!user) return { success: false, message: "User not found" };
+        const { createBoxdWarehouse } = require("./couriers.controller");
 
-        const currentWallet = await Wallet.findById(walletId);
+        // Parallelize DB fetches, zone checks, and warehouse creation
+        const [user, currentWallet, zone, warehouseId] = await Promise.all([
+            User.findById(currentOrder.userId),
+            Wallet.findById(walletId),
+            getZone(
+                currentOrder.pickupAddress.pinCode,
+                currentOrder.receiverAddress.pinCode
+            ),
+            createBoxdWarehouse(currentOrder.userId, currentOrder.pickupAddress)
+        ]);
+
+        if (!user) return { success: false, message: "User not found" };
         if (!currentWallet) return { success: false, message: "Wallet not found" };
 
         // Wallet balance check
@@ -31,16 +41,12 @@ const createOrderBoxdLogistics = async (
         if (balance < charges) return { success: false, message: "Insufficient Wallet Balance" };
 
         // Zone check
-        const zone = await getZone(
-            currentOrder.pickupAddress.pinCode,
-            currentOrder.receiverAddress.pinCode
-        );
         if (!zone) return { success: false, message: "Pincode not serviceable" };
 
         // Step 1: Create order on BoxdLogistics portal
         let createRes;
         try {
-            createRes = await createBoxdOrder(currentOrder, serviceDetails.name);
+            createRes = await createBoxdOrder(currentOrder, serviceDetails.name, warehouseId);
             console.log("BoxdLogistics bulk create response:", createRes);
         } catch (err) {
             console.error("❌ BoxdLogistics bulk create failed:", err.response?.data || err.message);

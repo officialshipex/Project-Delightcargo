@@ -45,7 +45,15 @@ const getToken = async (req, res) => {
 
 
 
+let cachedAmazonToken = null;
+let amazonTokenExpiresAt = 0;
+
 const getAmazonAccessToken = async () => {
+  const now = Date.now();
+  if (cachedAmazonToken && now < amazonTokenExpiresAt) {
+    return cachedAmazonToken;
+  }
+
   try {
     // console.log("refresh token",process.env.SPAPI_REFRESH_TOKEN);
     // console.log("clientId",process.env.SPAPI_CLIENT_ID)
@@ -56,6 +64,13 @@ const getAmazonAccessToken = async () => {
       client_id: process.env.SPAPI_CLIENT_ID,
       client_secret: process.env.SPAPI_CLIENT_SECRET,
     });
+
+    if (response.data?.access_token) {
+      cachedAmazonToken = response.data.access_token;
+      const expiresIn = response.data.expires_in || 3600;
+      amazonTokenExpiresAt = now + (expiresIn - 300) * 1000; // cache for expires_in minus 5 minutes safety buffer
+      return cachedAmazonToken;
+    }
 
     // console.log("✅ Amazon SP-API Access Token:", response.data.access_token);
     return response.data.access_token;

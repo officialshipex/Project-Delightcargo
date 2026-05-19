@@ -4,6 +4,9 @@ const AllCourier = require("../../../models/AllCourierSchema");
 const USERNAME = process.env.EKART_USERNAME;
 const PASSWORD = process.env.EKART_PASSWORD;
 const EKART_CLIENT_ID = process.env.EKART_CLIENT_ID;
+// Map<clientId, { token, expiresAt }>
+const ekartTokenCache = new Map();
+
 const getAccessToken = async (courierName) => {
   try {
     let courier;
@@ -31,11 +34,27 @@ const getAccessToken = async (courierName) => {
       return null;
     }
 
+    const now = Date.now();
+    const cached = ekartTokenCache.get(clientId);
+    if (cached && now < cached.expiresAt) {
+      return cached.token;
+    }
+
     const response = await axios.post(
       `https://app.elite.ekartlogistics.in/integrations/v2/auth/token/${clientId}`,
       { username, password },
       { headers: { "Content-Type": "application/json" } }
     );
+
+    if (response.data?.access_token) {
+      // Ekart tokens usually last 24 hours. Cache for 12 hours to be safe.
+      ekartTokenCache.set(clientId, {
+        token: response.data.access_token,
+        expiresAt: now + 12 * 60 * 60 * 1000,
+      });
+      return response.data.access_token;
+    }
+
     return response.data.access_token;
   } catch (error) {
     console.error("Token Error:", error.response?.data || error.message);

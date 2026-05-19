@@ -10,7 +10,6 @@ const createDTDCShipment = require("../Courier/dtdcShipmentCreation.controller")
 const createSmartshipShipment = require("../Courier/smartshipShipmentCreation.controller");
 const CourierService = require("../../models/CourierService.Schema");
 const User = require("../../models/User.model");
-const mongoose = require("mongoose");
 const createShreeMarutiShipment = require("../Courier/shreeMarutiShipmentCreation.controller");
 const createZipypostShipment = require("../Courier/zipyPostShipmentCreation.controller");
 const createEkartShipment = require("../Courier/ekartShipmentCreation.controller");
@@ -51,7 +50,6 @@ const orderSchema = Joi.object({
 
 const bookOrder = async (req, res) => {
   const userId = req.user._id;
-  // console.log("Booking order for user:", userId);
 
   // ✅ Validate request body
   const { error, value } = orderSchema.validate(req.body, {
@@ -67,10 +65,14 @@ const bookOrder = async (req, res) => {
 
   const { orderId, courierServiceName, courierId } = value;
   const provider = providerMap[courierId] || null;
-  // console.log("value", value, provider);
+
   try {
-    // ✅ Fetch order
-    const order = await Order.findOne({ orderId });
+    // ✅ Fetch order, user in parallel (fast DB reads)
+    const [order, user] = await Promise.all([
+      Order.findOne({ orderId }),
+      User.findById(userId),
+    ]);
+
     if (!order) {
       return res.status(404).json({
         status: "failure",
@@ -85,8 +87,6 @@ const bookOrder = async (req, res) => {
       });
     }
 
-    // ✅ Fetch user
-    const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
         status: "failure",
@@ -102,12 +102,40 @@ const bookOrder = async (req, res) => {
       });
     }
 
-    // ✅ Fetch wallet
-    const wallet = await Wallet.findById(user.Wallet);
+    // ✅ Fetch wallet + courier service in parallel
+    const [wallet, courierService] = await Promise.all([
+      Wallet.findById(user.Wallet),
+      CourierService.findOne({
+        name: { $regex: `^\\s*${courierServiceName.trim()}\\s*$`, $options: "i" },
+        provider,
+      }),
+    ]);
+
     if (!wallet) {
       return res.status(404).json({
         status: "failure",
         message: "Wallet not found for user.",
+      });
+    }
+
+    if (!provider) {
+      return res.status(400).json({
+        status: "failure",
+        message: `Courier ID '${courierId}' is invalid or not supported.`,
+      });
+    }
+
+    if (!courierService) {
+      return res.status(400).json({
+        status: "failure",
+        message: `Courier service '${courierServiceName}' and courier ID '${courierId}' mismatch or not supported.`,
+      });
+    }
+
+    if (courierService.status === "Disable") {
+      return res.status(400).json({
+        status: "failure",
+        message: `Courier service '${courierServiceName}' is currently disabled.`,
       });
     }
 
@@ -124,10 +152,10 @@ const bookOrder = async (req, res) => {
       userID: userId,
     };
 
-    // ✅ Calculate rates
+    // ✅ Calculate rates (pure DB math — no external API calls)
     const finalChargesArray = await calculateRateForService(payload);
-    // console.log("final", finalChargesArray);
-    // ✅ Validate courier service
+
+    // ✅ Validate courier service rate
     const matchedChargeObj = finalChargesArray.find(
       (item) =>
         item.courierServiceName.toLowerCase().trim() ===
@@ -140,9 +168,6 @@ const bookOrder = async (req, res) => {
         message: `Courier service '${courierServiceName}' is invalid or not supported.`,
       });
     }
-    // else{
-    //   return res.status(200).json({status:"success",message:"courier service fetched"})
-    // }
 
     const finalCharges = matchedChargeObj.forward?.finalCharges || null;
     if (!finalCharges) {
@@ -157,7 +182,7 @@ const bookOrder = async (req, res) => {
       cod: matchedChargeObj?.cod,
       gst: matchedChargeObj?.forward?.gst,
       total: matchedChargeObj?.forward?.finalCharges,
-    }
+    };
 
     // ✅ Check wallet balance
     const walletHoldAmount = wallet.holdAmount || 0;
@@ -171,34 +196,6 @@ const bookOrder = async (req, res) => {
       });
     }
 
-    // ✅ Fetch courier service (for DTDC etc.)
-    const courierService = await CourierService.findOne({
-      name: { $regex: `^\\s*${courierServiceName.trim()}\\s*$`, $options: "i" },
-      provider,
-    });
-
-    // console.log("courier", courierService);
-    if (!courierService) {
-      return res.status(400).json({
-        status: "failure",
-        message: `Courier service '${courierServiceName}' and courier ID '${courierId}' mismatch or not supported.`,
-      });
-    }
-
-    if (courierService.status === "Disable") {
-      return res.status(400).json({
-        status: "failure",
-        message: `Courier service '${courierServiceName}' and courier ID '${courierId}' mismatch or not supported.`,
-      });
-    }
-
-    if (!provider) {
-      return res.status(400).json({
-        status: "failure",
-        message: `Courier ID '${courierId}' is invalid or not supported.`,
-      });
-    }
-
     // ✅ Create shipment by provider
     let shipmentResult;
     switch (provider) {
@@ -208,7 +205,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
-          priceBreakup
+          priceBreakup,
         });
         break;
       case "Delhivery":
@@ -218,7 +215,7 @@ const bookOrder = async (req, res) => {
           courierName: courierService.courierName || "Delhivery",
           finalCharges,
           courierServiceName,
-          priceBreakup
+          priceBreakup,
         });
         break;
       case "Dtdc":
@@ -228,7 +225,7 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           courier: courierService?.courier,
-          priceBreakup
+          priceBreakup,
         });
         break;
       case "Smartship":
@@ -237,7 +234,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
-          priceBreakup
+          priceBreakup,
         });
         break;
       case "Shree Maruti":
@@ -246,7 +243,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
-          priceBreakup
+          priceBreakup,
         });
         break;
       case "ZipyPost":
@@ -255,7 +252,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
-          priceBreakup
+          priceBreakup,
         });
         break;
       case "Ekart":
@@ -264,7 +261,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
-          priceBreakup
+          priceBreakup,
         });
         break;
       case "BoxdLogistics":
@@ -274,7 +271,7 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           courier: courierService?.courier,
-          priceBreakup
+          priceBreakup,
         });
         break;
       case "Proship":
@@ -283,7 +280,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
-          priceBreakup
+          priceBreakup,
         });
         break;
 
@@ -293,7 +290,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
-          priceBreakup
+          priceBreakup,
         });
         break;
 
@@ -303,7 +300,7 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
-          priceBreakup
+          priceBreakup,
         });
         break;
 

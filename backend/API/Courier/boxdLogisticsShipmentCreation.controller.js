@@ -6,6 +6,7 @@ const { getZone } = require("../../Rate/zoneManagementController");
 const {
     createBoxdOrder,
     shipBoxdOrder,
+    createBoxdWarehouse,
 } = require("../../AllCouriers/BoxdLogistics/Courier/couriers.controller");
 const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
@@ -35,8 +36,16 @@ const createBoxdLogisticsShipment = async ({
             };
         }
 
-        // Step 2: Fetch user + wallet
-        const user = await User.findById(currentOrder.userId).session(session);
+        // Step 2: Fetch user, zone, and warehouse ID in parallel
+        const [user, zone, warehouseId] = await Promise.all([
+            User.findById(currentOrder.userId).session(session),
+            getZone(
+                currentOrder.pickupAddress.pinCode,
+                currentOrder.receiverAddress.pinCode
+            ),
+            createBoxdWarehouse(currentOrder.userId, currentOrder.pickupAddress)
+        ]);
+
         if (!user) throw new Error("User not found");
         if (!user.Wallet) throw new Error("User wallet not found");
 
@@ -50,16 +59,12 @@ const createBoxdLogisticsShipment = async ({
         if (balance < finalCharges) throw new Error("Insufficient wallet balance");
 
         // Step 4: Zone check
-        const zone = await getZone(
-            currentOrder.pickupAddress.pinCode,
-            currentOrder.receiverAddress.pinCode
-        );
         if (!zone) throw new Error("Pincode not serviceable");
 
         // Step 5: Create order on BoxdLogistics portal
         let createRes;
         try {
-            createRes = await createBoxdOrder(currentOrder, courierServiceName);
+            createRes = await createBoxdOrder(currentOrder, courierServiceName, warehouseId);
             console.log("BoxdLogistics API create response:", createRes);
         } catch (err) {
             await Order.updateOne(

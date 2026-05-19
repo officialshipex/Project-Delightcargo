@@ -5,7 +5,15 @@ const USERNAME = process.env.SMARTSHIP_USERNAME;
 const PASSWORD = process.env.SMARTSHIP_PASSWORD;
 const SMARTSHIP_CLIENT_ID = process.env.SMARTSHIP_CLIENT_ID;
 const SMARTSHIP_CLIENT_SECRET = process.env.SMARTSHIP_CLIENT_SECRET;
+let cachedSmartshipToken = null;
+let smartshipTokenExpiresAt = 0;
+
 const getAccessToken = async () => {
+  const now = Date.now();
+  if (cachedSmartshipToken && now < smartshipTokenExpiresAt) {
+    return cachedSmartshipToken;
+  }
+
   const credentials = {
     username: USERNAME,
     password: PASSWORD, 
@@ -23,6 +31,14 @@ const getAccessToken = async () => {
         headers: { "Content-Type": "application/json" },
       }
     );
+    
+    if (response.data?.access_token) {
+      cachedSmartshipToken = response.data.access_token;
+      // Smartship token usually lasts for 24 hours. Cache for 12 hours.
+      smartshipTokenExpiresAt = now + 12 * 60 * 60 * 1000;
+      return cachedSmartshipToken;
+    }
+
     // console.log("Access Token:", response.data.access_token);
     return response.data.access_token;
   } catch (error) {

@@ -3,6 +3,7 @@ if (process.env.NODE_ENV != "production") {
 }
 const axios = require("axios");
 const { fetchBulkWaybills, getDelhiveryApiKey } = require("../Authorize/saveCourierContoller");
+const { getWaybill } = require("../Authorize/waybillPool");
 const url = process.env.DELHIVERY_URL;
 const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
@@ -201,9 +202,9 @@ const createOrder = async (req, res) => {
     // Fetch API key for the specific account
     const apiKey = await getDelhiveryApiKey(internalCourierName);
 
-    // Step 3️⃣ Get waybills, zone & create warehouse in parallel
+    // Step 3️⃣ Get waybills (from pool cache), zone & create warehouse in parallel
     const [waybills, zone, warehouseCreationResult] = await Promise.all([
-      fetchBulkWaybills(1, apiKey),
+      getWaybill(apiKey),
       getZone(
         currentOrder.pickupAddress.pinCode,
         currentOrder.receiverAddress.pinCode,

@@ -3,6 +3,7 @@ if (process.env.NODE_ENV != "production") {
 }
 const axios = require("axios");
 const { fetchBulkWaybills, getDelhiveryApiKey } = require("../Authorize/saveCourierContoller");
+const { getWaybill } = require("../Authorize/waybillPool");
 const url = process.env.DELHIVERY_URL;
 const Order = require("../../../models/newOrder.model");
 const crypto = require("crypto");
@@ -30,11 +31,11 @@ const createShipmentFunctionDelhivery = async (
     // Fetch API Key for the specific account
     const apiKey = await getDelhiveryApiKey(selectedServiceDetails.courier || selectedServiceDetails.provider);
 
-    // Parallelize fetch bulk waybills, getZone and createClientWarehouse
+    // Parallelize getWaybill, getZone and createClientWarehouse
     const [warehouseCreationResult, zone, waybills] = await Promise.all([
       createClientWarehouse(currentOrder.pickupAddress, apiKey),
       getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode),
-      fetchBulkWaybills(1, apiKey),
+      getWaybill(apiKey),
     ]);
 
     if (!zone) {

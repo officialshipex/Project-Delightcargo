@@ -86,7 +86,7 @@ const createBoxdWarehouse = async (userId, pickup) => {
         return null;
     }
 };
-const createBoxdOrder = async (currentOrder, courierServiceName) => {
+const createBoxdOrder = async (currentOrder, courierServiceName, preResolvedWarehouseId) => {
     const isCOD = currentOrder.paymentDetails?.method === "COD";
     const codAmount = isCOD ? (currentOrder.paymentDetails?.amount || 0) : 0;
 
@@ -121,7 +121,7 @@ const createBoxdOrder = async (currentOrder, courierServiceName) => {
             parseInt(currentOrder.receiverAddress.phoneNumber?.replace(/\D/g, "")) || null,
         customer_isd_code: "+91",
         customer_gst_number: null,
-        warehouse_id: parseInt(await createBoxdWarehouse(currentOrder.userId, currentOrder.pickupAddress)) || 1,
+        warehouse_id: preResolvedWarehouseId ? parseInt(preResolvedWarehouseId) : (parseInt(await createBoxdWarehouse(currentOrder.userId, currentOrder.pickupAddress)) || 1),
         // Shipping (receiver)
         shipping_name: currentOrder.receiverAddress.contactName?.trim() || "",
         shipping_email: currentOrder.receiverAddress.email || null,
@@ -582,4 +582,5 @@ module.exports = {
     trackOrderBoxdLogistics,
     createBoxdOrder,
     shipBoxdOrder,
+    createBoxdWarehouse,
 };
