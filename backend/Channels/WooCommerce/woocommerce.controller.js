@@ -3,6 +3,18 @@ const Order = require("../../models/newOrder.model");
 const AllChannel = require("../allChannel.model");
 const PickupAddress = require("../../models/pickupAddress.model");
 
+// Helper to extract HSN code from WooCommerce metadata
+const extractHSN = (metaDataArray) => {
+  if (!Array.isArray(metaDataArray)) return null;
+  const hsnKeys = ["hsn_code", "hsn", "_hsn_code", "_hsn", "gst_hsn_code", "hs_code"];
+  for (const item of metaDataArray) {
+    if (item && item.key && hsnKeys.includes(item.key.toLowerCase())) {
+      return String(item.value || "").trim();
+    }
+  }
+  return null;
+};
+
 // const storeURL = "https://www.mahadevrediments.in/";
 // const consumerKey = "ck_167c49505d20d4ec91bc4bb73459df2c4e7fc489";
 // const consumerSecret = "cs_e479f1773fc3fc267c0ca01ce1845405d8c5ff66";
@@ -94,7 +106,7 @@ const createWooCommerceWebhook = async (
       (webhook) =>
         webhook.topic.includes("order") &&
         webhook.delivery_url ===
-          "https://api.shipexindia.com/v1/channel/webhook/woocommerce"
+        "https://api.shipexindia.com/v1/channel/webhook/woocommerce"
     );
 
     if (existingWebhook) {
@@ -199,9 +211,12 @@ const wooCommerceWebhookHandler = async (req, res) => {
 
         // Calculate inclusive unit price (using subtotal to get the original price before discounts)
         const unitPriceInclTax = (subtotal + subtotalTax) / qty;
-        
+
         // Calculate discount per unit (if any)
         const discountInclTax = (subtotal + subtotalTax - total - totalTax) / qty;
+
+        // Check line_item meta_data first, fallback to fetched product meta_data
+        const itemHsn = extractHSN(item.meta_data) || productInfo.hsn || "";
 
         const productRow = {
           id: item.product_id,
@@ -211,6 +226,7 @@ const wooCommerceWebhookHandler = async (req, res) => {
           discount: discountInclTax > 0 ? discountInclTax.toFixed(2) : "0",
           sku: item.sku,
           tax: String(totalTax),
+          hsn: itemHsn,
         };
 
         console.log(`Synced Product: ${item.name} | UnitPrice(Incl.Tax): ${productRow.unitPrice} | Discount: ${productRow.discount}`);
@@ -233,9 +249,9 @@ const wooCommerceWebhookHandler = async (req, res) => {
     };
 
     // Fetch primary pickup address for this user
-    const primaryPickup = await PickupAddress.findOne({ 
-      userId: store.userId, 
-      isPrimary: true 
+    const primaryPickup = await PickupAddress.findOne({
+      userId: store.userId,
+      isPrimary: true
     }).lean();
 
     // Prepare order payload
@@ -343,6 +359,7 @@ const getWooCommerceProductDetails = async (
       height: parseFloat(dimensions.height) || 10,
       sku: product.sku || null, // Optional extra
       price: product.price ? parseFloat(product.price) : null, // Optional extra
+      hsn: extractHSN(product.meta_data),
     };
   } catch (error) {
     console.error(
@@ -358,18 +375,18 @@ const getWooCommerceProductDetails = async (
 // Stores with shipment plugins may also accept: shipped, in-transit, out-for-delivery, etc.
 const shipexToWooStatus = (shipexStatus) => {
   const map = {
-    "Booked":           "wc-ready-to-ship", // maps to "Ready To Ship"
-    "Ready To Ship":    "wc-ready-to-ship", // maps to "Ready To Ship"
-    "Pickup Completed": "wc-in-transit",    // maps to "In Transit"
-    "In-transit":       "wc-in-transit",    // maps to "In Transit"
-    "Out for Delivery": "wc-out-for-delivery", // maps to "Out for Delivery"
-    "Delivered":        "wc-delivered",     // maps to "Delivered"
-    "Cancelled":        "cancelled",        // standard WooCommerce cancelled status
-    "RTO":              "refunded",         // standard WooCommerce refunded status
-    "RTO In-transit":   "refunded",         // standard WooCommerce refunded status
-    "RTO Delivered":    "refunded",         // standard WooCommerce refunded status
-    "Undelivered":      "on-hold",          // standard WooCommerce on-hold status
-    "Lost":             "on-hold",          // standard WooCommerce on-hold status
+    "Booked": "shipped",
+    "Ready To Ship": "ready-to-ship",
+    "Pickup Completed": "in-transit",
+    "In-transit": "in-transit",
+    "Out for Delivery": "out-for-delivery",
+    "Delivered": "delivered",
+    "Cancelled": "cancelled",
+    "RTO": "refunded",
+    "RTO In-transit": "refunded",
+    "RTO Delivered": "refunded",
+    "Undelivered": "on-hold",
+    "Lost": "on-hold",
   };
   return map[shipexStatus] || null; // null = don't update WC status for unknown statuses
 };
@@ -383,8 +400,8 @@ const markWooOrderAsShipped = async (
 ) => {
   try {
     const baseUrl = storeUrl.replace(/\/$/, "");
-    const store = await AllChannel.findOne({ 
-      storeURL: { $regex: storeUrl.replace(/\/$/, ""), $options: "i" } 
+    const store = await AllChannel.findOne({
+      storeURL: { $regex: storeUrl.replace(/\/$/, ""), $options: "i" }
     });
 
     if (!store) {
@@ -394,10 +411,10 @@ const markWooOrderAsShipped = async (
 
     // 3. Resolve channelId (WC's internal ID) if our internal 6-digit ID was provided
     let wcOrderId = orderId;
-    const dbOrder = await Order.findOne({ 
-      $or: [{ orderId: orderId }, { channelId: orderId }] 
+    const dbOrder = await Order.findOne({
+      $or: [{ orderId: orderId }, { channelId: orderId }]
     });
-    
+
     if (dbOrder && dbOrder.channel !== "WooCommerce") {
       console.error(`❌ Order ${orderId} is a ${dbOrder.channel} order, not a WooCommerce order. Fulfillment skipped.`);
       return;
@@ -438,7 +455,7 @@ const markWooOrderAsShipped = async (
       try {
         await axios.put(
           `${baseUrl}/wp-json/wc/v3/orders/${wcOrderId}`,
-          { 
+          {
             status: wcStatus,
             customer_note: newNote,
           },
@@ -517,8 +534,8 @@ const markWooOrderAsShipped = async (
 
 // markWooOrderAsShipped("https://shop.teamworkarts.com/","576643","QPSP0000000209","Ekart")
 
-module.exports = { 
-  markWooOrderAsShipped, 
-  wooCommerceWebhookHandler, 
-  createWooCommerceWebhook 
+module.exports = {
+  markWooOrderAsShipped,
+  wooCommerceWebhookHandler,
+  createWooCommerceWebhook
 };
