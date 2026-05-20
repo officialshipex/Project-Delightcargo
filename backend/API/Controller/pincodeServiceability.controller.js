@@ -271,7 +271,44 @@ const pincodeServiceability = async (req, res) => {
     );
 
     const ans = [];
+    const uniqueChecks = [];
+    const checkKeys = new Set();
+
+    for (let rc of rateCards) {
+      if (rc.status !== "Active") continue;
+      const provider = rc.courierProviderName;
+      const providerCheck = providers.find((p) => p.name.toLowerCase() === provider.toLowerCase());
+      if (!providerCheck) continue;
+
+      const serviceKey = `${provider}_${rc.courierServiceName}`;
+      if (!checkKeys.has(serviceKey)) {
+        checkKeys.add(serviceKey);
+        uniqueChecks.push({
+          provider,
+          serviceName: rc.courierServiceName,
+          serviceKey,
+          checkFn: providerCheck.check,
+        });
+      }
+    }
+
+    // Execute all serviceability checks in parallel
+    const checkResults = await Promise.all(
+      uniqueChecks.map(async (item) => {
+        try {
+          const result = await item.checkFn(item.serviceName);
+          return { serviceKey: item.serviceKey, result };
+        } catch (err) {
+          console.error(`Serviceability check failed for ${item.serviceKey}:`, err);
+          return { serviceKey: item.serviceKey, result: { success: false, error: err.message } };
+        }
+      })
+    );
+
     const serviceabilityCache = {};
+    for (const item of checkResults) {
+      serviceabilityCache[item.serviceKey] = item.result;
+    }
 
     // ✅ Step 5: Iterate through user’s rateCards
     for (let rc of rateCards) {
@@ -281,9 +318,6 @@ const pincodeServiceability = async (req, res) => {
       if (!providerCheck) continue;
 
       const serviceKey = `${provider}_${rc.courierServiceName}`;
-      if (!serviceabilityCache[serviceKey]) {
-        serviceabilityCache[serviceKey] = await providerCheck.check(rc.courierServiceName);
-      }
       const serviceable = serviceabilityCache[serviceKey];
       // console.log("serviceable",serviceable)
       // console.log(`Serviceability for ${provider}:`, serviceable);
@@ -349,7 +383,7 @@ const pincodeServiceability = async (req, res) => {
       ans.push({
         courierServiceName: rc.courierServiceName,
         courierId: courierIds[provider],
-        codCharges: cod,
+        codCharges: Number(cod.toFixed(2)),
         forward: {
           charges: Number(finalCharge.toFixed(2)),
           gst: Number(gstAmount),

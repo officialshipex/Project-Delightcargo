@@ -120,55 +120,75 @@ const availableCourierService = async (req, res) => {
       rateCardDocs.map((doc) => [doc._id.toString(), doc.isFlatRate === true])
     );
 
+    // Collect unique active providers
+    const activeProviders = new Set();
+    for (let rc of rateCards) {
+      if (rc.status !== "Active") continue;
+      const provider = rc.courierProviderName;
+      if (Object.keys(courierIds).includes(provider)) {
+        activeProviders.add(provider);
+      }
+    }
+
+    const checkResults = await Promise.all(
+      Array.from(activeProviders).map(async (provider) => {
+        let result = { success: false };
+        try {
+          if (provider === "Amazon Shipping") {
+            const weight = order.packageDetails?.applicableWeight * 1000;
+            const payload = {
+              origin: order.pickupAddress,
+              destination: order.receiverAddress,
+              payment_type: order.paymentDetails?.method,
+              order_amount: order.paymentDetails?.amount || 0,
+              weight: weight || 0,
+              length: order.packageDetails.volumetricWeight?.length || 0,
+              breadth: order.packageDetails.volumetricWeight?.width || 0,
+              height: order.packageDetails.volumetricWeight?.height || 0,
+              productDetails: order.productDetails,
+              orderId: order.orderId,
+            };
+            const { rate, requestToken } = await checkAmazonServiceability("Amazon", payload);
+            result = (rate && requestToken) ? { success: true } : { success: false };
+          } else if (provider === "EcomExpress") {
+            result = await checkServiceabilityEcomExpress(pickUpPincode, deliveryPincode);
+          } else if (provider === "Delhivery") {
+            result = await checkPincodeServiceabilityDelhivery(pickUpPincode, deliveryPincode, order_type);
+          } else if (provider === "Dtdc") {
+            result = await checkServiceabilityDTDC(pickUpPincode, deliveryPincode, paymentType);
+          } else if (provider === "Smartship") {
+            result = await checkSmartshipHubServiceability({ source_pincode: pickUpPincode, destination_pincode: deliveryPincode, order_weight: applicableWeight, order_value: declaredValue });
+          } else if (provider === "Shree Maruti") {
+            result = await checkServiceabilityShreeMaruti({ fromPincode: parseInt(pickUpPincode), toPincode: parseInt(deliveryPincode), isCodOrder: order.paymentDetails.method === "COD", deliveryMode: "SURFACE" });
+          } else if (provider === "ZipyPost") {
+            const payload = { source_pincode: pickUpPincode, destination_pincode: deliveryPincode, payment_type: order.paymentDetails?.method, order_weight: order.packageDetails?.applicableWeight * 1000, length: order.packageDetails.volumetricWeight?.length || 0, breadth: order.packageDetails.volumetricWeight?.width || 0, height: order.packageDetails.volumetricWeight?.height || 0, order_value: order.paymentDetails?.amount || 0 };
+            result = await checkZipypostServiceability(payload);
+          } else if (provider === "Ekart") {
+            result = await checkEkartServiceability({ pickUpPincode, deliveryPincode, paymentMethod: paymentType, codAmount: declaredValue });
+          } else if (provider === "BoxdLogistics") {
+            result = await checkServiceabilityBoxdLogistics({ pickupPincode: pickUpPincode, shippingPincode: deliveryPincode, paymentMode: paymentType === "COD" ? "cod" : "prepaid", codAmount: paymentType === "COD" ? declaredValue : 0, weight: applicableWeight * 1000, length: 10, breadth: 10, height: 10 });
+          } else if (provider === "Proship") {
+            result = await checkProshipServiceability({ pickUpPincode, deliveryPincode });
+          }
+        } catch (err) {
+          console.error(`Serviceability check failed for ${provider}:`, err);
+          result = { success: false, error: err.message };
+        }
+        return { provider, result };
+      })
+    );
+
+    for (const item of checkResults) {
+      serviceabilityCache[item.provider] = item.result;
+    }
+
     // 5. Loop through rateCards & calculate serviceability + charges
     for (let rc of rateCards) {
       if (rc.status !== "Active") continue;
       const provider = rc.courierProviderName;
       if (!Object.keys(courierIds).includes(provider)) continue;
 
-      let serviceable = false;
-
-      if (!serviceabilityCache[provider]) {
-        if (provider === "Amazon Shipping") {
-          const weight = order.packageDetails?.applicableWeight * 1000;
-          const payload = {
-            origin: order.pickupAddress,
-            destination: order.receiverAddress,
-            payment_type: order.paymentDetails?.method,
-            order_amount: order.paymentDetails?.amount || 0,
-            weight: weight || 0,
-            length: order.packageDetails.volumetricWeight?.length || 0,
-            breadth: order.packageDetails.volumetricWeight?.width || 0,
-            height: order.packageDetails.volumetricWeight?.height || 0,
-            productDetails: order.productDetails,
-            orderId: order.orderId,
-          };
-          const { rate, requestToken } = await checkAmazonServiceability("Amazon", payload);
-          serviceabilityCache[provider] = (rate && requestToken) ? { success: true } : { success: false };
-        } else if (provider === "EcomExpress") {
-          serviceabilityCache[provider] = await checkServiceabilityEcomExpress(pickUpPincode, deliveryPincode);
-        } else if (provider === "Delhivery") {
-          serviceabilityCache[provider] = await checkPincodeServiceabilityDelhivery(pickUpPincode, deliveryPincode, order_type);
-        } else if (provider === "Dtdc") {
-          serviceabilityCache[provider] = await checkServiceabilityDTDC(pickUpPincode, deliveryPincode, paymentType);
-        } else if (provider === "Smartship") {
-          serviceabilityCache[provider] = await checkSmartshipHubServiceability({ source_pincode: pickUpPincode, destination_pincode: deliveryPincode, order_weight: applicableWeight, order_value: declaredValue });
-        } else if (provider === "Shree Maruti") {
-          serviceabilityCache[provider] = await checkServiceabilityShreeMaruti({ fromPincode: parseInt(pickUpPincode), toPincode: parseInt(deliveryPincode), isCodOrder: order.paymentDetails.method === "COD", deliveryMode: "SURFACE" });
-        } else if (provider === "ZipyPost") {
-          const payload = { source_pincode: pickUpPincode, destination_pincode: deliveryPincode, payment_type: order.paymentDetails?.method, order_weight: order.packageDetails?.applicableWeight * 1000, length: order.packageDetails.volumetricWeight?.length || 0, breadth: order.packageDetails.volumetricWeight?.width || 0, height: order.packageDetails.volumetricWeight?.height || 0, order_value: order.paymentDetails?.amount || 0 };
-          serviceabilityCache[provider] = await checkZipypostServiceability(payload);
-        } else if (provider === "Ekart") {
-          serviceabilityCache[provider] = await checkEkartServiceability({ pickUpPincode, deliveryPincode, paymentMethod: paymentType, codAmount: declaredValue });
-        } else if (provider === "BoxdLogistics") {
-          serviceabilityCache[provider] = await checkServiceabilityBoxdLogistics({ pickupPincode, shippingPincode: deliveryPincode, paymentMode: paymentType === "COD" ? "cod" : "prepaid", codAmount: paymentType === "COD" ? declaredValue : 0, weight: applicableWeight * 1000, length: 10, breadth: 10, height: 10 });
-        } else if (provider === "Proship") {
-          serviceabilityCache[provider] = await checkProshipServiceability({ pickUpPincode, deliveryPincode });
-        }
-      }
-
-      serviceable = serviceabilityCache[provider];
-
+      const serviceable = serviceabilityCache[provider];
       let isServiceable = serviceable && serviceable.success !== false;
 
       if (provider === "BoxdLogistics" && isServiceable && Array.isArray(serviceable.courier_ids)) {
@@ -227,7 +247,7 @@ const availableCourierService = async (req, res) => {
       ans.push({
         courierServiceName: rc.courierServiceName,
         courierId: courierIds[provider],
-        codCharges: cod,
+        codCharges: Number(cod.toFixed(2)),
         forward: {
           charges: Number(finalCharge.toFixed(2)),
           gst: Number(gstAmount),
