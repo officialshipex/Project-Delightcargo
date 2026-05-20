@@ -246,10 +246,11 @@ const remittanceScheduleData = async () => {
       `Found ${existingSameDateDelivered.length} pending SameDateDelivered entries.`
     );
 
-    const today = new Date();
-    const isNotSunday = today.getDay() !== 0;
-    const isTodayMWF = [1, 3, 5].includes(today.getDay());
-    const isTodayTF = [2, 5].includes(today.getDay());
+    const todayIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const day = todayIST.getDay(); // 0 = Sunday (in IST)
+    const isNotSunday = day !== 0;
+    const isTodayMWF = [1, 3, 5].includes(day);
+    const isTodayTF = [2, 5].includes(day);
 
     for (const remittance of existingSameDateDelivered) {
       const [codPlan, user] = await Promise.all([
@@ -267,22 +268,12 @@ const remittanceScheduleData = async () => {
 
       const planDays = parseInt(codPlan.planName.replace(/\D/g, ""), 10);
 
-      const startOfTodayUTC = new Date(
-        Date.UTC(
-          today.getUTCFullYear(),
-          today.getUTCMonth(),
-          today.getUTCDate()
-        )
-      );
-      const deliveryUTC = new Date(
-        Date.UTC(
-          remittance.deliveryDate.getUTCFullYear(),
-          remittance.deliveryDate.getUTCMonth(),
-          remittance.deliveryDate.getUTCDate()
-        )
-      );
+      const deliveryDate = remittance.deliveryDate;
+      const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
+      const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
       const dayDiff = Math.floor(
-        (startOfTodayUTC - deliveryUTC) / (1000 * 60 * 60 * 24)
+        (startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24)
       );
 
       // Only check remittance eligibility
@@ -302,13 +293,13 @@ const remittanceScheduleData = async () => {
 
       // Only store minimal info if not due (raw data, no business calculation)
       const remittanceEntry = {
-        date: today,
+        date: todayIST,
         userId: remittance.userId,
         userName: user ? user.fullname : "",
         remitanceId: uniqueId,
         totalCod: remittance.totalCod,
         orderDetails: {
-          date: today,
+          date: todayIST,
           codcal: remittance.totalCod,
           orders: [...remittance.orderIds],
         },
@@ -384,19 +375,12 @@ const processAndRemit = async (plan) => {
   const deliveryDate =
     plan.deliveryDate ||
     (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : new Date());
-  const today = new Date();
-  const startOfTodayUTC = new Date(
-    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
-  );
-  const deliveryUTC = new Date(
-    Date.UTC(
-      deliveryDate.getUTCFullYear(),
-      deliveryDate.getUTCMonth(),
-      deliveryDate.getUTCDate()
-    )
-  );
+  const todayIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
+  const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
   const dayDiff = Math.floor(
-    (startOfTodayUTC - deliveryUTC) / (1000 * 60 * 60 * 24)
+    (startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24)
   );
 
   // CodRemittance logic as per your initial approach
@@ -464,7 +448,7 @@ const processAndRemit = async (plan) => {
   // Prepare remittance entry
   const totalCodResult = Number((remainingRecharge - charges).toFixed(2));
   const remittanceEntryForUser = {
-    date: today,
+    date: todayIST,
     remittanceId: plan.remitanceId,
     codAvailable: Number(totalCodResult.toFixed(2)),
     amountCreditedToWallet: extraAmount,
@@ -492,7 +476,7 @@ const processAndRemit = async (plan) => {
   );
 
   const adminEntry = {
-    date: today,
+    date: todayIST,
     userId: plan.userId,
     userName: user.fullname,
     remitanceId: plan.remitanceId,
@@ -510,8 +494,8 @@ const processAndRemit = async (plan) => {
 
 const fetchExtraData = async () => {
   try {
-    const today = new Date();
-    const day = today.getDay(); // 0 = Sunday
+    const todayIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const day = todayIST.getDay(); // 0 = Sunday (in IST)
     const isNotSunday = day !== 0;
     const isTodayMWF = [1, 3, 5].includes(day);
     const isTodayTF = [2, 5].includes(day);
@@ -526,12 +510,18 @@ const fetchExtraData = async () => {
       }
 
       const planDays = parseInt(codPlan.planName.replace(/\D/g, ""), 10);
-      const planOrderDate =
+      const deliveryDate =
         plan.deliveryDate ||
-        (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : today);
+        (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : todayIST);
+
+      const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
+      const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
+
       const dayDiff = Math.floor(
-        (today - new Date(planOrderDate)) / (1000 * 60 * 60 * 24)
+        (startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24)
       );
+
       const shouldMoveToAdmin =
         isNotSunday &&
         (([1, 4, 7].includes(planDays) && dayDiff >= planDays) ||
@@ -539,7 +529,7 @@ const fetchExtraData = async () => {
           (planDays === 3 && dayDiff >= 3 && isTodayTF));
 
       if (!shouldMoveToAdmin) {
-        console.log(`⏭️ Skipping user ${plan.userId}: Not yet due`);
+        console.log(`⏭️ Skipping user ${plan.userId}: Not yet due (dayDiff: ${dayDiff})`);
         continue;
       }
 
