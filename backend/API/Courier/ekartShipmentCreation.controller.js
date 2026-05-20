@@ -76,7 +76,6 @@ const createEkartShipment = async ({
     );
 
     if (!zone) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Pincode not serviceable" };
@@ -91,7 +90,6 @@ const createEkartShipment = async ({
     const balance = effectiveBalance + wallet.creditLimit;
 
     if (balance < finalCharges) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Insufficient Wallet Balance" };
@@ -142,7 +140,6 @@ const createEkartShipment = async ({
       );
 
       if (!addResult?.success) {
-        await Order.findByIdAndUpdate(id, { status: "new" });
         await session.abortTransaction();
         session.endSession();
         return {
@@ -294,7 +291,6 @@ const createEkartShipment = async ({
         const reRegResult = await addEkartAddress(newAddressPayload, accessToken);
 
         if (!reRegResult.success) {
-          await Order.findByIdAndUpdate(id, { status: "new" });
           await session.abortTransaction();
           session.endSession();
           return {
@@ -328,7 +324,6 @@ const createEkartShipment = async ({
           );
           console.log("[Ekart API] Retry Shipment Response:", response.data);
         } catch (retryErr) {
-          await Order.findByIdAndUpdate(id, { status: "new" });
           await session.abortTransaction();
           session.endSession();
           return {
@@ -341,7 +336,6 @@ const createEkartShipment = async ({
         }
       } else {
         // Other errors → fail immediately
-        await Order.findByIdAndUpdate(id, { status: "new" });
         await session.abortTransaction();
         session.endSession();
         return {
@@ -356,7 +350,6 @@ const createEkartShipment = async ({
     }
 
     if (!response?.data?.status) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return {
@@ -437,7 +430,6 @@ const createEkartShipment = async ({
       awb_number: response.data.tracking_id,
     };
   } catch (error) {
-    await Order.findByIdAndUpdate(id, { status: "new" });
     await session.abortTransaction();
     session.endSession();
     return {

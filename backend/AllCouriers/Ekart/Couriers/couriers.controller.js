@@ -101,7 +101,6 @@ const orderCreationEkart = async (req, res) => {
       currentOrder.receiverAddress.pinCode,
     );
     if (!zone) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return res
@@ -117,7 +116,6 @@ const orderCreationEkart = async (req, res) => {
 
     const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < finalCharges) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return res
@@ -172,7 +170,6 @@ const orderCreationEkart = async (req, res) => {
       // console.log("Ekart Add Address Result:", addResult);
 
       if (!addResult.success) {
-        await Order.findByIdAndUpdate(id, { status: "new" });
         await session.abortTransaction();
         session.endSession();
         return res.status(500).json({
@@ -372,7 +369,6 @@ const orderCreationEkart = async (req, res) => {
 
             process.nextTick(async () => {
               try {
-                await Order.findByIdAndUpdate(id, { status: "new" });
                 await session.abortTransaction();
                 session.endSession();
               } catch (e) {
@@ -393,7 +389,6 @@ const orderCreationEkart = async (req, res) => {
 
           process.nextTick(async () => {
             try {
-              await Order.findByIdAndUpdate(id, { status: "new" });
               await session.abortTransaction();
               session.endSession();
             } catch (e) {
@@ -417,7 +412,6 @@ const orderCreationEkart = async (req, res) => {
         // ✅ CLEANUP ASYNC (do NOT block response)
         process.nextTick(async () => {
           try {
-            await Order.findByIdAndUpdate(id, { status: "new" });
             await session.abortTransaction();
             session.endSession();
           } catch (e) {
@@ -430,7 +424,6 @@ const orderCreationEkart = async (req, res) => {
     }
 
     if (!response?.data?.status) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return res
@@ -521,7 +514,6 @@ const orderCreationEkart = async (req, res) => {
     });
   } catch (err) {
     console.log("error ekart", err.response?.data || err.message)
-    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
     await session.abortTransaction();
     session.endSession();
 
@@ -550,14 +542,14 @@ async function addEkartAddress(address, accessToken) {
 
     let line2 = (address.address_line2 || "").trim().replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ");
 
-    // 3. If short → append city + state (Ekart requires min 10 chars)
-    if (line1.length < 10) {
+    // 3. If short → append city + state (Ekart requires min 10 chars, we enforce min 25 chars for safety)
+    if (line1.length < 25) {
       line1 = `${line1} ${address.city} ${address.state}`.trim().replace(/\s+/g, " ");
     }
 
     // 4. If still short (rare), pad with dots instead of spaces (spaces at end can trigger validation issues)
-    if (line1.length < 10) {
-      line1 = line1.padEnd(10, ".");
+    if (line1.length < 25) {
+      line1 = line1.padEnd(25, ".");
     }
     // -------------------------------------------------------
 

@@ -22,6 +22,9 @@ const {
   getAccessToken: getEkartAccessToken,
 } = require("../AllCouriers/Ekart/Authorize/Ekart.controller");
 const { getDelhiveryApiKey } = require("../AllCouriers/Delhivery/Authorize/saveCourierContoller");
+const {
+  getProshipAccessToken,
+} = require("../AllCouriers/Proship/Authorize/proship.controller");
 
 const ordersDatabase = [
   {
@@ -1423,6 +1426,158 @@ const submitNdrToBoxdLogistics = async ({
   }
 };
 
+const submitNdrToProship = async ({
+  awb_number,
+  action,
+  remarks,
+  customer_name,
+  new_address,
+  new_address2,
+  new_phone,
+  new_pincode,
+  scheduled_delivery_date,
+}) => {
+  try {
+    if (!awb_number || !action) {
+      return {
+        success: false,
+        error: "Missing required fields (awb_number, action)",
+      };
+    }
+
+    const orderInDb = await Order.findOne({ awb_number });
+    if (!orderInDb) {
+      return { success: false, error: "Order not found in DB" };
+    }
+
+    const token = await getProshipAccessToken();
+    if (!token) {
+      return { success: false, error: "Failed to get Proship access token" };
+    }
+
+    const actionUpper = action.toUpperCase();
+    const isRto = actionUpper === "RTO" || actionUpper === "INITIATE_RTO";
+    const proshipAction = isRto ? "INITIATE_RTO" : "REATTEMPT";
+
+    const singleWbData = {
+      waybill: String(awb_number).trim(),
+      action: proshipAction,
+    };
+
+    if (proshipAction === "REATTEMPT") {
+      const receiver = orderInDb.receiverAddress || {};
+      
+      let fullAddress = "";
+      if (new_address) {
+        fullAddress = new_address;
+        if (new_address2) {
+          fullAddress += ", " + new_address2;
+        }
+      } else {
+        fullAddress = receiver.address || "";
+        if (receiver.address2) {
+          fullAddress += ", " + receiver.address2;
+        }
+      }
+
+      singleWbData.address = fullAddress.trim() || undefined;
+      singleWbData.drop_pincode = String(new_pincode || receiver.pinCode || "").trim() || undefined;
+      singleWbData.phone_number = String(new_phone || receiver.phoneNumber || "").trim() || undefined;
+      
+      let prefDate = scheduled_delivery_date;
+      if (!prefDate) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        prefDate = tomorrow.toISOString().split("T")[0];
+      } else {
+        try {
+          const d = new Date(prefDate);
+          if (!isNaN(d.getTime())) {
+            prefDate = d.toISOString().split("T")[0];
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      singleWbData.preferred_date = prefDate;
+      singleWbData.landmark = receiver.landmark || "";
+    }
+
+    const payload = {
+      ndr_waybills_data: [singleWbData]
+    };
+
+    console.log("Proship NDR Payload:", JSON.stringify(payload, null, 2));
+
+    const response = await axios.post(
+      "https://proship.prozo.com/api/order/ndrActionUpdate",
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 10000,
+      }
+    );
+
+    console.log("Proship NDR Response:", response.data);
+
+    if (response.data && (response.data.meta?.status === "200 OK" || response.data.success || response.data.status === 200)) {
+      const entry = {
+        action: isRto ? "RTO" : "RE-ATTEMPT",
+        actionBy: "ShipexIndia",
+        remark: remarks || "NDR Action Requested",
+        source: "ShipexIndia",
+        date: new Date(),
+      };
+
+      if (!Array.isArray(orderInDb.ndrHistory)) {
+        orderInDb.ndrHistory = [];
+      }
+
+      const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
+      if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
+        latest.actions.push(entry);
+      } else {
+        orderInDb.ndrHistory.push({ actions: [entry] });
+      }
+
+      if (new_address || customer_name || new_phone || new_pincode) {
+        if (new_address) orderInDb.receiverAddress.address = new_address;
+        if (new_address2) orderInDb.receiverAddress.address2 = new_address2;
+        if (customer_name) orderInDb.receiverAddress.contactName = customer_name;
+        if (new_phone) orderInDb.receiverAddress.phoneNumber = new_phone;
+        if (new_pincode) orderInDb.receiverAddress.pinCode = new_pincode;
+      }
+
+      orderInDb.ndrStatus = "Action_Requested";
+      orderInDb.status = "Action_Requested";
+      orderInDb.reattempt = false;
+      await orderInDb.save();
+
+      return {
+        success: true,
+        message: `Proship NDR action (${proshipAction}) processed successfully`,
+        data: response.data,
+      };
+    } else {
+      return {
+        success: false,
+        error: response.data?.meta?.message || "Proship NDR request failed",
+        details: response.data,
+      };
+    }
+  } catch (error) {
+    console.error("Proship NDR Error:", error.response?.data || error.message);
+    return {
+      success: false,
+      error: error.response?.data?.meta?.message || "Error occurred while processing Proship NDR",
+      details: error.response?.data || error.message,
+    };
+  }
+};
+
 module.exports = {
   getOrderDetails,
   callShiprocketNdrApi,
@@ -1436,4 +1591,5 @@ module.exports = {
   submitNdrToShreeMaruti,
   submitNdrToEkart,
   submitNdrToBoxdLogistics,
+  submitNdrToProship,
 };

@@ -37,136 +37,157 @@ const {
 } = require("../../Orders/scheduledPickup.controller");
 
 const cancelOrdersAtBooked = async (req, res) => {
-  const MAX_RETRIES = 1;
-  let attempt = 0;
+  try {
+    const { awb_number } = req.params;
+    if (!awb_number) {
+      return res.status(400).json({
+        success: false,
+        message: "AWB number is required in params"
+      });
+    }
 
-  while (attempt < MAX_RETRIES) {
+    const currentOrder = await Order.findOne({ awb_number });
+    if (!currentOrder) {
+      return res.status(404).json({
+        success: false,
+        message: `Order with AWB number ${awb_number} not found`
+      });
+    }
+
+    if (["Cancelled", "new"].includes(currentOrder.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Order is already cancelled"
+      });
+    }
+
+    if (
+      !["Ready To Ship", "Booked", "Not Picked"].includes(currentOrder.status)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Order is not ready to be cancelled"
+      });
+    }
+
+    const userDoc = await user.findById(currentOrder.userId);
+    if (!userDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "User linked with order not found"
+      });
+    }
+
+    const currentWallet = await Wallet.findById(userDoc.Wallet);
+    if (!currentWallet) {
+      return res.status(404).json({
+        success: false,
+        message: "Wallet linked with user not found"
+      });
+    }
+
+    let provider;
+    if (
+      currentOrder.partner === "ZipyPost" &&
+      currentOrder.provider === "Bluedart"
+    ) {
+      provider = "ZipyPost";
+    } else if (currentOrder.partner === "BoxdLogistics") {
+      provider = "BoxdLogistics";
+    } else if (currentOrder.partner === "Proship") {
+      provider = "Proship";
+    } else if (currentOrder.partner === "Shadowfax" || currentOrder.provider === "Shadowfax") {
+      provider = "Shadowfax";
+    } else {
+      provider = currentOrder.provider;
+    }
+
+    let result;
+    switch (provider) {
+      case "Delhivery":
+        result = await cancelOrderDelhivery(currentOrder.awb_number);
+        break;
+      case "Dtdc":
+        result = await cancelOrderDTDC(currentOrder.awb_number);
+        break;
+      case "Amazon Shipping":
+        result = await cancelShipment(currentOrder.shipment_id);
+        break;
+      case "Smartship":
+        result = await cancelSmartshipOrder(currentOrder.orderId);
+        break;
+      case "Shree Maruti":
+        result = await cancelOrderShreeMaruti(currentOrder.orderId);
+        break;
+      case "ZipyPost":
+        result = await cancelOrderZipypost(currentOrder.awb_number);
+        break;
+      case "Ekart":
+        result = await cancelShipmentEkart(currentOrder.awb_number);
+        break;
+      case "BoxdLogistics":
+        result = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
+        break;
+      case "Proship":
+        result = await cancelProshipOrder(currentOrder.awb_number);
+        break;
+      case "Shadowfax":
+        result = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
+        break;
+      default:
+        return res.status(400).json({
+          success: false,
+          message: "Unsupported courier provider"
+        });
+    }
+
+    if (result?.error || result?.success === false) {
+      return res.status(400).json({
+        success: false,
+        message:
+          result.message || "Failed to cancel order with courier provider",
+      });
+    }
+
+    // Remove from pickup manifest if exists
+    try {
+      await removeFromPickupManifest(currentOrder);
+    } catch (err) {
+      console.error("[Pickup] Failed to remove order from manifest during API cancellation:", err.message);
+    }
+
+    // Perform database updates inside a quick transaction
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      attempt++;
-      const { awb_number } = req.params;
-      if (!awb_number) {
-        throw new Error("AWB number is required in params");
-      }
-
-      const currentOrder = await Order.findOne({ awb_number }).session(session);
-      if (!currentOrder)
-        throw new Error(`Order with AWB number ${awb_number} not found`);
-
-      if (["Cancelled", "new"].includes(currentOrder.status)) {
-        throw new Error("Order is already cancelled");
-      }
-
-      if (
-        !["Ready To Ship", "Booked", "Not Picked"].includes(currentOrder.status)
-      ) {
-        throw new Error("Order is not ready to be cancelled");
-      }
-
-      const userDoc = await user.findById(currentOrder.userId).session(session);
-      if (!userDoc) throw new Error("User linked with order not found");
-
-      const currentWallet = await Wallet.findById(userDoc.Wallet).session(
-        session
-      );
-      if (!currentWallet) throw new Error("Wallet linked with user not found");
-      // console.log("currentOrder", currentOrder);
-      let provider;
-
-      if (
-        currentOrder.partner === "ZipyPost" &&
-        currentOrder.provider === "Bluedart"
-      ) {
-        provider = "ZipyPost";
-      } else if (currentOrder.partner === "BoxdLogistics") {
-        provider = "BoxdLogistics";
-      } else if (currentOrder.partner === "Proship") {
-        provider = "Proship";
-      } else if (currentOrder.partner === "Shadowfax" || currentOrder.provider === "Shadowfax") {
-        provider = "Shadowfax";
-      } else {
-        provider = currentOrder.provider;
-      }
-      // console.log("provider", provider);
-      let result;
-      switch (provider) {
-        case "Delhivery":
-          result = await cancelOrderDelhivery(currentOrder.awb_number);
-          break;
-        case "Dtdc":
-          result = await cancelOrderDTDC(currentOrder.awb_number);
-          break;
-        case "Amazon Shipping":
-          result = await cancelShipment(currentOrder.shipment_id);
-          break;
-        case "Smartship":
-          result = await cancelSmartshipOrder(currentOrder.orderId);
-          break;
-        case "Shree Maruti":
-          result = await cancelOrderShreeMaruti(currentOrder.orderId);
-          break;
-        case "ZipyPost":
-          result = await cancelOrderZipypost(currentOrder.awb_number);
-          break;
-        case "Ekart":
-          result = await cancelShipmentEkart(currentOrder.awb_number);
-          break;
-        case "BoxdLogistics":
-          result = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
-          break;
-        case "Proship":
-          result = await cancelProshipOrder(currentOrder.awb_number);
-          break;
-        case "Shadowfax":
-          result = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
-          break;
-        default:
-          throw new Error("Unsupported courier provider");
-      }
-
-      if (result?.error || result.success === false) {
-        return res.status(400).json({
-          success: false,
-          message:
-            result.message || "Failed to cancel order with courier provider",
-        });
-      }
-
-      // Remove from pickup manifest if exists
-      try {
-        await removeFromPickupManifest(currentOrder);
-      } catch (err) {
-        console.error("[Pickup] Failed to remove order from manifest during API cancellation:", err.message);
-      }
-
-      // Update order
-      currentOrder.status = "Cancelled";
-      currentOrder.tracking.push({
+      // Re-fetch within session to lock
+      const currentOrderInSession = await Order.findById(currentOrder._id).session(session);
+      currentOrderInSession.status = "Cancelled";
+      currentOrderInSession.tracking.push({
         status: "Cancelled",
         StatusLocation: "",
         Instructions: "Cancelled order by user",
         StatusDateTime: new Date(),
       });
-      await currentOrder.save({ session });
+      await currentOrderInSession.save({ session });
 
-      // Refund if needed
       const balanceToBeAdded =
-        currentOrder.totalFreightCharges === "N/A"
+        currentOrderInSession.totalFreightCharges === "N/A"
           ? 0
-          : parseFloat(currentOrder.totalFreightCharges);
+          : parseFloat(currentOrderInSession.totalFreightCharges);
 
       if (balanceToBeAdded > 0) {
-        const alreadyRefunded = currentWallet.transactions.some(
+        const walletInSession = await Wallet.findById(currentWallet._id).session(session);
+        const alreadyRefunded = walletInSession.transactions.some(
           (t) =>
-            t.awb_number === currentOrder.awb_number &&
+            t.awb_number === currentOrderInSession.awb_number &&
             t.category === "credit" &&
             t.description === "Freight Charges Received"
         );
 
         if (!alreadyRefunded) {
-          const newBalance = currentWallet.balance + balanceToBeAdded;
+          const newBalance = walletInSession.balance + balanceToBeAdded;
 
           await Wallet.findOneAndUpdate(
             { _id: currentWallet._id },
@@ -174,12 +195,12 @@ const cancelOrdersAtBooked = async (req, res) => {
               $inc: { balance: balanceToBeAdded },
               $push: {
                 transactions: {
-                  channelOrderId: currentOrder.orderId || null,
+                  channelOrderId: currentOrderInSession.orderId || null,
                   category: "credit",
                   amount: balanceToBeAdded,
                   balanceAfterTransaction: newBalance,
                   date: new Date(),
-                  awb_number: currentOrder.awb_number,
+                  awb_number: currentOrderInSession.awb_number,
                   description: "Freight Charges Received",
                 },
               },
@@ -196,23 +217,16 @@ const cancelOrdersAtBooked = async (req, res) => {
         success: true,
         message: "Order cancelled successfully",
       });
-    } catch (error) {
+    } catch (err) {
       await session.abortTransaction();
       session.endSession();
-
-      if (
-        error.errorLabels?.includes("TransientTransactionError") &&
-        attempt < MAX_RETRIES
-      ) {
-        console.warn(`⚠️ Transient error on attempt ${attempt}, retrying...`);
-        continue;
-      }
-
-      console.error("❌ Error cancelling order:", error);
-      return res.status(500).json({
-        error: error.message || "Internal server error",
-      });
+      throw err;
     }
+  } catch (error) {
+    console.error("❌ Error cancelling order:", error);
+    return res.status(500).json({
+      error: error.message || "Internal server error",
+    });
   }
 };
 

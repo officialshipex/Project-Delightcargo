@@ -1770,7 +1770,6 @@ const cancelOrdersAtBooked = async (req, res) => {
 
       await currentOrder.save({ session });
       await session.commitTransaction();
-      await currentOrder.save({ session });
       session.endSession();
     } catch (err) {
       await session.abortTransaction();
@@ -1998,7 +1997,6 @@ const GetTrackingByAwbs = async (req, res) => {
 };
 
 const bulkCancelOrder = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
     const { selectedOrders } = req.body;
 
@@ -2020,69 +2018,19 @@ const bulkCancelOrder = async (req, res) => {
     let failedCount = 0;
     const results = [];
 
-    // Loop through each order separately
-    for (const currentOrder of orders) {
-      const orderSession = await mongoose.startSession();
-      orderSession.startTransaction();
-
-      try {
+    // 1. Parallel External API Calls
+    const apiResults = await Promise.all(
+      orders.map(async (currentOrder) => {
         if (
           !["Booked", "Not Picked", "Ready To Ship"].includes(
             currentOrder.status,
           )
         ) {
-          failedCount++;
-          results.push({
+          return {
             orderId: currentOrder._id,
             status: "skipped",
             reason: `Order status is '${currentOrder.status}', not cancellable.`,
-          });
-          await orderSession.abortTransaction();
-          orderSession.endSession();
-          continue;
-        }
-
-        // ✅ Take userId from order itself
-        const userId = currentOrder.userId;
-
-        // --- Fetch user and wallet based on order’s userId ---
-        const userDoc = await user.findById(userId);
-        if (!userDoc) {
-          failedCount++;
-          results.push({
-            orderId: currentOrder._id,
-            status: "failed",
-            reason: "User not found for this order.",
-          });
-          await orderSession.abortTransaction();
-          orderSession.endSession();
-          continue;
-        }
-
-        const walletId = userDoc.Wallet;
-        if (!walletId) {
-          failedCount++;
-          results.push({
-            orderId: currentOrder._id,
-            status: "failed",
-            reason: "User wallet not found.",
-          });
-          await orderSession.abortTransaction();
-          orderSession.endSession();
-          continue;
-        }
-
-        const walletDoc = await Wallet.findById(walletId);
-        if (!walletDoc) {
-          failedCount++;
-          results.push({
-            orderId: currentOrder._id,
-            status: "failed",
-            reason: "Wallet document not found.",
-          });
-          await orderSession.abortTransaction();
-          orderSession.endSession();
-          continue;
+          };
         }
 
         // ✅ Determine provider
@@ -2098,64 +2046,134 @@ const bulkCancelOrder = async (req, res) => {
 
         // --- Cancel order by provider ---
         let cancelResponse;
-        switch (provider) {
-          case "Delhivery":
-            cancelResponse = await cancelOrderDelhivery(
-              currentOrder.awb_number,
-            );
-            break;
-          case "Amazon Shipping":
-            cancelResponse = await cancelShipment(currentOrder.shipment_id);
-            break;
-          case "ZipyPost":
-            cancelResponse = await cancelOrderZipypost(currentOrder.awb_number);
-            break;
-          case "Shree Maruti":
-            cancelResponse = await cancelOrderShreeMaruti(currentOrder.orderId);
-            break;
-          case "Dtdc":
-            cancelResponse = await cancelOrderDTDC(currentOrder.awb_number);
-            break;
-          case "Ekart":
-            cancelResponse = await cancelShipmentEkart(currentOrder.awb_number);
-            break;
-          case "BoxdLogistics":
-            cancelResponse = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
-            break;
-          case "Proship":
-            cancelResponse = await cancelProshipOrder(currentOrder.awb_number);
-            break;
-          case "Shiprocket":
-            cancelResponse = await cancelShiprocketOrder(currentOrder.awb_number);
-            break;
-          case "Shadowfax":
-            cancelResponse = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
-            break;
-          default:
-            failedCount++;
-            results.push({
-              orderId: currentOrder._id,
-              status: "failed",
-              reason: `Unknown provider: ${currentOrder.provider}`,
-            });
-            await orderSession.abortTransaction();
-            orderSession.endSession();
-            continue;
+        try {
+          switch (provider) {
+            case "Delhivery":
+              cancelResponse = await cancelOrderDelhivery(
+                currentOrder.awb_number,
+              );
+              break;
+            case "Amazon Shipping":
+              cancelResponse = await cancelShipment(currentOrder.shipment_id);
+              break;
+            case "ZipyPost":
+              cancelResponse = await cancelOrderZipypost(currentOrder.awb_number);
+              break;
+            case "Shree Maruti":
+              cancelResponse = await cancelOrderShreeMaruti(currentOrder.orderId);
+              break;
+            case "Dtdc":
+              cancelResponse = await cancelOrderDTDC(currentOrder.awb_number);
+              break;
+            case "Ekart":
+              cancelResponse = await cancelShipmentEkart(currentOrder.awb_number);
+              break;
+            case "BoxdLogistics":
+              cancelResponse = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
+              break;
+            case "Proship":
+              cancelResponse = await cancelProshipOrder(currentOrder.awb_number);
+              break;
+            case "Shiprocket":
+              cancelResponse = await cancelShiprocketOrder(currentOrder.awb_number);
+              break;
+            case "Shadowfax":
+              cancelResponse = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
+              break;
+            default:
+              return {
+                orderId: currentOrder._id,
+                status: "failed",
+                reason: `Unknown provider: ${currentOrder.provider}`,
+              };
+          }
+        } catch (err) {
+          cancelResponse = { success: false, error: err.message };
         }
 
         // --- Handle API failure ---
         if (cancelResponse?.success === false) {
-          failedCount++;
-          results.push({
+          return {
             orderId: currentOrder._id,
             status: "failed",
             reason:
               cancelResponse?.message ||
               cancelResponse?.error ||
               "Provider API returned failure",
+          };
+        }
+
+        return {
+          orderId: currentOrder._id,
+          status: "success",
+          order: currentOrder,
+        };
+      })
+    );
+
+    // 2. Sequential & Cached Database Updates
+    const userCache = {};
+    const walletCache = {};
+
+    for (const result of apiResults) {
+      if (result.status === "skipped") {
+        failedCount++;
+        results.push(result);
+        continue;
+      }
+
+      if (result.status === "failed") {
+        failedCount++;
+        results.push(result);
+        continue;
+      }
+
+      const currentOrder = result.order;
+      try {
+        // ✅ Take userId from order itself
+        const userId = currentOrder.userId;
+
+        // --- Fetch user and wallet based on order’s userId (cached) ---
+        let userDoc = userCache[userId];
+        if (!userDoc) {
+          userDoc = await user.findById(userId);
+          if (userDoc) userCache[userId] = userDoc;
+        }
+
+        if (!userDoc) {
+          failedCount++;
+          results.push({
+            orderId: currentOrder._id,
+            status: "failed",
+            reason: "User not found for this order.",
           });
-          await orderSession.abortTransaction();
-          orderSession.endSession();
+          continue;
+        }
+
+        const walletId = userDoc.Wallet;
+        if (!walletId) {
+          failedCount++;
+          results.push({
+            orderId: currentOrder._id,
+            status: "failed",
+            reason: "User wallet not found.",
+          });
+          continue;
+        }
+
+        let walletDoc = walletCache[walletId];
+        if (!walletDoc) {
+          walletDoc = await Wallet.findById(walletId);
+          if (walletDoc) walletCache[walletId] = walletDoc;
+        }
+
+        if (!walletDoc) {
+          failedCount++;
+          results.push({
+            orderId: currentOrder._id,
+            status: "failed",
+            reason: "Wallet document not found.",
+          });
           continue;
         }
 
@@ -2185,26 +2203,33 @@ const bulkCancelOrder = async (req, res) => {
             const updatedWallet = await Wallet.findOneAndUpdate(
               { _id: walletId },
               { $inc: { balance: balanceToAdd } },
-              { new: true, session: orderSession },
+              { new: true },
             );
+
+            // Update cached balance for subsequent updates
+            walletDoc.balance = updatedWallet.balance;
+
+            const transactionObj = {
+              channelOrderId: currentOrder.orderId || null,
+              category: "credit",
+              amount: balanceToAdd,
+              balanceAfterTransaction: updatedWallet.balance,
+              date: new Date(),
+              awb_number: currentOrder.awb_number || "",
+              description: "Freight Charges Received",
+            };
 
             await Wallet.updateOne(
               { _id: walletId },
               {
                 $push: {
-                  transactions: {
-                    channelOrderId: currentOrder.orderId || null,
-                    category: "credit",
-                    amount: balanceToAdd,
-                    balanceAfterTransaction: updatedWallet.balance,
-                    date: new Date(),
-                    awb_number: currentOrder.awb_number || "",
-                    description: "Freight Charges Received",
-                  },
+                  transactions: transactionObj,
                 },
               },
-              { session: orderSession },
             );
+
+            // Push to cached document's transactions to handle multiple orders of same user
+            walletDoc.transactions.push(transactionObj);
           } else {
             console.log(`[BulkCancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
           }
@@ -2220,9 +2245,7 @@ const bulkCancelOrder = async (req, res) => {
           Instructions: "Order cancelled successfully",
         });
 
-        await currentOrder.save({ session: orderSession });
-        await orderSession.commitTransaction();
-        orderSession.endSession();
+        await currentOrder.save();
 
         successCount++;
         results.push({
@@ -2231,8 +2254,6 @@ const bulkCancelOrder = async (req, res) => {
           provider: currentOrder.provider,
         });
       } catch (err) {
-        await orderSession.abortTransaction();
-        orderSession.endSession();
         failedCount++;
         results.push({
           orderId: currentOrder._id,
@@ -2241,8 +2262,6 @@ const bulkCancelOrder = async (req, res) => {
         });
       }
     }
-
-    session.endSession();
 
     return res.status(200).json({
       success: true,
@@ -2253,8 +2272,6 @@ const bulkCancelOrder = async (req, res) => {
       details: results,
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
     console.error("Bulk Cancel Error:", error);
     return res.status(500).json({
       success: false,

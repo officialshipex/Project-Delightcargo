@@ -26,6 +26,10 @@ const refilling = new Map();
  * Fetch a batch of waybills from Delhivery and add them to the pool.
  */
 async function refillPool(apiKey) {
+  if (process.env.NODE_ENV !== "production") {
+    console.log("ℹ️ [WaybillPool] Skipping refillPool in non-production environment.");
+    return;
+  }
   if (refilling.get(apiKey)) return; // Already refilling
   refilling.set(apiKey, true);
 
@@ -60,6 +64,30 @@ async function refillPool(apiKey) {
  */
 async function getWaybill(apiKey) {
   const key = apiKey || process.env.DEL_API_TOKEN;
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`ℹ️ [WaybillPool] Running in non-production. Fetching a single waybill live (no pooling)...`);
+    try {
+      const url = `${BASE_URL}/waybill/api/bulk/json/?count=1`;
+      const response = await axios.get(url, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Token ${key}`,
+        },
+        timeout: 15000,
+      });
+      const raw = response.data;
+      if (raw) {
+        const waybill = String(raw).split(",")[0].trim();
+        console.log(`✅ [WaybillPool] Fetched single waybill live: ${waybill}`);
+        return [waybill];
+      }
+      return null;
+    } catch (err) {
+      console.error(`❌ [WaybillPool] Live fetch failed in dev:`, err.message);
+      return null;
+    }
+  }
 
   // Ensure pool exists for this key
   if (!pool.has(key)) {
@@ -107,6 +135,10 @@ async function getWaybill(apiKey) {
  * Call this during server startup for each active Delhivery account.
  */
 async function warmPool(apiKey) {
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`ℹ️ [WaybillPool] Skipping pool warming in non-production mode.`);
+    return;
+  }
   const key = apiKey || process.env.DEL_API_TOKEN;
   if (!pool.has(key) || pool.get(key).length < LOW_WATER_MARK) {
     console.log(`🔄 [WaybillPool] Warming pool for key ***${key?.slice(-6)}...`);

@@ -11,6 +11,7 @@ const {
   submitNdrToShreeMaruti,
   submitNdrToEkart,
   submitNdrToBoxdLogistics,
+  submitNdrToProship,
 } = require("../services/ndrService");
 
 /**
@@ -145,6 +146,18 @@ const runNdrTask = async (orderId, actionDetails) => {
         updated_state: state || null,
         updated_pincode: pincode || null,
         updated_mobile: phone,
+      });
+    } else if (finalPartner === "Proship") {
+      apiResponse = await submitNdrToProship({
+        awb_number: finalAwb,
+        action,
+        remarks: finalRemarks,
+        customer_name,
+        new_address: address1,
+        new_address2: address2,
+        new_phone: phone,
+        new_pincode: pincode,
+        scheduled_delivery_date: finalDate,
       });
     } else {
       apiResponse = { success: false, message: "Unsupported provider" };
