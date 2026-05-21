@@ -1,6 +1,7 @@
 const Order = require("../../../models/newOrder.model");
 const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { createBoxdOrder, shipBoxdOrder } = require("./couriers.controller");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -138,6 +139,19 @@ const createOrderBoxdLogistics = async (
                 },
             }
         );
+
+        // 🔁 Dual-write: mirror to WalletTransaction for future migration
+        WalletTransaction.create({
+            walletId: walletId,
+            channelOrderId: currentOrder.orderId || null,
+            category: "debit",
+            amount: finalCharges,
+            balanceAfterTransaction: currentWallet.balance - finalCharges,
+            date: new Date(),
+            awb_number: awb,
+            description: "Freight Charges Applied",
+            priceBreakup
+        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk BoxdLogistics):", e.message));
 
         return {
             success: true,

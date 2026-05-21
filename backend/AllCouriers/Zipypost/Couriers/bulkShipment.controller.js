@@ -2,6 +2,7 @@ const axios = require("axios");
 const Order = require("../../../models/newOrder.model");
 const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const CourierService = require("../../../models/CourierService.Schema");
 const { getAuthToken } = require("../Authorize/zipyPost.controller");
 const { createWarehouse } = require("./couriers.controller");
@@ -327,6 +328,19 @@ const createOrderZipypost = async (
           },
         }
       );
+
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      await WalletTransaction.create({
+        walletId: walletId,
+        channelOrderId: currentOrder.orderId,
+        category: "debit",
+        amount: parseFloat(charges),
+        balanceAfterTransaction: currentWallet.balance - parseFloat(charges),
+        date: new Date(),
+        awb_number: awb,
+        description: "Freight Charges Applied",
+        priceBreakup
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrderZipypost):", e.message));
 
       return {
         success: true,

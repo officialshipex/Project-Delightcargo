@@ -1,6 +1,7 @@
 const Order = require("../models/newOrder.model");
 const Wallet = require("../models/wallet");
 const User = require("../models/User.model");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const {
   sendWhatsAppMessage,
   sendEmailMessage,
@@ -235,6 +236,18 @@ const ShadowfaxWebhook = async (req, res) => {
                       },
                    }
                 );
+
+                await WalletTransaction.create({
+                   walletId: currentWallet._id,
+                   channelOrderId: order.orderId || null,
+                   category: "credit",
+                   amount: balanceTobeAdded,
+                   balanceAfterTransaction: newBalance,
+                   date: new Date(),
+                   awb_number: order.awb_number,
+                   description: "Freight Charges Received",
+                }).catch(err => console.error("⚠️ WalletTransaction dual-write failed for ShadowfaxWebhook:", err.message));
+
                 order.walletRefunded = true;
                 console.log(`Shadowfax Webhook: Refunded ₹${balanceTobeAdded} for AWB ${order.awb_number}`);
              }

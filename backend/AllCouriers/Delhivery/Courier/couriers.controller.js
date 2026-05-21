@@ -9,6 +9,7 @@ const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
 const crypto = require("crypto");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const user = require("../../../models/User.model");
 const plan = require("../../../models/Plan.model");
 const CourierService = require("../../../models/CourierService.Schema");
@@ -384,6 +385,19 @@ const createOrder = async (req, res) => {
         { session },
       ),
     ]);
+
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create([{
+      walletId: currentWallet._id,
+      channelOrderId: currentOrder.orderId || null,
+      category: "debit",
+      amount: balanceToBeDeducted,
+      balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+      date: new Date(),
+      awb_number: result.waybill || "",
+      description: "Freight Charges Applied",
+      priceBreakup
+    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrder Delhivery):", e.message));
 
     await session.commitTransaction();
     session.endSession();

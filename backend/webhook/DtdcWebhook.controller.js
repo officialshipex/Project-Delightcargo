@@ -1,5 +1,6 @@
 const Order = require("../models/newOrder.model");
 const Wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const statusMap = require("../statusMap/StatusMap.model");
 const { formatDTDCDateTime } = require("../Orders/tracking.controller");
 const {
@@ -178,9 +179,38 @@ const DTDCWebhook = async (req, res) => {
     // ✔ Update Wallet if needed
     // -------------------------------------------
     if (shouldUpdateWallet && balanceTobeAdded > 0) {
-      await Wallet.findByIdAndUpdate(order.walletId, {
-        $inc: { balance: balanceTobeAdded },
-      });
+      const walletDoc = await Wallet.findById(order.walletId);
+      if (walletDoc) {
+        const newBalance = (walletDoc.balance || 0) + balanceTobeAdded;
+        await Wallet.updateOne(
+          { _id: walletDoc._id },
+          {
+            $inc: { balance: balanceTobeAdded },
+            $push: {
+              transactions: {
+                channelOrderId: order.orderId || null,
+                category: "credit",
+                amount: balanceTobeAdded,
+                balanceAfterTransaction: newBalance,
+                date: new Date(),
+                awb_number: order.awb_number,
+                description: "Freight Charges Received",
+              }
+            }
+          }
+        );
+
+        await WalletTransaction.create({
+          walletId: walletDoc._id,
+          channelOrderId: order.orderId || null,
+          category: "credit",
+          amount: balanceTobeAdded,
+          balanceAfterTransaction: newBalance,
+          date: new Date(),
+          awb_number: order.awb_number,
+          description: "Freight Charges Received",
+        }).catch(err => console.error("⚠️ WalletTransaction dual-write failed for DtdcWebhook:", err.message));
+      }
     }
 
     await order.save();

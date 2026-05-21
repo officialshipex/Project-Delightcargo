@@ -2,6 +2,7 @@ const axios = require("axios");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const { getZone } = require("../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const mongoose = require("mongoose");
@@ -16,7 +17,12 @@ const createEkartShipment = async ({
   provider,
   finalCharges,
   courierServiceName,
-  priceBreakup
+  priceBreakup,
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
 
@@ -82,12 +88,9 @@ const createEkartShipment = async ({
     }
 
     // 3️⃣ Wallet check
-    const user = await User.findById(currentOrder.userId).session(session);
-    const wallet = await Wallet.findById(user.Wallet).session(session);
-
-    const holdAmount = wallet.holdAmount || 0;
-    const effectiveBalance = wallet.balance - holdAmount;
-    const balance = effectiveBalance + wallet.creditLimit;
+    const holdAmount = walletHoldAmount || 0;
+    const effectiveBalance = walletBalance - holdAmount;
+    const balance = effectiveBalance + walletCreditLimit;
 
     if (balance < finalCharges) {
       await session.abortTransaction();
@@ -358,35 +361,72 @@ const createEkartShipment = async ({
       };
     }
 
-    // 9️⃣ Order update
+    // 9️⃣ Order and Wallet update
     const balanceToBeDeducted = parseFloat(finalCharges);
 
-    await Order.findByIdAndUpdate(
-      id,
-      {
-        $set: {
-          status: "Booked",
-          awb_number: response.data.tracking_id,
-          shipment_id: currentOrder.orderId,
-          provider,
-          courierServiceName,
-          totalFreightCharges: balanceToBeDeducted,
-          shipmentCreatedAt: new Date(),
-          zone: zone.zone,
-          estimatedDeliveryDate: estimateDate || "",
-          priceBreakup
-        },
-        $push: {
-          tracking: {
+    await Promise.all([
+      Order.findByIdAndUpdate(
+        id,
+        {
+          $set: {
             status: "Booked",
-            StatusLocation: currentOrder.pickupAddress?.city || "N/A",
-            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-            Instructions: "Order booked successfully",
+            awb_number: response.data.tracking_id,
+            shipment_id: currentOrder.orderId,
+            provider,
+            courierServiceName,
+            totalFreightCharges: balanceToBeDeducted,
+            shipmentCreatedAt: new Date(),
+            zone: zone.zone,
+            estimatedDeliveryDate: estimateDate || "",
+            priceBreakup
+          },
+          $push: {
+            tracking: {
+              status: "Booked",
+              StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+              Instructions: "Order booked successfully",
+            },
           },
         },
-      },
-      { session },
-    );
+        { session },
+      ),
+      Wallet.updateOne(
+        { _id: walletId },
+        {
+          $inc: { balance: -balanceToBeDeducted },
+          $push: {
+            transactions: {
+              channelOrderId: currentOrder.orderId,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+              date: new Date(),
+              awb_number: response.data.tracking_id,
+              description: "Freight Charges Applied",
+              priceBreakup
+            },
+          },
+        },
+        { session }
+      ),
+      WalletTransaction.create(
+        [
+          {
+            walletId: walletId,
+            channelOrderId: currentOrder.orderId,
+            category: "debit",
+            amount: balanceToBeDeducted,
+            balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+            date: new Date(),
+            awb_number: response.data.tracking_id,
+            description: "Freight Charges Applied",
+            priceBreakup
+          }
+        ],
+        { session }
+      )
+    ]);
 
     await session.commitTransaction();
     session.endSession();
@@ -399,30 +439,6 @@ const createEkartShipment = async ({
       .catch((pErr) => {
         console.error("[Pickup] assignPickupManifest failed:", pErr.message);
       });
-
-    // 🔟 Wallet update (post-commit)
-    try {
-      await Wallet.findOneAndUpdate(
-        { _id: user.Wallet },
-        {
-          $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId,
-              category: "debit",
-              amount: balanceToBeDeducted,
-              balanceAfterTransaction: wallet.balance - balanceToBeDeducted,
-              date: new Date(),
-              awb_number: response.data.tracking_id,
-              description: "Freight Charges Applied",
-              priceBreakup
-            },
-          },
-        },
-      );
-    } catch (e) {
-      console.error("Wallet update failed:", e.message);
-    }
 
     return {
       success: true,

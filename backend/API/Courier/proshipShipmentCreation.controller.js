@@ -2,6 +2,7 @@ const axios = require("axios");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const mongoose = require("mongoose");
 const { getZone } = require("../../Rate/zoneManagementController");
 const { getProshipAccessToken } = require("../../AllCouriers/Proship/Authorize/proship.controller");
@@ -15,7 +16,12 @@ const createProshipShipment = async ({
   provider,
   finalCharges,
   courierServiceName,
-  priceBreakup
+  priceBreakup,
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
 
@@ -39,21 +45,18 @@ const createProshipShipment = async ({
       };
     }
 
-    // Step 2️⃣ Fetch user & wallet
-    const user = await User.findById(currentOrder.userId).populate("Wallet").session(session);
-    if (!user || !user.Wallet) {
+    // Step 2️⃣ Wallet check
+    if (!walletId) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
-      return { success: false, message: "User or Wallet not found" };
+      return { success: false, message: "Wallet not found" };
     }
 
-    const currentWallet = user.Wallet;
-
     // Step 3️⃣ Wallet Balance Check
-    const effectiveBalance = currentWallet.balance - (currentWallet.holdAmount || 0);
+    const effectiveBalance = walletBalance - (walletHoldAmount || 0);
     const balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
-    const totalBalance = effectiveBalance + (currentWallet.creditLimit || 0);
+    const totalBalance = effectiveBalance + (walletCreditLimit || 0);
     
     if (totalBalance < balanceToBeDeducted) {
       await Order.findByIdAndUpdate(id, { status: "new" });
@@ -126,7 +129,7 @@ const createProshipShipment = async ({
         from_phone_number: currentOrder.pickupAddress.phoneNumber,
         from_address: currentOrder.pickupAddress.address,
         from_country: "IN",
-        from_email: currentOrder.pickupAddress.email || user.email || "info@shipex.in",
+        from_email: currentOrder.pickupAddress.email || "info@shipex.in",
         from_pincode: String(currentOrder.pickupAddress.pinCode),
         from_city: currentOrder.pickupAddress.city,
         from_addressline: currentOrder.pickupAddress.address,
@@ -232,7 +235,8 @@ const createProshipShipment = async ({
         },
         { session }
       ),
-      currentWallet.updateOne(
+      Wallet.updateOne(
+        { _id: walletId },
         {
           $inc: { balance: -balanceToBeDeducted },
           $push: {
@@ -240,7 +244,7 @@ const createProshipShipment = async ({
               channelOrderId: currentOrder.orderId || null,
               category: "debit",
               amount: balanceToBeDeducted,
-              balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
               date: new Date(),
               awb_number: awb_number || "",
               description: "Freight Charges Applied",
@@ -250,6 +254,22 @@ const createProshipShipment = async ({
         },
         { session }
       ),
+      WalletTransaction.create(
+        [
+          {
+            walletId: walletId,
+            channelOrderId: currentOrder.orderId || null,
+            category: "debit",
+            amount: balanceToBeDeducted,
+            balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+            date: new Date(),
+            awb_number: awb_number || "",
+            description: "Freight Charges Applied",
+            priceBreakup
+          }
+        ],
+        { session }
+      )
     ]);
 
     await session.commitTransaction();

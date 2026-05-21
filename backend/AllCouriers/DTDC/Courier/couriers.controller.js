@@ -5,6 +5,7 @@ require("dotenv").config();
 const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { getDTDCAuthToken } = require("../Authorize/saveCourierContoller");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const commodityOptions = require("../../../config/commodityOptions");
@@ -300,6 +301,18 @@ const createOrder = async (req, res) => {
             },
           }
         );
+        // 🔁 Dual-write: mirror to WalletTransaction for future migration
+        WalletTransaction.create({
+          walletId: user.Wallet,
+          channelOrderId: currentOrder.orderId || null,
+          category: "debit",
+          amount: balanceToBeDeducted,
+          balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+          date: new Date(),
+          awb_number: result.reference_number || "",
+          description: "Freight Charges Applied",
+          priceBreakup
+        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrder DTDC):", e.message));
       } catch (err) {
         console.error("Wallet update error:", err.message);
       }

@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const AllocateRole = require("../../models/allocateRoleSchema");
 const Order = require("../../models/newOrder.model");
 const weightDispreancy = require("../../WeightDispreancy/weightDispreancy.model");
@@ -228,6 +229,15 @@ const addWalletHistory = async (req, res) => {
         description: `Recharge From Gateway(Razorpay)`,
         channelOrderId: orderId,
       });
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      WalletTransaction.create({
+        walletId: wallet._id,
+        category: "credit",
+        amount: Number(amount),
+        balanceAfterTransaction: wallet.balance,
+        description: `Recharge From Gateway(Razorpay)`,
+        channelOrderId: orderId,
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (addWalletHistory):", e.message));
     }
 
     await wallet.save();
@@ -327,6 +337,16 @@ const addPassbook = async (req, res) => {
       awb_number: awbNumber,
       description,
     });
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create({
+      walletId: wallet._id,
+      channelOrderId: orderId,
+      category: transactionType,
+      amount: parseFloat(amount),
+      balanceAfterTransaction: newBalance,
+      awb_number: awbNumber,
+      description,
+    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (addPassbook):", e.message));
 
     // Update wallet balance
     wallet.balance = newBalance;
@@ -549,6 +569,16 @@ const walletUpdation = async (req, res) => {
       amount: parsedAmount,
       balanceAfterTransaction: newBalance,
     });
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create({
+      walletId: wallet._id,
+      channelOrderId: order?.orderId || null,
+      awb_number: isCreditNote ? null : awbNumber,
+      description: `${description} ${updatedCategory}`,
+      category,
+      amount: parsedAmount,
+      balanceAfterTransaction: newBalance,
+    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (walletUpdation):", e.message));
 
     wallet.balance = newBalance; // ✅ Update balance
 
@@ -656,6 +686,16 @@ const reverseTransaction = async (req, res) => {
       awb_number: awbNumber,
       description: reversedDescription,
     });
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create({
+      walletId: wallet._id,
+      channelOrderId: orderId,
+      category: "credit",
+      amount: parsedAmount,
+      balanceAfterTransaction: newBalance,
+      awb_number: awbNumber,
+      description: reversedDescription,
+    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (reverseTransaction):", e.message));
 
     wallet.balance = newBalance;
     await wallet.save();

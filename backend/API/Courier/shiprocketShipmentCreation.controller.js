@@ -2,6 +2,7 @@ const axios = require("axios");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const mongoose = require("mongoose");
 const { getZone } = require("../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
@@ -49,6 +50,11 @@ const createShiprocketShipment = async ({
   finalCharges,
   courierServiceName,
   priceBreakup,
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
 
@@ -68,21 +74,18 @@ const createShiprocketShipment = async ({
       return { success: false, message: "Shipment already created or order not in 'new' status." };
     }
 
-    // Step 2️⃣ Fetch user & wallet
-    const user = await User.findById(currentOrder.userId).populate("Wallet").session(session);
-    if (!user || !user.Wallet) {
+    // Step 2️⃣ Wallet check
+    if (!walletId) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
-      return { success: false, message: "User or Wallet not found" };
+      return { success: false, message: "Wallet not found" };
     }
 
-    const currentWallet = user.Wallet;
-
     // Step 3️⃣ Wallet Balance Check
-    const effectiveBalance = currentWallet.balance - (currentWallet.holdAmount || 0);
+    const effectiveBalance = walletBalance - (walletHoldAmount || 0);
     const balanceToBeDeducted = parseFloat(finalCharges) || 0;
-    const totalBalance = effectiveBalance + (currentWallet.creditLimit || 0);
+    const totalBalance = effectiveBalance + (walletCreditLimit || 0);
 
     if (totalBalance < balanceToBeDeducted) {
       await Order.findByIdAndUpdate(id, { status: "new" });
@@ -158,7 +161,7 @@ const createShiprocketShipment = async ({
           {
             pickup_location: pickupLocationName,
             name: currentOrder.pickupAddress.contactName,
-            email: currentOrder.pickupAddress.email || user.email || SHIPROCKET_EMAIL,
+            email: currentOrder.pickupAddress.email || SHIPROCKET_EMAIL,
             phone: cleanPhone(currentOrder.pickupAddress.phoneNumber),
             address: ensureAddress(currentOrder.pickupAddress.address),
             city: currentOrder.pickupAddress.city,
@@ -205,7 +208,7 @@ const createShiprocketShipment = async ({
       billing_pincode: String(currentOrder.pickupAddress.pinCode),
       billing_state: currentOrder.pickupAddress.state,
       billing_country: "India",
-      billing_email: currentOrder.pickupAddress.email || user.email || SHIPROCKET_EMAIL,
+      billing_email: currentOrder.pickupAddress.email || SHIPROCKET_EMAIL,
       billing_phone: cleanPhone(currentOrder.pickupAddress.phoneNumber),
       shipping_is_billing: false,
       shipping_customer_name: receiverName.first,
@@ -215,7 +218,7 @@ const createShiprocketShipment = async ({
       shipping_pincode: String(currentOrder.receiverAddress.pinCode),
       shipping_state: currentOrder.receiverAddress.state,
       shipping_country: "India",
-      shipping_email: currentOrder.receiverAddress.email || user.email || SHIPROCKET_EMAIL,
+      shipping_email: currentOrder.receiverAddress.email || SHIPROCKET_EMAIL,
       shipping_phone: cleanPhone(currentOrder.receiverAddress.phoneNumber),
       order_items: currentOrder.productDetails.map((p) => ({
         name: p.name || "Product",
@@ -317,7 +320,8 @@ const createShiprocketShipment = async ({
         },
         { session }
       ),
-      currentWallet.updateOne(
+      Wallet.updateOne(
+        { _id: walletId },
         {
           $inc: { balance: -balanceToBeDeducted },
           $push: {
@@ -325,7 +329,7 @@ const createShiprocketShipment = async ({
               channelOrderId: currentOrder.orderId || null,
               category: "debit",
               amount: balanceToBeDeducted,
-              balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
               date: new Date(),
               awb_number: awb_number,
               description: "Freight Charges Applied",
@@ -335,6 +339,22 @@ const createShiprocketShipment = async ({
         },
         { session }
       ),
+      WalletTransaction.create(
+        [
+          {
+            walletId: walletId,
+            channelOrderId: currentOrder.orderId || null,
+            category: "debit",
+            amount: balanceToBeDeducted,
+            balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+            date: new Date(),
+            awb_number: awb_number,
+            description: "Freight Charges Applied",
+            priceBreakup,
+          }
+        ],
+        { session }
+      )
     ]);
 
     await session.commitTransaction();

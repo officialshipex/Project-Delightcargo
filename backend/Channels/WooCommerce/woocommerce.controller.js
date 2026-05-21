@@ -1,5 +1,6 @@
 const axios = require("axios");
 const Order = require("../../models/newOrder.model");
+const { generateUniqueOrderIds } = require("../../utils/generateUniqueOrderId");
 const AllChannel = require("../allChannel.model");
 const PickupAddress = require("../../models/pickupAddress.model");
 
@@ -147,15 +148,8 @@ const createWooCommerceWebhook = async (
 
 // Generate unique 6-digit ID with DB check
 const generateUniqueOrderId = async () => {
-  let newId;
-  let exists = true;
-
-  while (exists) {
-    newId = Math.floor(100000 + Math.random() * 900000).toString();
-    exists = await Order.exists({ orderId: newId });
-  }
-
-  return newId;
+  const orderId = await generateUniqueOrderIds(1);
+  return orderId.toString();
 };
 
 const wooCommerceWebhookHandler = async (req, res) => {

@@ -2,6 +2,7 @@ const axios = require("axios");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const { getZone } = require("../../Rate/zoneManagementController");
 const DTDC_API_URL = process.env.DTDC_API_URL;
 const API_KEY = process.env.DTDC_API_KEY;
@@ -29,7 +30,12 @@ const createDTDCShipment = async ({
   finalCharges,
   courierServiceName,
   courier,
-  priceBreakup
+  priceBreakup,
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
 
@@ -60,27 +66,17 @@ const createDTDCShipment = async ({
       };
     }
 
-    // --- Fetch zone & user ---
-    const [zone, user] = await Promise.all([
-      getZone(
-        currentOrder.pickupAddress.pinCode,
-        currentOrder.receiverAddress.pinCode
-      ),
-      User.findById(currentOrder.userId).session(session),
-    ]);
+    // --- Fetch zone ---
+    const zone = await getZone(
+      currentOrder.pickupAddress.pinCode,
+      currentOrder.receiverAddress.pinCode
+    );
 
     if (!zone) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Pincode not serviceable" };
-    }
-
-    if (!user) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
-      await session.abortTransaction();
-      session.endSession();
-      return { success: false, message: "User not found" };
     }
 
     // Step 5️⃣ Fetch estimated delivery date from DB
@@ -106,18 +102,9 @@ const createDTDCShipment = async ({
       }
     }
 
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
-    if (!currentWallet) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
-      await session.abortTransaction();
-      session.endSession();
-      return { success: false, message: "Wallet not found" };
-    }
-
     // --- Wallet balance check ---
-    const effectiveBalance =
-      currentWallet.balance - (currentWallet.holdAmount || 0);
-    const balance = effectiveBalance + currentWallet.creditLimit;
+    const effectiveBalance = walletBalance - walletHoldAmount;
+    const balance = effectiveBalance + walletCreditLimit;
     if (balance < finalCharges) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
@@ -255,32 +242,37 @@ const createDTDCShipment = async ({
 
     try {
       // --- Update wallet immediately ---
-      const updatedWallet = await Wallet.findOneAndUpdate(
-        { _id: user.Wallet, balance: { $gte: balanceToBeDeducted } },
-        {
-          $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId || null,
-              category: "debit",
-              amount: balanceToBeDeducted,
-              balanceAfterTransaction:
-                currentWallet.balance - balanceToBeDeducted,
-              date: new Date(),
-              awb_number: result.reference_number || "",
-              description: "Freight Charges Applied",
-              priceBreakup
+      await Promise.all([
+        Wallet.updateOne(
+          { _id: walletId },
+          {
+            $inc: { balance: -balanceToBeDeducted },
+            $push: {
+              transactions: {
+                channelOrderId: currentOrder.orderId || null,
+                category: "debit",
+                amount: balanceToBeDeducted,
+                balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+                date: new Date(),
+                awb_number: result.reference_number || "",
+                description: "Freight Charges Applied",
+                priceBreakup
+              },
             },
-          },
-        },
-        { new: true }
-      );
-
-      if (!updatedWallet) {
-        console.warn(
-          "⚠️ Wallet not updated — insufficient balance or invalid ID"
-        );
-      }
+          }
+        ),
+        WalletTransaction.create({
+          walletId: walletId,
+          channelOrderId: currentOrder.orderId || null,
+          category: "debit",
+          amount: balanceToBeDeducted,
+          balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+          date: new Date(),
+          awb_number: result.reference_number || "",
+          description: "Freight Charges Applied",
+          priceBreakup
+        })
+      ]);
     } catch (err) {
       console.error("Wallet update error:", err.message);
     }

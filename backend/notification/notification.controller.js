@@ -1,6 +1,7 @@
 const axios = require("axios");
 const NotificationSetting = require("./notification.model");
 const Wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const NewOrder = require("../models/newOrder.model");
 const nodemailer = require("nodemailer");
 const mongoose = require("mongoose");
@@ -131,6 +132,15 @@ const buyCredits = async (req, res) => {
       balanceAfterTransaction: wallet.balance,
       date: new Date(),
     });
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create({
+      walletId: wallet._id,
+      channelOrderId: transactionId,
+      category: "debit",
+      amount: purchaseAmount,
+      description: `Notification Credits Purchased`,
+      balanceAfterTransaction: wallet.balance,
+    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (buyCredits):", e.message));
 
     // 5. Record CREDIT in notificationTransactions history
     wallet.notificationTransactions.push({

@@ -1,4 +1,5 @@
 const Wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const User = require("../models/User.model");
 
 require("dotenv").config();
@@ -188,6 +189,15 @@ const razorpayWebhook = async (req, res) => {
           description: `Recharge From Gateway(Razorpay)`,
           channelOrderId: payment.order_id,
         });
+        // 🔁 Dual-write: mirror to WalletTransaction for future migration
+        WalletTransaction.create([{
+          walletId: wallet._id,
+          category: "credit",
+          amount,
+          balanceAfterTransaction: newBalance,
+          description: `Recharge From Gateway(Razorpay)`,
+          channelOrderId: payment.order_id,
+        }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (razorpayWebhook):", e.message));
         await wallet.save({ session });
         await session.commitTransaction();
         session.endSession();

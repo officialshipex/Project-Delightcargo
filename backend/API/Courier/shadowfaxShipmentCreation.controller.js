@@ -2,6 +2,7 @@ const axios = require("axios");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const mongoose = require("mongoose");
 const plan = require("../../models/Plan.model");
 const { getZone } = require("../../Rate/zoneManagementController");
@@ -17,7 +18,12 @@ const createShadowfaxShipment = async ({
   courierName,
   finalCharges,
   courierServiceName,
-  priceBreakup
+  priceBreakup,
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
 
@@ -40,17 +46,13 @@ const createShadowfaxShipment = async ({
       };
     }
 
-    // Step 2️⃣ Fetch user + wallet
-    const users = await User.findById(currentOrder.userId).populate("Wallet").session(session);
-
-    if (!users || !users.Wallet) {
+    // Step 2️⃣ Wallet check
+    if (!walletId) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
-      return { success: false, message: "User or Wallet not found" };
+      return { success: false, message: "Wallet not found" };
     }
-
-    const currentWallet = users.Wallet;
 
     // Fetch API Key
     const apiKey = await getShadowfaxToken(courierName || provider);
@@ -95,10 +97,10 @@ const createShadowfaxShipment = async ({
     }
 
     // Step 5️⃣ Wallet check
-    const walletHoldAmount = currentWallet.holdAmount || 0;
-    const effectiveBalance = currentWallet.balance - walletHoldAmount;
+    const holdAmount = walletHoldAmount || 0;
+    const effectiveBalance = walletBalance - holdAmount;
     const balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
-    const balance = effectiveBalance + (currentWallet.creditLimit || 0);
+    const balance = effectiveBalance + (walletCreditLimit || 0);
 
     if (balance < balanceToBeDeducted) {
       await Order.findByIdAndUpdate(id, { status: "new" });
@@ -211,7 +213,8 @@ const createShadowfaxShipment = async ({
         },
         { session }
       ),
-      currentWallet.updateOne(
+      Wallet.updateOne(
+        { _id: walletId },
         {
           $inc: { balance: -balanceToBeDeducted },
           $push: {
@@ -219,7 +222,7 @@ const createShadowfaxShipment = async ({
               channelOrderId: currentOrder.orderId || null,
               category: "debit",
               amount: balanceToBeDeducted,
-              balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
               date: new Date(),
               awb_number: sfxData.data.awb_number,
               description: "Freight Charges Applied",
@@ -229,6 +232,22 @@ const createShadowfaxShipment = async ({
         },
         { session }
       ),
+      WalletTransaction.create(
+        [
+          {
+            walletId: walletId,
+            channelOrderId: currentOrder.orderId || null,
+            category: "debit",
+            amount: balanceToBeDeducted,
+            balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+            date: new Date(),
+            awb_number: sfxData.data.awb_number,
+            description: "Freight Charges Applied",
+            priceBreakup
+          }
+        ],
+        { session }
+      )
     ]);
 
     await session.commitTransaction();

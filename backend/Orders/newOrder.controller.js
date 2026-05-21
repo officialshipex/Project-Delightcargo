@@ -1,4 +1,5 @@
 const Order = require("../models/newOrder.model"); // Adjust the path to your model
+const { generateUniqueOrderIds } = require("../utils/generateUniqueOrderId");
 const user = require("../models/User.model");
 const pickAddress = require("../models/pickupAddress.model");
 const receiveAddress = require("../models/deliveryAddress.model");
@@ -6,6 +7,7 @@ const Courier = require("../models/AllCourierSchema");
 const CourierService = require("../models/CourierService.Schema");
 const Plan = require("../models/Plan.model");
 const Wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const Bottleneck = require("bottleneck");
 const cron = require("node-cron");
 const EDDMap = require("../models/EDDMap.model");
@@ -110,17 +112,8 @@ const newOrder = async (req, res) => {
       return res.status(400).json({ error: "Invalid payment method" });
     }
 
-    // Generate a unique six-digit order ID
-    let orderId;
-    let isUnique = false;
-
-    while (!isUnique) {
-      orderId = Math.floor(100000 + Math.random() * 900000); // Generates a random six-digit number
-      const existingOrder = await Order.findOne({ orderId });
-      if (!existingOrder) {
-        isUnique = true;
-      }
-    }
+    // Generate a unique order ID
+    const orderId = await generateUniqueOrderIds(1);
     const compositeOrderId = `${req.user._id}-${orderId}`;
     // Create a new shipment
     const shipment = new Order({
@@ -1747,11 +1740,28 @@ const cancelOrdersAtBooked = async (req, res) => {
           { new: true, session },
         );
 
-        await Wallet.updateOne(
-          { _id: updatedWallet._id },
-          {
-            $push: {
-              transactions: {
+        await Promise.all([
+          Wallet.updateOne(
+            { _id: updatedWallet._id },
+            {
+              $push: {
+                transactions: {
+                  channelOrderId: currentOrder.orderId || null,
+                  category: "credit",
+                  amount: balanceTobeAdded,
+                  balanceAfterTransaction: updatedWallet.balance,
+                  date: new Date(),
+                  awb_number: allOrders.awb_number || "",
+                  description: `Freight Charges Received`,
+                },
+              },
+            },
+            { session },
+          ),
+          WalletTransaction.create(
+            [
+              {
+                walletId: updatedWallet._id,
                 channelOrderId: currentOrder.orderId || null,
                 category: "credit",
                 amount: balanceTobeAdded,
@@ -1759,11 +1769,11 @@ const cancelOrdersAtBooked = async (req, res) => {
                 date: new Date(),
                 awb_number: allOrders.awb_number || "",
                 description: `Freight Charges Received`,
-              },
-            },
-          },
-          { session },
-        );
+              }
+            ],
+            { session }
+          )
+        ]);
       } else if (balanceTobeAdded > 0 && alreadyRefunded) {
         console.log(`[Cancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
       }
@@ -2219,14 +2229,26 @@ const bulkCancelOrder = async (req, res) => {
               description: "Freight Charges Received",
             };
 
-            await Wallet.updateOne(
-              { _id: walletId },
-              {
-                $push: {
-                  transactions: transactionObj,
+            await Promise.all([
+              Wallet.updateOne(
+                { _id: walletId },
+                {
+                  $push: {
+                    transactions: transactionObj,
+                  },
                 },
-              },
-            );
+              ),
+              WalletTransaction.create({
+                walletId: walletId,
+                channelOrderId: transactionObj.channelOrderId,
+                category: transactionObj.category,
+                amount: transactionObj.amount,
+                balanceAfterTransaction: transactionObj.balanceAfterTransaction,
+                date: transactionObj.date,
+                awb_number: transactionObj.awb_number,
+                description: transactionObj.description,
+              })
+            ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in newOrder (bulk cancel):", err.message));
 
             // Push to cached document's transactions to handle multiple orders of same user
             walletDoc.transactions.push(transactionObj);

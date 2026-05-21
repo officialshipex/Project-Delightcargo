@@ -4,6 +4,7 @@ const User = require("../../../models/User.model");
 require("dotenv").config();
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { getDTDCAuthToken } = require("../Authorize/saveCourierContoller");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const CourierService = require("../../../models/CourierService.Schema");
@@ -228,6 +229,18 @@ const createOrderDTDC = async (
         },
         { new: true }
       );
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      WalletTransaction.create({
+        walletId: walletId,
+        channelOrderId: currentOrder.orderId,
+        category: "debit",
+        amount: charges,
+        balanceAfterTransaction: currentWallet.balance - parseFloat(charges),
+        date: new Date(),
+        awb_number: result.reference_number,
+        description: "Freight Charges Applied",
+        priceBreakup
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk DTDC):", e.message));
     } else {
       console.log("ererer", response.data);
       return { message: "Error creating shipment" };

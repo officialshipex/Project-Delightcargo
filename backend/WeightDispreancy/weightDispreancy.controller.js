@@ -10,6 +10,7 @@ const { uploadToS3 } = require("../config/s3");
 const { calculateRateForDispute } = require("../Rate/calculateRateController");
 const Plan = require("../models/Plan.model");
 const mongoose = require("mongoose");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const downloadExcel = async (req, res) => {
   try {
     const workbook = new ExcelJS.Workbook();
@@ -687,6 +688,10 @@ const AcceptDiscrepancy = async (req, res) => {
     };
     wallet.transactions.push(newTransaction);
 
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session })
+      .catch(e => console.error("⚠️ WalletTransaction dual-write failed (AcceptDiscrepancy):", e.message));
+
     await wallet.save({ session });
 
     discrepancies.status = "Accepted";
@@ -803,6 +808,10 @@ const AcceptAllDiscrepancies = async (req, res) => {
 
       wallet.transactions.push(newTransaction);
 
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session })
+        .catch(e => console.error("⚠️ WalletTransaction dual-write failed (AcceptAllDiscrepancies):", e.message));
+
       // update discrepancy
       discrepancy.status = "Accepted";
       discrepancy.clientStatus = "Accepted by Client";
@@ -894,6 +903,11 @@ const autoAcceptDiscrepancies = async () => {
       };
 
       wallet.transactions.push(newTransaction);
+
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session })
+        .catch(e => console.error("⚠️ WalletTransaction dual-write failed (autoAcceptDiscrepancies):", e.message));
+
       await wallet.save({ session });
 
       discrepancy.status = "Accepted";

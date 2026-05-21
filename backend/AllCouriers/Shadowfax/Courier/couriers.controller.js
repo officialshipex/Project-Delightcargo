@@ -6,6 +6,7 @@ const axios = require("axios");
 const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const User = require("../../../models/User.model");
 const { getShadowfaxToken } = require("../Authorize/saveCourierController");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -225,6 +226,19 @@ const createOrder = async (req, res) => {
           },
           { session }
         );
+
+        // 🔁 Dual-write: mirror to WalletTransaction for future migration
+        await WalletTransaction.create([{
+          walletId: currentWallet._id,
+          channelOrderId: currentOrder.orderId || null,
+          category: "debit",
+          amount: balanceToBeDeducted,
+          balanceAfterTransaction: newBalance,
+          date: new Date(),
+          awb_number: sfxData.data.awb_number,
+          description: "Freight Charges Applied",
+          priceBreakup
+        }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createShadowfaxOrder):", e.message));
       }
 
       // ── Update order document ─────────────────────────────────────────────

@@ -4,6 +4,7 @@ const Order = require("../../../models/newOrder.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const mongoose = require("mongoose");
 const pickupAddress = require("../../../models/pickupAddress.model");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -489,7 +490,7 @@ const orderCreationEkart = async (req, res) => {
     // =====================================================
     process.nextTick(async () => {
       try {
-        await Wallet.findOneAndUpdate(
+        const updatedWallet = await Wallet.findOneAndUpdate(
           { _id: user.Wallet },
           {
             $inc: { balance: -balanceToBeDeducted },
@@ -507,7 +508,22 @@ const orderCreationEkart = async (req, res) => {
               },
             },
           },
+          { new: true }
         );
+
+        if (updatedWallet) {
+          await WalletTransaction.create({
+            walletId: updatedWallet._id,
+            channelOrderId: currentOrder.orderId,
+            category: "debit",
+            amount: balanceToBeDeducted,
+            balanceAfterTransaction: updatedWallet.balance,
+            date: new Date(),
+            awb_number: response.data.tracking_id,
+            description: "Freight Charges Applied",
+            priceBreakup
+          }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createEkartOrder async):", e.message));
+        }
       } catch (err) {
         console.error("Wallet update error:", err);
       }

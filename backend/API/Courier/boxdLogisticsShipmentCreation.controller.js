@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const { getZone } = require("../../Rate/zoneManagementController");
 const {
     createBoxdOrder,
@@ -17,6 +18,11 @@ const createBoxdLogisticsShipment = async ({
     courierServiceName,
     courier,       // courier_id (number) from serviceability response
     priceBreakup,
+    userId,
+    walletId,
+    walletBalance,
+    walletHoldAmount,
+    walletCreditLimit,
 }) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -36,9 +42,8 @@ const createBoxdLogisticsShipment = async ({
             };
         }
 
-        // Step 2: Fetch user, zone, and warehouse ID in parallel
-        const [user, zone, warehouseId] = await Promise.all([
-            User.findById(currentOrder.userId).session(session),
+        // Step 2: Fetch zone and warehouse ID in parallel
+        const [zone, warehouseId] = await Promise.all([
             getZone(
                 currentOrder.pickupAddress.pinCode,
                 currentOrder.receiverAddress.pinCode
@@ -46,16 +51,10 @@ const createBoxdLogisticsShipment = async ({
             createBoxdWarehouse(currentOrder.userId, currentOrder.pickupAddress)
         ]);
 
-        if (!user) throw new Error("User not found");
-        if (!user.Wallet) throw new Error("User wallet not found");
-
-        const currentWallet = await Wallet.findById(user.Wallet).session(session);
-        if (!currentWallet) throw new Error("Wallet not found");
-
         // Step 3: Wallet balance check
-        const hold = currentWallet.holdAmount || 0;
-        const effectiveBalance = currentWallet.balance - hold;
-        const balance = effectiveBalance + (currentWallet.creditLimit || 0);
+        const hold = walletHoldAmount || 0;
+        const effectiveBalance = walletBalance - hold;
+        const balance = effectiveBalance + (walletCreditLimit || 0);
         if (balance < finalCharges) throw new Error("Insufficient wallet balance");
 
         // Step 4: Zone check
@@ -163,38 +162,70 @@ const createBoxdLogisticsShipment = async ({
         }
 
         // Step 7: Update order + wallet atomically
-        currentOrder.status = "Booked";
-        currentOrder.awb_number = awb;
-        currentOrder.shipment_id = String(boxdOrderId);
-        currentOrder.provider = "Bluedart";
-        currentOrder.partner = "BoxdLogistics";
-        currentOrder.shipmentCreatedAt = new Date();
-        currentOrder.totalFreightCharges = parseFloat(finalCharges) || 0;
-        currentOrder.courierServiceName = courierServiceName;
-        currentOrder.zone = zone.zone;
-        currentOrder.priceBreakup = priceBreakup;
-        currentOrder.tracking.push({
-            status: "Booked",
-            StatusLocation: currentOrder.pickupAddress?.city || "N/A",
-            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-            Instructions: "Order booked successfully",
-        });
-
-        currentWallet.balance -= parseFloat(finalCharges);
-        currentWallet.transactions.push({
-            channelOrderId: currentOrder.orderId,
-            category: "debit",
-            amount: parseFloat(finalCharges),
-            balanceAfterTransaction: currentWallet.balance,
-            date: new Date(),
-            awb_number: awb,
-            description: "Freight Charges Applied",
-            priceBreakup
-        });
+        const balanceToBeDeducted = parseFloat(finalCharges) || 0;
 
         await Promise.all([
-            currentOrder.save({ session }),
-            currentWallet.save({ session }),
+            Order.findByIdAndUpdate(
+                id,
+                {
+                    $set: {
+                        status: "Booked",
+                        awb_number: awb,
+                        shipment_id: String(boxdOrderId),
+                        provider: "Bluedart",
+                        partner: "BoxdLogistics",
+                        shipmentCreatedAt: new Date(),
+                        totalFreightCharges: balanceToBeDeducted,
+                        courierServiceName,
+                        zone: zone.zone,
+                        priceBreakup
+                    },
+                    $push: {
+                        tracking: {
+                            status: "Booked",
+                            StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+                            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                            Instructions: "Order booked successfully",
+                        }
+                    }
+                },
+                { session }
+            ),
+            Wallet.updateOne(
+                { _id: walletId },
+                {
+                    $inc: { balance: -balanceToBeDeducted },
+                    $push: {
+                        transactions: {
+                            channelOrderId: currentOrder.orderId,
+                            category: "debit",
+                            amount: balanceToBeDeducted,
+                            balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+                            date: new Date(),
+                            awb_number: awb,
+                            description: "Freight Charges Applied",
+                            priceBreakup
+                        }
+                    }
+                },
+                { session }
+            ),
+            WalletTransaction.create(
+                [
+                    {
+                        walletId: walletId,
+                        channelOrderId: currentOrder.orderId,
+                        category: "debit",
+                        amount: balanceToBeDeducted,
+                        balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+                        date: new Date(),
+                        awb_number: awb,
+                        description: "Freight Charges Applied",
+                        priceBreakup
+                    }
+                ],
+                { session }
+            )
         ]);
 
         await session.commitTransaction();

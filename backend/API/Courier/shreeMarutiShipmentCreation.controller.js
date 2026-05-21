@@ -8,6 +8,7 @@ const Services = require("../../models/CourierService.Schema");
 const Order = require("../../models/newOrder.model");
 const user = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const { getZone } = require("../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
@@ -17,7 +18,12 @@ const createShreeMarutiShipment = async ({
   provider,
   finalCharges,
   courierServiceName,
-  priceBreakup
+  priceBreakup,
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
   const API_URL = `${BASE_URL}/fulfillment/public/seller/order/ecomm/push-order`;
   const MANIFEST_API = `${BASE_URL}/fulfillment/public/seller/order/create-manifest`;
@@ -47,8 +53,6 @@ const createShreeMarutiShipment = async ({
       };
     }
 
-    const users = await user.findById(currentOrder.userId).session(session);
-    const currentWallet = await Wallet.findById(users.Wallet).session(session);
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
@@ -78,9 +82,8 @@ const createShreeMarutiShipment = async ({
     }
 
     // Wallet balance check
-    const effectiveBalance =
-      currentWallet.balance - (currentWallet.holdAmount || 0);
-    const balance = effectiveBalance + currentWallet.creditLimit;
+    const effectiveBalance = walletBalance - walletHoldAmount;
+    const balance = effectiveBalance + walletCreditLimit;
     if (balance < finalCharges) {
       await session.abortTransaction();
       await Order.findByIdAndUpdate(id, { status: "new" });
@@ -213,25 +216,43 @@ const createShreeMarutiShipment = async ({
 
       await currentOrder.save({ session });
 
-      await currentWallet.updateOne(
-        {
-          $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
+      await Promise.all([
+        Wallet.updateOne(
+          { _id: walletId },
+          {
+            $inc: { balance: -balanceToBeDeducted },
+            $push: {
+              transactions: {
+                channelOrderId: currentOrder.orderId || null,
+                category: "debit",
+                amount: balanceToBeDeducted,
+                balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+                date: new Date(),
+                awb_number: result.awbNumber || "",
+                description: `Freight Charges Applied`,
+                priceBreakup
+              },
+            },
+          },
+          { session }
+        ),
+        WalletTransaction.create(
+          [
+            {
+              walletId: walletId,
               channelOrderId: currentOrder.orderId || null,
               category: "debit",
               amount: balanceToBeDeducted,
-              balanceAfterTransaction:
-                currentWallet.balance - balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
               date: new Date(),
               awb_number: result.awbNumber || "",
               description: `Freight Charges Applied`,
               priceBreakup
-            },
-          },
-        },
-        { session }
-      );
+            }
+          ],
+          { session }
+        )
+      ]);
 
       await session.commitTransaction();
       session.endSession();

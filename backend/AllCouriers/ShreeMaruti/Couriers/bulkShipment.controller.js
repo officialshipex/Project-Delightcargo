@@ -8,6 +8,7 @@ const Services = require("../../../models/CourierService.Schema");
 const Order = require("../../../models/newOrder.model");
 const { getUniqueId } = require("../../getUniqueId");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -256,6 +257,21 @@ const createShipmentFunctionShreeMaruti = async (
         }, // Deduct the charges
         { new: true } // Return the updated document
       );
+
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      if (updatedWallet) {
+        await WalletTransaction.create({
+          walletId: updatedWallet._id,
+          channelOrderId: currentOrder.orderId,
+          category: "debit",
+          amount: parseFloat(finalCharges),
+          balanceAfterTransaction: updatedWallet.balance,
+          date: new Date(),
+          awb_number: result.awbNumber,
+          description: "Freight Charges Applied",
+          priceBreakup
+        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createShipmentFunctionShreeMaruti ShreeMaruti):", e.message));
+      }
 
       // --- Call Manifest API ---
       try {

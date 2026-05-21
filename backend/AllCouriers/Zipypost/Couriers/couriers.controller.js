@@ -4,6 +4,7 @@ require("dotenv").config();
 const Order = require("../../../models/newOrder.model");
 const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const CourierService = require("../../../models/CourierService.Schema");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
@@ -378,6 +379,17 @@ const createZipypostOrder = async (req, res) => {
       description: "Freight Charges Applied",
       priceBreakup
     });
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create([{
+      walletId: currentWallet._id,
+      channelOrderId: currentOrder.orderId,
+      category: "debit",
+      amount: finalCharges,
+      balanceAfterTransaction: currentWallet.balance,
+      awb_number: result.awb,
+      description: "Freight Charges Applied",
+      priceBreakup
+    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createZipypostOrder):", e.message));
 
     await Promise.all([
       currentOrder.save({ session }),

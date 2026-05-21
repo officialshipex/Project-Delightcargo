@@ -8,6 +8,7 @@ const url = process.env.DELHIVERY_URL;
 const Order = require("../../../models/newOrder.model");
 const crypto = require("crypto");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const {
   createClientWarehouse,
   getUniqueWarehouseName,
@@ -222,6 +223,19 @@ const createShipmentFunctionDelhivery = async (
             }
           );
         }
+
+        // 🔁 Dual-write: mirror to WalletTransaction for future migration
+        WalletTransaction.create({
+          walletId: walletId,
+          channelOrderId: currentOrder.orderId,
+          category: "debit",
+          amount: parseFloat(finalCharges),
+          balanceAfterTransaction: updatedWallet ? updatedWallet.balance : (currentWallet.balance - parseFloat(finalCharges)),
+          date: new Date(),
+          awb_number: result.waybill,
+          description: "Freight Charges Applied",
+          priceBreakup
+        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk Delhivery):", e.message));
 
         return {
           status: 201,

@@ -3,6 +3,7 @@ const Plan = require("../models/Plan.model");
 const rateCards = require("../models/rateCards");
 const users = require("../models/User.model");
 const wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const cron = require("node-cron");
 const zoneManagementController = require("../Rate/zoneManagementController");
 const getZone = zoneManagementController.getZone;
@@ -165,11 +166,28 @@ const rtoCharges = async (specificOrderId = null) => {
           const upd = await applyIncAndGet(userWallet._id, codCharges);
           const balanceAfter = parseFloat((upd.balance || 0).toFixed(2));
 
-          await wallet.updateOne(
-            { _id: userWallet._id },
-            {
-              $push: {
-                transactions: {
+          await Promise.all([
+            wallet.updateOne(
+              { _id: userWallet._id },
+              {
+                $push: {
+                  transactions: {
+                    channelOrderId: item.orderId || null,
+                    category: "credit",
+                    amount: codCharges,
+                    balanceAfterTransaction: balanceAfter,
+                    date: codDate,
+                    awb_number: awb,
+                    description: codDescription,
+                  },
+                },
+              },
+              { session }
+            ),
+            WalletTransaction.create(
+              [
+                {
+                  walletId: userWallet._id,
                   channelOrderId: item.orderId || null,
                   category: "credit",
                   amount: codCharges,
@@ -177,11 +195,11 @@ const rtoCharges = async (specificOrderId = null) => {
                   date: codDate,
                   awb_number: awb,
                   description: codDescription,
-                },
-              },
-            },
-            { session }
-          );
+                }
+              ],
+              { session }
+            )
+          ]);
 
           console.log(
             `➕ COD applied for AWB ${awb}: +${codCharges}, balanceAfter=${balanceAfter}`
@@ -203,11 +221,32 @@ const rtoCharges = async (specificOrderId = null) => {
           );
           finalBalanceForOrder = balanceAfterDebit;
 
-          await wallet.updateOne(
-            { _id: userWallet._id },
-            {
-              $push: {
-                transactions: {
+          await Promise.all([
+            wallet.updateOne(
+              { _id: userWallet._id },
+              {
+                $push: {
+                  transactions: {
+                    channelOrderId: item.orderId || null,
+                    category: "debit",
+                    amount: totalChargesReverse,
+                    balanceAfterTransaction: balanceAfterDebit,
+                    date: rtoDate,
+                    awb_number: awb,
+                    description: rtoDescription,
+                    priceBreakup: {
+                      freight: charges,
+                      gst: gstAmount,
+                    },
+                  },
+                },
+              },
+              { session }
+            ),
+            WalletTransaction.create(
+              [
+                {
+                  walletId: userWallet._id,
                   channelOrderId: item.orderId || null,
                   category: "debit",
                   amount: totalChargesReverse,
@@ -219,11 +258,11 @@ const rtoCharges = async (specificOrderId = null) => {
                     freight: charges,
                     gst: gstAmount,
                   },
-                },
-              },
-            },
-            { session }
-          );
+                }
+              ],
+              { session }
+            )
+          ]);
           console.log(`➖ RTO debit applied for AWB ${awb}: -${totalChargesReverse}, balanceAfter=${balanceAfterDebit}`);
         } else if (hasRtoTx) {
           console.log(`ℹ️ Skipping RTO debit for AWB ${awb} (Duplicate)`);

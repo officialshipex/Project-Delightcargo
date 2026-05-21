@@ -1,4 +1,5 @@
 const Order = require("../../models/newOrder.model");
+const { generateUniqueOrderIds } = require("../../utils/generateUniqueOrderId");
 const Joi = require("joi");
 const User = require("../../models/User.model");
 
@@ -124,14 +125,8 @@ const orderCreationController = async (req, res) => {
       });
     }
 
-    // Generate unique 6-digit orderId for channelId field
-    let orderId;
-    let isUnique = false;
-    while (!isUnique) {
-      orderId = Math.floor(100000 + Math.random() * 900000); // 6-digit number
-      const exists = await Order.findOne({ channelId: orderId });
-      if (!exists) isUnique = true;
-    }
+    // Generate a unique order ID
+    const orderId = await generateUniqueOrderIds(1);
 
     const compositeOrderId = `${userId}-${orderId}`;
 

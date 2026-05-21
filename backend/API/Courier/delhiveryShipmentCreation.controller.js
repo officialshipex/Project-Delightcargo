@@ -2,6 +2,7 @@ const axios = require("axios");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const mongoose = require("mongoose");
 const plan = require("../../models/Plan.model");
 const { getZone } = require("../../Rate/zoneManagementController");
@@ -214,7 +215,7 @@ const createDelhiveryShipment = async ({
       };
     }
 
-    // Step 9️⃣ Update Order & Wallet atomically
+    // Step 9️⃣ Update Order & Wallet atomically (with Dual-Write to WalletTransaction)
     await Promise.all([
       Order.findByIdAndUpdate(
         id,
@@ -264,6 +265,23 @@ const createDelhiveryShipment = async ({
         },
         { session }
       ),
+      // ✅ DUAL-WRITE: High-performance independent transaction log
+      WalletTransaction.create(
+        [
+          {
+            walletId: walletId,
+            channelOrderId: currentOrder.orderId || null,
+            category: "debit",
+            amount: balanceToBeDeducted,
+            balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+            date: new Date(),
+            awb_number: result.waybill || "",
+            description: "Freight Charges Applied",
+            priceBreakup
+          }
+        ],
+        { session }
+      )
     ]);
 
     await session.commitTransaction();

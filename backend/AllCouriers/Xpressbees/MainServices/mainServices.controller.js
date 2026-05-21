@@ -6,6 +6,7 @@ const axios = require("axios");
 const Order = require("../../../models/newOrder.model");
 const { getToken } = require("../Authorize/XpressbeesAuthorize.controller");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const user = require("../../../models/User.model");
 const BASE_URL = process.env.XpreesbeesUrl;
 const plan = require("../../../models/Plan.model");
@@ -165,6 +166,18 @@ const createShipment = async (req, res) => {
           },
         },
       });
+
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      await WalletTransaction.create({
+        walletId: currentWallet._id,
+        channelOrderId: currentOrder.orderId || null,
+        category: "debit",
+        amount: balanceToBeDeducted,
+        balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+        date: new Date(),
+        awb_number: result.awb_number || "",
+        description: "Freight Charges Applied",
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createShipment Xpressbees):", e.message));
 
       return res.status(201).json({ message: "Shipment Created Succesfully" });
     } else {

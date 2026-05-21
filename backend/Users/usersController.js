@@ -13,6 +13,7 @@ const Order = require("../models/newOrder.model");
 const BillingAddress = require("../models/billingInfo.model");
 const { generateKeySync } = require("crypto");
 const Wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const KamDetails = require("../models/KamDetails.model");
 const ActivityLog = require("../models/ActivityLog.model");
 
@@ -77,6 +78,11 @@ const refundFreightIfSingleDebit = async () => {
           return txn;
         });
 
+        await WalletTransaction.updateMany(
+          { walletId: wallet._id, awb_number: awb },
+          { $set: { transactionStatus: "Cancelled" } }
+        ).catch(err => console.error("⚠️ WalletTransaction status update failed in usersController:", err.message));
+
         await wallet.save();
         await order.save();
         console.log("✔ Order + Wallet transactions updated.");
@@ -108,6 +114,17 @@ const refundFreightIfSingleDebit = async () => {
         order.status = "Cancelled";
 
         wallet.balance = newBalance;
+
+        await WalletTransaction.create({
+          walletId: wallet._id,
+          channelOrderId: orderId,
+          category: "credit",
+          amount: refundAmount,
+          balanceAfterTransaction: newBalance,
+          awb_number: awb,
+          description: "Freight Charges Received",
+        }).catch(err => console.error("⚠️ WalletTransaction dual-write failed in usersController:", err.message));
+
         await wallet.save();
         await order.save();
         console.log(`✔ Credited ₹${refundAmount} for AWB ${awb}.`);

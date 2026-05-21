@@ -2,6 +2,7 @@ const axios = require("axios");
 const { getShadowfaxToken } = require("../Authorize/saveCourierController");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -160,6 +161,21 @@ const createOrderShadowfax = async (
         },
         { new: true }
       );
+
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      if (updatedWallet) {
+        await WalletTransaction.create({
+          walletId: updatedWallet._id,
+          channelOrderId: currentOrder.orderId,
+          category: "debit",
+          amount: parseFloat(finalCharges),
+          balanceAfterTransaction: updatedWallet.balance,
+          date: new Date(),
+          awb_number: awb,
+          description: "Freight Charges Applied",
+          priceBreakup,
+        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrderShadowfax bulk):", e.message));
+      }
 
       // Auto-assign pickup manifest
       try {

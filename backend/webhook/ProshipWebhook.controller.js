@@ -1,6 +1,7 @@
 const Order = require("../models/newOrder.model");
 const Wallet = require("../models/wallet");
 const User = require("../models/User.model");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const {
   sendWhatsAppMessage,
   sendEmailMessage,
@@ -269,6 +270,18 @@ const ProshipWebhook = async (req, res) => {
                       },
                     }
                   );
+
+                  await WalletTransaction.create({
+                    walletId: currentWallet._id,
+                    channelOrderId: order.orderId || null,
+                    category: "credit",
+                    amount: balanceToBeAdded,
+                    balanceAfterTransaction: newBalance,
+                    date: new Date(),
+                    awb_number: order.awb_number,
+                    description: "Freight Charges Received",
+                  }).catch(err => console.error("⚠️ WalletTransaction dual-write failed for ProshipWebhook:", err.message));
+
                   order.walletRefunded = true;
                   console.log(
                     `Proship Webhook: Refunded ₹${balanceToBeAdded} for AWB ${order.awb_number} due to cancellation`

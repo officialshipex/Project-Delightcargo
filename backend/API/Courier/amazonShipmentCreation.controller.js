@@ -3,6 +3,7 @@ const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const {
   getAmazonAccessToken,
 } = require("../../AllCouriers/Amazon/Authorize/saveCourierController");
@@ -31,7 +32,12 @@ const createAmazonShipment = async ({
   provider,
   finalCharges,
   courierServiceName,
-  priceBreakup
+  priceBreakup,
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -84,17 +90,10 @@ const createAmazonShipment = async ({
       }
     }
 
-    // ✅ Get user & wallet (with session)
-    const user = await User.findById(currentOrder.userId).session(session);
-    if (!user) throw new Error("User not found");
-
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
-    if (!currentWallet) throw new Error("Wallet not found");
-
-    const holdAmount = currentWallet.holdAmount || 0;
-    const availableBalance = currentWallet.balance - holdAmount;
-    const balance = availableBalance + currentWallet.creditLimit;
     const charges = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
+    const holdAmount = walletHoldAmount || 0;
+    const availableBalance = walletBalance - holdAmount;
+    const balance = availableBalance + walletCreditLimit;
 
     if (balance < charges)
       throw new Error("Insufficient wallet balance");
@@ -196,18 +195,36 @@ const createAmazonShipment = async ({
       date: new Date(),
       awb_number: currentOrder.awb_number,
       description: "Freight Charges Applied",
-      balanceAfterTransaction: currentWallet.balance - charges,
+      balanceAfterTransaction: walletBalance - charges,
       priceBreakup
     };
 
-    await Wallet.findOneAndUpdate(
-      { _id: currentWallet._id, balance: { $gte: charges } },
-      {
-        $inc: { balance: -charges },
-        $push: { transactions: transaction },
-      },
-      { session, new: true }
-    );
+    await Promise.all([
+      Wallet.updateOne(
+        { _id: walletId },
+        {
+          $inc: { balance: -charges },
+          $push: { transactions: transaction },
+        },
+        { session }
+      ),
+      WalletTransaction.create(
+        [
+          {
+            walletId: walletId,
+            channelOrderId: currentOrder.orderId,
+            category: "debit",
+            amount: charges,
+            balanceAfterTransaction: walletBalance - charges,
+            date: new Date(),
+            awb_number: currentOrder.awb_number,
+            description: "Freight Charges Applied",
+            priceBreakup
+          }
+        ],
+        { session }
+      )
+    ]);
 
     // ✅ Commit transaction
     await session.commitTransaction();

@@ -6,6 +6,7 @@ const Order = require("../models/newOrder.model");
 const adminCodRemittance = require("./adminCodRemittance.model");
 const users = require("../models/User.model");
 const Wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const afterPlan = require("./afterPlan.model");
 const fs = require("fs");
 const csvParser = require("csv-parser");
@@ -419,13 +420,24 @@ const processAndRemit = async (plan) => {
       description: "COD Adjustment credited to wallet",
     };
 
-    await Wallet.updateOne(
-      { _id: wallet._id },
-      {
-        $set: { balance: afterWallet },
-        $push: { transactions: transactionEntry },
-      }
-    );
+    await Promise.all([
+      Wallet.updateOne(
+        { _id: wallet._id },
+        {
+          $set: { balance: afterWallet },
+          $push: { transactions: transactionEntry },
+        }
+      ),
+      WalletTransaction.create({
+        walletId: wallet._id,
+        channelOrderId: transactionEntry.channelOrderId,
+        category: transactionEntry.category,
+        amount: transactionEntry.amount,
+        balanceAfterTransaction: transactionEntry.balanceAfterTransaction,
+        awb_number: transactionEntry.awb_number,
+        description: transactionEntry.description,
+      })
+    ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in cod.controller (adjustAmount):", err.message));
   } else {
     // No adjustment → only update balance
     await Wallet.updateOne(
@@ -781,18 +793,28 @@ const codRemittanceRecharge = async (req, res) => {
     );
 
     // ✅ Push transaction and update wallet balance
-    await currentWallet.updateOne({
-      $inc: { balance: amount },
-      $push: {
-        transactions: {
-          category: "credit",
-          amount,
-          balanceAfterTransaction: currentWallet.balance + amount,
-          date: new Date(),
-          description: "Recharge from COD Remittance",
+    await Promise.all([
+      currentWallet.updateOne({
+        $inc: { balance: amount },
+        $push: {
+          transactions: {
+            category: "credit",
+            amount,
+            balanceAfterTransaction: currentWallet.balance + amount,
+            date: new Date(),
+            description: "Recharge from COD Remittance",
+          },
         },
-      },
-    });
+      }),
+      WalletTransaction.create({
+        walletId: currentWallet._id,
+        category: "credit",
+        amount,
+        balanceAfterTransaction: currentWallet.balance + amount,
+        date: new Date(),
+        description: "Recharge from COD Remittance",
+      })
+    ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in cod.controller (recharge):", err.message));
 
     return res.status(200).json({
       success: true,
@@ -2678,21 +2700,31 @@ const transferCOD = async (req, res) => {
     if (totalAdjusted > 0) {
       const newBalance = wallet.balance + totalAdjusted;
 
-      await Wallet.updateOne(
-        { _id: wallet._id },
-        {
-          $set: { balance: newBalance },
-          $push: {
-            transactions: {
-              category: "credit",
-              amount: totalAdjusted,
-              balanceAfterTransaction: newBalance,
-              description: "COD adjustment credited to wallet",
-              date: new Date(),
+      await Promise.all([
+        Wallet.updateOne(
+          { _id: wallet._id },
+          {
+            $set: { balance: newBalance },
+            $push: {
+              transactions: {
+                category: "credit",
+                amount: totalAdjusted,
+                balanceAfterTransaction: newBalance,
+                description: "COD adjustment credited to wallet",
+                date: new Date(),
+              },
             },
-          },
-        }
-      );
+          }
+        ),
+        WalletTransaction.create({
+          walletId: wallet._id,
+          category: "credit",
+          amount: totalAdjusted,
+          balanceAfterTransaction: newBalance,
+          description: "COD adjustment credited to wallet",
+          date: new Date(),
+        })
+      ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in cod.controller (bulk adjust):", err.message));
     }
 
     // ============================================================

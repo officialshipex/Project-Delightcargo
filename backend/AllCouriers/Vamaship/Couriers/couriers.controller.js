@@ -3,6 +3,7 @@ require("dotenv").config();
 const Order = require("../../../models/newOrder.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const User = require("../../../models/User.model");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -189,6 +190,18 @@ const createVamashipShipment = async (req, res) => {
           },
         },
       });
+
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      await WalletTransaction.create({
+        walletId: currentWallet._id,
+        channelOrderId: currentOrder.orderId,
+        category: "debit",
+        amount: parseInt(finalCharges),
+        balanceAfterTransaction: effectiveBalance - parseInt(finalCharges),
+        date: new Date(),
+        awb_number: shipmentInfo.awb,
+        description: "Freight Charges Applied",
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createVamashipShipment):", e.message));
     }
 
     return res.status(200).json({

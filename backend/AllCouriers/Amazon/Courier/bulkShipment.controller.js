@@ -1,6 +1,7 @@
 const axios = require("axios");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { getAmazonAccessToken } = require("../Authorize/saveCourierController");
 const User = require("../../../models/User.model");
 const { s3 } = require("../../../config/s3");
@@ -231,6 +232,19 @@ const createShipmentAmazon = async (
         }
       );
     }
+
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create({
+      walletId: walletId,
+      channelOrderId: currentOrder.orderId,
+      category: "debit",
+      amount: parseFloat(charges),
+      balanceAfterTransaction: updatedWallet ? updatedWallet.balance : (currentWallet.balance - parseFloat(charges)),
+      date: new Date(),
+      awb_number: result.packageDocumentDetails[0].trackingId,
+      description: "Freight Charges Applied",
+      priceBreakup
+    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk Amazon):", e.message));
 
     return {
       success: true,

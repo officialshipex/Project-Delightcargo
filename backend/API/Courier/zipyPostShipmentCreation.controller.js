@@ -2,6 +2,7 @@ const axios = require("axios");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const { getZone } = require("../../Rate/zoneManagementController");
 const {
   getAuthToken,
@@ -25,7 +26,12 @@ const createZipypostShipment = async ({
   provider,
   finalCharges,
   courierServiceName,
-  priceBreakup
+  priceBreakup,
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -46,18 +52,12 @@ const createZipypostShipment = async ({
       };
     }
 
-    // ✅ Step 2: Fetch user and wallet
-    const user = await User.findById(currentOrder.userId).session(session);
-    if (!user) throw new Error("User not found");
-    if (!user.Wallet) throw new Error("User wallet not found");
-
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
-    if (!currentWallet) throw new Error("Wallet not found");
+    // ✅ Step 2: Skip redundant user/wallet queries - parameters pre-fetched
 
     // ✅ Step 3: Check wallet balance
-    const hold = currentWallet.holdAmount || 0;
-    const effectiveBalance = currentWallet.balance - hold;
-    const balance = effectiveBalance + currentWallet.creditLimit;
+    const hold = walletHoldAmount || 0;
+    const effectiveBalance = walletBalance - hold;
+    const balance = effectiveBalance + walletCreditLimit;
     if (balance < finalCharges) throw new Error("Insufficient wallet balance");
 
     // ✅ Step 4: Get zone (cached for speed)
@@ -283,21 +283,43 @@ const createZipypostShipment = async ({
       Instructions: "Order booked successfully",
     });
 
-    currentWallet.balance -= finalCharges;
-    currentWallet.transactions.push({
-      channelOrderId: currentOrder.orderId,
-      category: "debit",
-      amount: finalCharges,
-      balanceAfterTransaction: currentWallet.balance,
-      date: new Date(),
-      awb_number: result.awb,
-      description: "Freight Charges Applied",
-      priceBreakup
-    });
-
     await Promise.all([
       currentOrder.save({ session }),
-      currentWallet.save({ session }),
+      Wallet.updateOne(
+        { _id: walletId },
+        {
+          $inc: { balance: -finalCharges },
+          $push: {
+            transactions: {
+              channelOrderId: currentOrder.orderId,
+              category: "debit",
+              amount: finalCharges,
+              balanceAfterTransaction: walletBalance - finalCharges,
+              date: new Date(),
+              awb_number: result.awb,
+              description: "Freight Charges Applied",
+              priceBreakup
+            },
+          },
+        },
+        { session }
+      ),
+      WalletTransaction.create(
+        [
+          {
+            walletId: walletId,
+            channelOrderId: currentOrder.orderId,
+            category: "debit",
+            amount: finalCharges,
+            balanceAfterTransaction: walletBalance - finalCharges,
+            date: new Date(),
+            awb_number: result.awb,
+            description: "Freight Charges Applied",
+            priceBreakup
+          }
+        ],
+        { session }
+      )
     ]);
 
     await session.commitTransaction();

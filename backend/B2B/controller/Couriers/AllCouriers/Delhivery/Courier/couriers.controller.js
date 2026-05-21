@@ -3,6 +3,7 @@ const BASE_URL = process.env.DEL_URL;
 const axios = require("axios");
 const User = require("../../../../../../models/User.model");
 const Wallet = require("../../../../../../models/wallet");
+const WalletTransaction = require("../../../../../../models/WalletTransaction.model");
 const mongoose = require("mongoose");
 const Order = require("../../../../../../models/newOrder.model");
 
@@ -43,23 +44,36 @@ const createDelhiveryB2BShipment = async (req, res) => {
     ================================= */
     const newBalance = wallet.balance - Number(finalCharges);
 
-    await Wallet.findByIdAndUpdate(
-      user.Wallet,
-      {
-        $inc: { balance: -finalCharges },
-        $push: {
-          transactions: {
-            channelOrderId: order.orderId,
-            category: "debit",
-            amount: finalCharges,
-            balanceAfterTransaction: newBalance,
-            description: "Freight Charges Applied",
-            date: new Date(),
+    await Promise.all([
+      Wallet.findByIdAndUpdate(
+        user.Wallet,
+        {
+          $inc: { balance: -finalCharges },
+          $push: {
+            transactions: {
+              channelOrderId: order.orderId,
+              category: "debit",
+              amount: finalCharges,
+              balanceAfterTransaction: newBalance,
+              description: "Freight Charges Applied",
+              date: new Date(),
+            },
           },
         },
-      },
-      { session }
-    );
+        { session }
+      ),
+      WalletTransaction.create([
+        {
+          walletId: user.Wallet,
+          channelOrderId: order.orderId,
+          category: "debit",
+          amount: finalCharges,
+          balanceAfterTransaction: newBalance,
+          description: "Freight Charges Applied",
+          date: new Date(),
+        }
+      ], { session }).catch(e => console.error("⚠️ WalletTransaction B2B debit dual-write failed:", e.message))
+    ]);
 
     /* ================================
        4️⃣ MANIFEST PAYLOAD
@@ -289,6 +303,16 @@ const delhiveryManifestCallback = async (req, res) => {
           },
         });
 
+        await WalletTransaction.create({
+          walletId: user.Wallet,
+          category: "credit",
+          channelOrderId: order.orderId,
+          amount: refundAmount,
+          balanceAfterTransaction: newBalance,
+          description: "Freight Charges Received",
+          date: new Date(),
+        }).catch(e => console.error("⚠️ WalletTransaction B2B credit dual-write failed:", e.message));
+
         await Order.findByIdAndUpdate(order._id, {
           status: "Cancelled",
           walletRefunded: true,
@@ -325,18 +349,32 @@ const delhiveryManifestCallback = async (req, res) => {
         },
       });
 
-      await Wallet.updateOne(
-        {
-          _id: user.Wallet,
-          "transactions.channelOrderId": order.orderId,
-          "transactions.category": "debit",
-        },
-        {
-          $set: {
-            "transactions.$.awb_number": payload.awbs?.[0] || null,
+      await Promise.all([
+        Wallet.updateOne(
+          {
+            _id: user.Wallet,
+            "transactions.channelOrderId": order.orderId,
+            "transactions.category": "debit",
           },
-        }
-      );
+          {
+            $set: {
+              "transactions.$.awb_number": payload.awbs?.[0] || null,
+            },
+          }
+        ),
+        WalletTransaction.updateOne(
+          {
+            walletId: user.Wallet,
+            channelOrderId: order.orderId,
+            category: "debit"
+          },
+          {
+            $set: {
+              awb_number: payload.awbs?.[0] || null
+            }
+          }
+        ).catch(e => console.error("⚠️ WalletTransaction B2B AWB update failed:", e.message))
+      ]);
     }
 
     res.json({ success: true });

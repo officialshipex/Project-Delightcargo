@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
 const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -501,6 +502,18 @@ const createBoxdLogisticsOrder = async (req, res) => {
                         },
                     }
                 );
+                // 🔁 Dual-write: mirror to WalletTransaction for future migration
+                WalletTransaction.create({
+                    walletId: user.Wallet,
+                    channelOrderId: currentOrder.orderId || null,
+                    category: "debit",
+                    amount: balanceToDeduct,
+                    balanceAfterTransaction: currentWallet.balance - balanceToDeduct,
+                    date: new Date(),
+                    awb_number: awb,
+                    description: "Freight Charges Applied",
+                    priceBreakup
+                }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (BoxdLogistics single):", e.message));
             } catch (err) {
                 console.error("BoxdLogistics wallet update error:", err.message);
             }

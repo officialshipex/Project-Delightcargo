@@ -1,5 +1,6 @@
 const Order = require("../models/newOrder.model");
 const Wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const User = require("../models/User.model");
 const DTDCStatusMapping = require("../statusMap/DTDCStatusMapping");
 const SmartShipStatusMapping = require("../statusMap/SmartShipStatusMapping");
@@ -1645,22 +1646,34 @@ const trackSingleOrder = async (order) => {
       const updatedWallet = await Wallet.findById(currentWallet._id);
 
       // Step 3: Push the transaction with correct balance
-      await Wallet.updateOne(
-        { _id: currentWallet._id },
-        {
-          $push: {
-            transactions: {
-              channelOrderId: order.orderId || null,
-              category: "credit",
-              amount: balanceTobeAdded,
-              balanceAfterTransaction: updatedWallet.balance,
-              date: new Date(),
-              awb_number: order.awb_number || "",
-              description: "Freight Charges Received",
+      await Promise.all([
+        Wallet.updateOne(
+          { _id: currentWallet._id },
+          {
+            $push: {
+              transactions: {
+                channelOrderId: order.orderId || null,
+                category: "credit",
+                amount: balanceTobeAdded,
+                balanceAfterTransaction: updatedWallet.balance,
+                date: new Date(),
+                awb_number: order.awb_number || "",
+                description: "Freight Charges Received",
+              },
             },
           },
-        },
-      );
+        ),
+        WalletTransaction.create({
+          walletId: currentWallet._id,
+          channelOrderId: order.orderId || null,
+          category: "credit",
+          amount: balanceTobeAdded,
+          balanceAfterTransaction: updatedWallet.balance,
+          date: new Date(),
+          awb_number: order.awb_number || "",
+          description: "Freight Charges Received",
+        })
+      ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in tracking controller:", err.message));
 
       console.log(
         "Wallet updated for AWB:",

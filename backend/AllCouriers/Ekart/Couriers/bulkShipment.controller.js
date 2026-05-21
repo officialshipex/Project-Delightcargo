@@ -1,6 +1,7 @@
 const axios = require("axios");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const pickupAddress = require("../../../models/pickupAddress.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { getAccessToken } = require("../Authorize/Ekart.controller");
@@ -333,7 +334,7 @@ const createOrderEkart = async (
     /* --------------------------------------------------
        9️⃣ WALLET DEBIT (DTDC STYLE)
     -------------------------------------------------- */
-    await Wallet.findOneAndUpdate(
+    const updatedWallet = await Wallet.findOneAndUpdate(
       { _id: walletId },
       {
         $inc: { balance: -charges },
@@ -353,6 +354,21 @@ const createOrderEkart = async (
       },
       { new: true },
     );
+
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    if (updatedWallet) {
+      await WalletTransaction.create({
+        walletId: updatedWallet._id,
+        channelOrderId: currentOrder.orderId,
+        category: "debit",
+        amount: charges,
+        balanceAfterTransaction: updatedWallet.balance,
+        date: new Date(),
+        awb_number: awb,
+        description: "Freight Charges Applied",
+        priceBreakup
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrderEkart bulk):", e.message));
+    }
 
     /* --------------------------------------------------
        10️⃣ FINAL RETURN (SAME AS DTDC)

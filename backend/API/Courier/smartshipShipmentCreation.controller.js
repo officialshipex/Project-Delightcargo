@@ -2,6 +2,7 @@ const axios = require("axios");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const { getZone } = require("../../Rate/zoneManagementController");
 const {
   registerSmartshipHub,
@@ -27,7 +28,12 @@ const createSmartshipShipment = async ({
   finalCharges,
   courierServiceName,
   provider,
-  priceBreakup
+  priceBreakup,
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -50,13 +56,12 @@ const createSmartshipShipment = async ({
       };
     }
 
-    // 2️⃣ Parallel fetch (zone, user, token)
-    const [zone, user, accessToken] = await Promise.all([
+    // 2️⃣ Parallel fetch (zone, token)
+    const [zone, accessToken] = await Promise.all([
       getZone(
         currentOrder.pickupAddress.pinCode,
         currentOrder.receiverAddress.pinCode
       ),
-      User.findById(currentOrder.userId),
       getAccessToken(),
     ]);
 
@@ -64,12 +69,6 @@ const createSmartshipShipment = async ({
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Pincode not serviceable" };
-    }
-
-    if (!user) {
-      await session.abortTransaction();
-      session.endSession();
-      return { success: false, message: "User not found" };
     }
 
     // ✅ Estimate Delivery Date (from DB)
@@ -96,17 +95,9 @@ const createSmartshipShipment = async ({
       }
     }
 
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
-    if (!currentWallet) {
-      await session.abortTransaction();
-      session.endSession();
-      return { success: false, message: "Wallet not found" };
-    }
-
     // 3️⃣ Check wallet balance
-    const effectiveBalance =
-      currentWallet.balance - (currentWallet.holdAmount || 0);
-    const balance = effectiveBalance + currentWallet.creditLimit;
+    const effectiveBalance = walletBalance - walletHoldAmount;
+    const balance = effectiveBalance + walletCreditLimit;
     if (balance < finalCharges) {
       await session.abortTransaction();
       session.endSession();
@@ -115,7 +106,7 @@ const createSmartshipShipment = async ({
 
     // 4️⃣ Register Smartship hub
     const smartshipHub = await registerSmartshipHub(
-      user._id,
+      userId,
       currentOrder.pickupAddress.pinCode
     );
 
@@ -236,26 +227,43 @@ const createSmartshipShipment = async ({
       { session }
     );
 
-    await Wallet.updateOne(
-      { _id: currentWallet._id },
-      {
-        $inc: { balance: -parseFloat(finalCharges) },
-        $push: {
-          transactions: {
+    await Promise.all([
+      Wallet.updateOne(
+        { _id: walletId },
+        {
+          $inc: { balance: -parseFloat(finalCharges) },
+          $push: {
+            transactions: {
+              channelOrderId: currentOrder.orderId,
+              category: "debit",
+              amount: parseFloat(finalCharges),
+              balanceAfterTransaction: walletBalance - parseFloat(finalCharges),
+              date: new Date(),
+              awb_number: result.awb_number,
+              description: `Freight Charges Applied`,
+              priceBreakup
+            },
+          },
+        },
+        { session }
+      ),
+      WalletTransaction.create(
+        [
+          {
+            walletId: walletId,
             channelOrderId: currentOrder.orderId,
             category: "debit",
             amount: parseFloat(finalCharges),
-            balanceAfterTransaction:
-              currentWallet.balance - parseFloat(finalCharges),
+            balanceAfterTransaction: walletBalance - parseFloat(finalCharges),
             date: new Date(),
             awb_number: result.awb_number,
             description: `Freight Charges Applied`,
             priceBreakup
-          },
-        },
-      },
-      { session }
-    );
+          }
+        ],
+        { session }
+      )
+    ]);
 
     await session.commitTransaction();
     session.endSession();

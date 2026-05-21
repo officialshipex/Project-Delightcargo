@@ -209,6 +209,11 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
       case "Delhivery":
@@ -235,6 +240,11 @@ const bookOrder = async (req, res) => {
           courierServiceName,
           courier: courierService?.courier,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
       case "Smartship":
@@ -244,6 +254,11 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
       case "Shree Maruti":
@@ -253,6 +268,11 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
       case "ZipyPost":
@@ -262,6 +282,11 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
       case "Ekart":
@@ -271,6 +296,11 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
       case "BoxdLogistics":
@@ -281,6 +311,11 @@ const bookOrder = async (req, res) => {
           courierServiceName,
           courier: courierService?.courier,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
       case "Proship":
@@ -290,6 +325,11 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
 
@@ -300,6 +340,11 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
 
@@ -310,6 +355,11 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
 

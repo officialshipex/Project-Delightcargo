@@ -3,6 +3,7 @@ const axios = require("axios");
 const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const User = require("../../../models/User.model");
 const { s3 } = require("../../../config/s3");
 const { getZone } = require("../../../Rate/zoneManagementController");
@@ -229,6 +230,19 @@ const createOneClickShipment = async (req, res) => {
         }),
       ),
     ]);
+
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create([{
+      walletId: currentWallet._id,
+      channelOrderId: currentOrder.orderId || null,
+      category: "debit",
+      amount: balanceToBeDeducted,
+      balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+      date: new Date(),
+      awb_number: trackingId,
+      description: "Freight Charges Applied",
+      priceBreakup
+    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOneClickShipment Amazon):", e.message));
 
     await session.commitTransaction();
     session.endSession();

@@ -5,6 +5,7 @@ const Order = require("../models/orderSchema.model");
 const Services = require("../models/courierServiceSecond.model");
 const Courier = require("../models/courierSecond");
 const Wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const { checkServiceabilityAll } = require("./shipment.controller");
 const { calculateRateForService } = require("../Rate/calculateRateController");
 const User = require("../models/User.model");
@@ -505,18 +506,22 @@ const cancelOrdersAtBooked = async (req, res) => {
         let balanceTobeAdded = currentOrder.freightCharges;
         let currentBalance = currentWallet.balance + balanceTobeAdded;
 
+        const cancelTxn = {
+          txnType: "Shipping",
+          action: "credit",
+          category: "credit",
+          amount: currentBalance,
+          balanceAfterTransaction: currentWallet.balance + balanceTobeAdded,
+          awb_number: `${currentOrder.awb_number}`,
+          description: "Cancellation Refund",
+        };
         await currentWallet.updateOne({
           $inc: { balance: balanceTobeAdded },
-          $push: {
-            transactions: {
-              txnType: "Shipping",
-              action: "credit",
-              amount: currentBalance,
-              balanceAfterTransaction: currentWallet.balance + balanceTobeAdded,
-              awb_number: `${currentOrder.awb_number}`,
-            },
-          },
+          $push: { transactions: cancelTxn },
         });
+        // 🔁 Dual-write: mirror to WalletTransaction for future migration
+        WalletTransaction.create([{ walletId: currentWallet._id, ...cancelTxn }])
+          .catch(e => console.error("⚠️ WalletTransaction dual-write failed (order.controller cancelOrder):", e.message));
         currentOrder.freightCharges = 0;
         await currentOrder.save();
         await currentWallet.save();

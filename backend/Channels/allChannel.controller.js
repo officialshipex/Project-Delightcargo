@@ -6,6 +6,7 @@ const express = require("express");
 const app = express();
 app.use(express.json());
 const Order = require("../models/newOrder.model");
+const { generateUniqueOrderIds } = require("../utils/generateUniqueOrderId");
 const {
   createWooCommerceWebhook,
 } = require("./WooCommerce/woocommerce.controller");
@@ -183,18 +184,20 @@ const fetchExistingOrders = async (req, res) => {
         }
       }
 
+      // Generate a unique internal orderId (do not use Shopify's order_number to avoid duplicates)
+      const internalOrderId = await generateUniqueOrderIds(1);
+
       const newOrder = new Order({
         userId: channel.userId,
-        orderId: order.order_number,
+        orderId: internalOrderId,
         channelId: order.id,
         compositeOrderId,
         pickupAddress: {
           contactName: order.billing_address?.name || "N/A",
           email: order.email || "unknown@example.com",
           phoneNumber: order.billing_address?.phone || "0000000000",
-          address: `${order.billing_address?.address1 || ""}, ${
-            order.billing_address?.address2 || ""
-          }`.trim(),
+          address: `${order.billing_address?.address1 || ""}, ${order.billing_address?.address2 || ""
+            }`.trim(),
           pinCode: order.billing_address?.zip || "000000",
           city: order.billing_address?.city || "Unknown",
           state: order.billing_address?.province || "Unknown",
@@ -323,18 +326,20 @@ const webhookhandler = async (req, res) => {
       totalHeight = Math.max(totalHeight, productInfo.height);
     }
 
+    // Generate a unique internal orderId (do not use Shopify's order_number to avoid duplicates)
+    const internalOrderId = await generateUniqueOrderIds(1);
+
     const newOrder = new Order({
       userId: user.userId,
-      orderId: shopifyOrder.order_number || "0000",
+      orderId: internalOrderId,
       compositeOrderId, // Ensure uniqueness
       channelId: firstLineItemId,
       pickupAddress: {
         contactName: shopifyOrder.billing_address?.name || "N/A",
         email: shopifyOrder.email || "abc@gmail.com",
         phoneNumber: shopifyOrder.billing_address?.phone || "0000000000",
-        address: `${shopifyOrder.billing_address?.address1 || ""},${
-          shopifyOrder.billing_address?.address2 || ""
-        }`,
+        address: `${shopifyOrder.billing_address?.address1 || ""},${shopifyOrder.billing_address?.address2 || ""
+          }`,
         pinCode: shopifyOrder.billing_address?.zip || "000000",
         city: shopifyOrder.billing_address?.city || "abc",
         state: locations?.localized_province_name || "N/A",

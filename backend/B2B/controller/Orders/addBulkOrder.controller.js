@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const xlsx = require("xlsx");
 const Order = require("../../../models/newOrder.model");
+const { generateUniqueOrderIds } = require("../../../utils/generateUniqueOrderId");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const File = require("../../../model/bulkOrderFiles.model");
 
@@ -254,6 +255,9 @@ const bulkOrderB2B = async (req, res) => {
     const orderDocs = [];
     const rowErrors = [];
 
+    // Pre-generate a batch of unique order IDs for all rows
+    const uniqueOrderIds = await generateUniqueOrderIds(rows.length);
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNumber = i + 2; // Excel row (header at row 1)
@@ -262,11 +266,7 @@ const bulkOrderB2B = async (req, res) => {
         /* ===============================
            ORDER ID
         =============================== */
-        let orderId;
-        while (true) {
-          orderId = Math.floor(100000 + Math.random() * 900000);
-          if (!(await Order.findOne({ orderId }))) break;
-        }
+        const orderId = uniqueOrderIds[i];
 
         const compositeOrderId = `${userId}-${orderId}`;
 

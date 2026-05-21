@@ -4,6 +4,7 @@ const { getAccessToken } = require("../Authorize/smartShip.controller");
 const Order = require("../../../models/newOrder.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const User = require("../../../models/User.model");
 const { registerSmartshipHub } = require("./couriers.controller");
 const estimatedDeliveryDate = require("../../../models/EDDMap.model");
@@ -235,6 +236,20 @@ const orderRegistrationOneStep = async (
         ],
         { new: true }
       );
+
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      if (updatedWallet) {
+        await WalletTransaction.create({
+          walletId: updatedWallet._id,
+          channelOrderId: currentOrder.orderId,
+          category: "debit",
+          amount: parseFloat(charges),
+          balanceAfterTransaction: updatedWallet.balance,
+          date: new Date(),
+          awb_number: result.awb_number,
+          description: "Freight Charges Applied",
+        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (orderRegistrationOneStep SmartShip bulk):", e.message));
+      }
     } else {
       return { message: "Error creating shipment" };
     }

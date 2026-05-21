@@ -1,6 +1,7 @@
 const fs = require("fs");
 const csvParser = require("csv-parser");
 const Order = require("../models/newOrder.model.js");
+const { generateUniqueOrderIds } = require("../utils/generateUniqueOrderId.js");
 const ExcelJS = require("exceljs");
 const path = require("path");
 const xlsx = require("xlsx");
@@ -337,6 +338,9 @@ const bulkOrder = async (req, res) => {
     const orderDocs = [];
     const rowErrors = [];
 
+    // Pre-generate a batch of unique order IDs for all rows
+    const uniqueOrderIds = await generateUniqueOrderIds(orders.length);
+
     for (let i = 0; i < orders.length; i++) {
       const row = orders[i];
       const rowNumber = i + 2; // Excel row number
@@ -362,11 +366,7 @@ const bulkOrder = async (req, res) => {
         /* ===============================
            ORDER ID
         =============================== */
-        let orderId;
-        while (true) {
-          orderId = Math.floor(100000 + Math.random() * 900000);
-          if (!(await Order.findOne({ orderId }))) break;
-        }
+        const orderId = uniqueOrderIds[i];
 
         const compositeOrderId = `${userID}-${orderId}`;
 

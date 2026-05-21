@@ -4,6 +4,7 @@ const { getAccessToken } = require("../Authorize/smartShip.controller");
 const Order = require("../../../models/newOrder.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const User = require("../../../models/User.model");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const https = require("https");
@@ -319,6 +320,18 @@ const orderRegistrationOneStep = async (req, res) => {
       },
       { session }
     );
+
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    await WalletTransaction.create([{
+      walletId: currentWallet._id,
+      channelOrderId: currentOrder.orderId,
+      category: "debit",
+      amount: parseFloat(finalCharges),
+      balanceAfterTransaction: effectiveBalance - parseFloat(finalCharges),
+      date: new Date(),
+      awb_number: result.awb_number,
+      description: "Freight Charges Applied",
+    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (orderRegistrationOneStep SmartShip):", e.message));
 
     await session.commitTransaction();
     session.endSession();

@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Order = require("../../../models/newOrder.model");
 const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const PickupAddress = require("../../../models/pickupAddress.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -247,6 +248,17 @@ const createProshipOrder = async (req, res) => {
       description: "Freight Charges Applied",
       priceBreakup,
     });
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create([{
+      walletId: currentWallet._id,
+      channelOrderId: currentOrder.orderId,
+      category: "debit",
+      amount: finalCharges,
+      balanceAfterTransaction: currentWallet.balance,
+      awb_number: awb_number,
+      description: "Freight Charges Applied",
+      priceBreakup,
+    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createProshipOrder):", e.message));
 
     await Promise.all([
       currentOrder.save({ session }),

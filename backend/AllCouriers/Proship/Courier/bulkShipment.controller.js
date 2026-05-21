@@ -1,6 +1,7 @@
 const axios = require("axios");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const { getProshipAccessToken } = require("../Authorize/proship.controller");
@@ -195,7 +196,7 @@ const createOrderProship = async (
     /* --------------------------------------------------
        8️⃣ WALLET DEBIT
     -------------------------------------------------- */
-    await Wallet.findOneAndUpdate(
+    const updatedWallet = await Wallet.findOneAndUpdate(
       { _id: walletId },
       {
         $inc: { balance: -charges },
@@ -214,6 +215,21 @@ const createOrderProship = async (
       },
       { new: true }
     );
+
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    if (updatedWallet) {
+      await WalletTransaction.create({
+        walletId: updatedWallet._id,
+        channelOrderId: currentOrder.orderId,
+        category: "debit",
+        amount: charges,
+        balanceAfterTransaction: updatedWallet.balance,
+        date: new Date(),
+        awb_number: awb,
+        description: "Freight Charges Applied",
+        priceBreakup,
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrderProship):", e.message));
+    }
 
     /* --------------------------------------------------
        9️⃣ FINAL RETURN

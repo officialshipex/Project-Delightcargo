@@ -5,6 +5,7 @@ const Order = require("../models/newOrder.model.js");
 const ReferralMonthlyStat = require("./referal.model.js");
 const ReferralWithdrawal = require("./referalWithdrawal.model.js");
 const Wallet = require("../models/wallet");
+const WalletTransaction = require("../models/WalletTransaction.model");
 const cron = require("node-cron");
 /**
  * Generate monthly referral reports for all users that have subUserId populated.
@@ -503,6 +504,14 @@ const withdrawCommission = async (req, res) => {
       balanceAfterTransaction: newBalance,
       description: "Referral Commission Received",
     });
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create([{
+      walletId: wallet._id,
+      category: "credit",
+      amount,
+      balanceAfterTransaction: newBalance,
+      description: "Referral Commission Received",
+    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (withdrawCommission):", e.message));
     wallet.balance = newBalance;
     await wallet.save({ session });
 

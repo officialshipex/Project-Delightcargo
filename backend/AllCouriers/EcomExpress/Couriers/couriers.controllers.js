@@ -3,6 +3,7 @@ const FormData = require("form-data");
 const user = require("../../../models/User.model");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { fetchBulkWaybills } = require("../Authorize/saveCourierController");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const checkServiceabilityEcomExpress = async (
@@ -258,6 +259,18 @@ const createManifest = async (req, res) => {
           },
         },
       });
+
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      WalletTransaction.create({
+        walletId: currentWallet._id,
+        channelOrderId: currentOrder.orderId || null,
+        category: "debit",
+        amount: balanceToBeDeducted,
+        balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+        date: new Date(),
+        awb_number: result.awb || "",
+        description: "Freight Charges Applied"
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createManifest EcomExpress):", e.message));
 
       return res.status(201).json({
         message: "Shipment Created Succesfully",

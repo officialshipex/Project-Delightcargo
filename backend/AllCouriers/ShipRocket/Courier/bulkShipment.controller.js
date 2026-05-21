@@ -4,6 +4,7 @@ if (process.env.NODE_ENV !== "production") {
 
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { getZone } = require("../../../Rate/zoneManagementController");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const { getAuthToken } = require("../Authorize/shiprocket.controller");
@@ -173,7 +174,7 @@ const createShipmentFunctionShipRocket = async (
       try { await assignPickupManifest(currentOrder); } catch (e) {}
     });
 
-    await Wallet.findOneAndUpdate(
+    const updatedWallet = await Wallet.findOneAndUpdate(
       { _id: walletId },
       {
         $inc: { balance: -charges },
@@ -189,8 +190,24 @@ const createShipmentFunctionShipRocket = async (
             priceBreakup,
           },
         },
-      }
+      },
+      { new: true }
     );
+
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    if (updatedWallet) {
+      await WalletTransaction.create({
+        walletId: updatedWallet._id,
+        channelOrderId: currentOrder.orderId,
+        category: "debit",
+        amount: charges,
+        balanceAfterTransaction: updatedWallet.balance,
+        date: new Date(),
+        awb_number,
+        description: "Freight Charges Applied",
+        priceBreakup,
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createShipmentFunctionShipRocket bulk):", e.message));
+    }
 
     return { status: 201, message: "Shipment Created Successfully", waybill: awb_number, orderId: currentOrder.orderId };
   } catch (error) {

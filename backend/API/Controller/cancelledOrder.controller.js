@@ -1,5 +1,6 @@
 const user = require("../../models/User.model");
 const Wallet = require("../../models/wallet");
+const WalletTransaction = require("../../models/WalletTransaction.model");
 const Order = require("../../models/newOrder.model");
 const {
   cancelOrderDelhivery,
@@ -189,12 +190,29 @@ const cancelOrdersAtBooked = async (req, res) => {
         if (!alreadyRefunded) {
           const newBalance = walletInSession.balance + balanceToBeAdded;
 
-          await Wallet.findOneAndUpdate(
-            { _id: currentWallet._id },
-            {
-              $inc: { balance: balanceToBeAdded },
-              $push: {
-                transactions: {
+          await Promise.all([
+            Wallet.findOneAndUpdate(
+              { _id: currentWallet._id },
+              {
+                $inc: { balance: balanceToBeAdded },
+                $push: {
+                  transactions: {
+                    channelOrderId: currentOrderInSession.orderId || null,
+                    category: "credit",
+                    amount: balanceToBeAdded,
+                    balanceAfterTransaction: newBalance,
+                    date: new Date(),
+                    awb_number: currentOrderInSession.awb_number,
+                    description: "Freight Charges Received",
+                  },
+                },
+              },
+              { session }
+            ),
+            WalletTransaction.create(
+              [
+                {
+                  walletId: currentWallet._id,
                   channelOrderId: currentOrderInSession.orderId || null,
                   category: "credit",
                   amount: balanceToBeAdded,
@@ -202,11 +220,11 @@ const cancelOrdersAtBooked = async (req, res) => {
                   date: new Date(),
                   awb_number: currentOrderInSession.awb_number,
                   description: "Freight Charges Received",
-                },
-              },
-            },
-            { session }
-          );
+                }
+              ],
+              { session }
+            )
+          ]);
         }
       }
 

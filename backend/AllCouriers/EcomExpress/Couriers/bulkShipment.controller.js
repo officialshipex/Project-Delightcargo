@@ -2,6 +2,7 @@ const axios = require("axios");
 const FormData = require("form-data");
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 // const User = require("../models/User");
 const { fetchBulkWaybills } = require("../Authorize/saveCourierController");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
@@ -111,6 +112,18 @@ const createShipmentFunctionEcomExpress = async (serviceDetails, orderId, wh, wa
     if (!updatedWallet) {
       return { success: false, message: "Wallet balance update failed" };
     }
+
+    // 🔁 Dual-write: mirror to WalletTransaction for future migration
+    WalletTransaction.create({
+      walletId: walletId,
+      channelOrderId: order.orderId,
+      category: "debit",
+      amount: charges,
+      balanceAfterTransaction: updatedWallet.balance,
+      date: new Date(),
+      awb_number: awbNumber,
+      description: "Freight Charges Applied"
+    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk EcomExpress):", e.message));
 
     // Call Ecom Express API
     const response = await axios.post(url, formData, { headers: { ...formData.getHeaders() } });

@@ -5,6 +5,7 @@ if (process.env.NODE_ENV != "production") {
 const axios = require('axios');
 const Order = require("../../../models/newOrder.model");
 const Wallet = require("../../../models/wallet");
+const WalletTransaction = require("../../../models/WalletTransaction.model");
 const { getAuthToken } = require("../Authorize/nimbuspost.controller");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const url = process.env.NIMBUSPOST_URL;
@@ -106,6 +107,17 @@ const createShipmentFunctionNimbusPost = async (selectedServiceDetails, id, wh, 
           },
         },
       });
+
+      // 🔁 Dual-write: mirror to WalletTransaction for future migration
+      WalletTransaction.create({
+        walletId: currentWallet._id,
+        category: "debit",
+        amount: balanceToBeDeducted,
+        balanceAfterTransaction: currentBalance,
+        awb_number: `${result.awb_number}`,
+        date: new Date(),
+        description: "Freight Charges Applied"
+      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk NimbusPost):", e.message));
 
       return { status: 201, message: "Shipment Created Successfully" };
     } else {
