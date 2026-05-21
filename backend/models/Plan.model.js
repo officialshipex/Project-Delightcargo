@@ -42,5 +42,8 @@ const planSchema = new mongoose.Schema({
   ],
 });
 
+// ✅ PERF FIX: Index for userId lookups (rate calculation, shipment creation)
+planSchema.index({ userId: 1 });
+
 const Plan = mongoose.model("Plan", planSchema);
 module.exports = Plan;

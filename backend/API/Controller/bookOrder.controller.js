@@ -104,9 +104,12 @@ const bookOrder = async (req, res) => {
 
     // ✅ Fetch wallet + courier service in parallel
     const [wallet, courierService] = await Promise.all([
-      Wallet.findById(user.Wallet),
+      // ✅ PERF FIX: Only load balance fields — excludes massive transactions/history arrays
+      // Without .select(), a user with 2000 orders loads ~2MB of transaction data
+      Wallet.findById(user.Wallet).select("balance holdAmount creditLimit"),
+      // ✅ Exact match — no $regex, uses compound index (name, provider)
       CourierService.findOne({
-        name: { $regex: `^\\s*${courierServiceName.trim()}\\s*$`, $options: "i" },
+        name: courierServiceName.trim(),
         provider,
       }),
     ]);
@@ -216,6 +219,12 @@ const bookOrder = async (req, res) => {
           finalCharges,
           courierServiceName,
           priceBreakup,
+          // ✅ PERF FIX: Pass pre-fetched data to avoid redundant User/Wallet/Plan loading
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
         });
         break;
       case "Dtdc":

@@ -24,8 +24,28 @@ const createDelhiveryShipment = async ({
   courierName,
   finalCharges,
   courierServiceName,
-  priceBreakup
+  priceBreakup,
+  // ✅ PERF FIX: Pre-fetched from bookOrder controller — avoids redundant User/Wallet/Plan loading
+  userId,
+  walletId,
+  walletBalance,
+  walletHoldAmount,
+  walletCreditLimit,
 }) => {
+  // ── Pre-transaction: read-only EDD lookup (no need to hold a write session) ──
+  let estimateDate = null;
+  try {
+    const eddData = await estimatedDeliveryDate.findOne({
+      courier: "Delhivery",
+      serviceName: courierServiceName.trim(),
+    }).lean();
+    if (eddData) {
+      // zone is not known yet; will be refined after getZone() runs inside the transaction
+      // Store raw eddData so we can compute the date after zone is resolved
+      createDelhiveryShipment._eddData = eddData;
+    }
+  } catch (_) { /* non-critical — proceed without EDD */ }
+
   const session = await mongoose.startSession();
 
   try {
@@ -48,23 +68,15 @@ const createDelhiveryShipment = async ({
       };
     }
 
-    // Step 2️⃣ Fetch user + wallet in parallel
-    const [users, currentPlan] = await Promise.all([
-      User.findById(currentOrder.userId).populate("Wallet").session(session),
-      plan.findOne({ userId: currentOrder.userId }).session(session),
-    ]);
+    // Step 2️⃣ Fetch API key only (User/Wallet/Plan already verified by bookOrder controller)
+    const apiKey = await getDelhiveryApiKey(courierName || provider);
 
-    if (!users || !users.Wallet) {
+    if (!walletId) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();
-      return { success: false, message: "User or Wallet not found" };
+      return { success: false, message: "Wallet not found" };
     }
-
-    const currentWallet = users.Wallet;
-
-    // Fetch API Key for the specific account
-    const apiKey = await getDelhiveryApiKey(courierName || provider);
 
     // Step 3️⃣ Get waybills (from pool cache), zone & create warehouse in parallel
     const [waybills, zone, warehouseCreationResult] = await Promise.all([
@@ -102,19 +114,11 @@ const createDelhiveryShipment = async ({
       };
     }
 
-    // Step 5️⃣ Fetch estimated delivery date from DB
-    const eddData = await estimatedDeliveryDate.findOne({
-      courier: "Delhivery",
-      serviceName: courierServiceName.trim(),
-    });
-
-    let estimateDate = null;
+    // Step 5️⃣ Compute EDD using zone resolved above (eddData fetched before transaction)
+    const eddData = createDelhiveryShipment._eddData || null;
     if (eddData) {
       let deliveryDays = null;
-      if (
-        eddData.zoneRates &&
-        typeof eddData.zoneRates[zone.zone] === "number"
-      ) {
+      if (eddData.zoneRates && typeof eddData.zoneRates[zone.zone] === "number") {
         deliveryDays = eddData.zoneRates[zone.zone];
       } else if (typeof eddData[zone.zone] === "number") {
         deliveryDays = eddData[zone.zone];
@@ -177,12 +181,11 @@ const createDelhiveryShipment = async ({
       JSON.stringify(payloadData)
     )}`;
 
-    // Step 7️⃣ Wallet check
-    const walletHoldAmount = currentWallet.holdAmount || 0;
-    const effectiveBalance = currentWallet.balance - walletHoldAmount;
+    // Step 7️⃣ Wallet check (using pre-fetched balance — no heavy document load)
+    const effectiveBalance = walletBalance - walletHoldAmount;
     const balanceToBeDeducted =
       finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
-    const balance = effectiveBalance + currentWallet.creditLimit;
+    const balance = effectiveBalance + walletCreditLimit;
     if (balance < balanceToBeDeducted) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
@@ -241,7 +244,9 @@ const createDelhiveryShipment = async ({
         },
         { session }
       ),
-      currentWallet.updateOne(
+      // ✅ PERF FIX: Atomic wallet update by _id — never loads the full wallet document
+      Wallet.updateOne(
+        { _id: walletId },
         {
           $inc: { balance: -balanceToBeDeducted },
           $push: {
@@ -249,7 +254,7 @@ const createDelhiveryShipment = async ({
               channelOrderId: currentOrder.orderId || null,
               category: "debit",
               amount: balanceToBeDeducted,
-              balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
               date: new Date(),
               awb_number: result.waybill || "",
               description: "Freight Charges Applied",

@@ -8,23 +8,36 @@ const { getUniqueId } = require("../../getUniqueId");
 
 const BASE_URL = process.env.DELHIVERY_URL;
 
+// ── In-memory cache for API keys (TTL: 5 minutes) ──────────────────────────
+const _apiKeyCache = new Map(); // Map<courierName|"__default__", { key, expiresAt }>
+const API_KEY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 const getDelhiveryApiKey = async (courierName) => {
+    const cacheKey = courierName || "__default__";
+
+    // Return cached key if still fresh
+    const cached = _apiKeyCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+        return cached.key;
+    }
+
     try {
         let courier;
         if (courierName) {
-            courier = await AllCourier.findOne({ courierName: courierName, courierProvider: 'Delhivery' });
+            courier = await AllCourier.findOne({ courierName: courierName, courierProvider: 'Delhivery' }).lean();
         } else {
             // If no specific courierName is provided, get the first active Delhivery account
-            courier = await AllCourier.findOne({ courierProvider: 'Delhivery', status: 'active' });
-            
+            courier = await AllCourier.findOne({ courierProvider: 'Delhivery', status: 'active' }).lean();
             // If no active one found, just get the first one
             if (!courier) {
-                courier = await AllCourier.findOne({ courierProvider: 'Delhivery' });
+                courier = await AllCourier.findOne({ courierProvider: 'Delhivery' }).lean();
             }
         }
-        
-        // console.log("courier found:", courier ? courier.courierName : "None, using fallback");
-        return courier ? courier.apiKey : process.env.DEL_API_TOKEN;
+
+        const key = courier ? courier.apiKey : process.env.DEL_API_TOKEN;
+        // Store in cache
+        _apiKeyCache.set(cacheKey, { key, expiresAt: Date.now() + API_KEY_CACHE_TTL_MS });
+        return key;
     } catch (error) {
         console.error("Error fetching Delhivery API key:", error);
         return process.env.DEL_API_TOKEN;

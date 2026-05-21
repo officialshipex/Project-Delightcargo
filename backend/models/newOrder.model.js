@@ -196,6 +196,10 @@ const orderSchema = new mongoose.Schema(
 
 // Compound index
 orderSchema.index({ userId: 1, createdAt: -1 });
+// ✅ PERF FIX: Index for direct orderId lookups (bookOrder API, tracking, etc.)
+orderSchema.index({ orderId: 1 });
+// ✅ PERF FIX: Index for AWB-based lookups (tracking, webhooks, etc.)
+orderSchema.index({ awb_number: 1 });
 
 // ── Auto NDR AI Calling Trigger & LastTrackedAt Update ──────────────────
 orderSchema.pre("save", function (next) {
