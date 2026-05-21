@@ -403,9 +403,9 @@ const walletUpdation = async (req, res) => {
     let existingTxn = null;
 
     if (!isCreditNote && !iswalletToBank) {
-      existingTxn = wallet.transactions.find(
-        (txn) => txn.awb_number === awbNumber
-      );
+      existingTxn = await WalletTransaction.findOne(
+        { walletId: wallet._id, awb_number: awbNumber }
+      ).lean();
 
       if (!existingTxn) {
         return res.status(404).json({
@@ -498,19 +498,14 @@ const walletUpdation = async (req, res) => {
     const normalizedCategory = category.trim().toLowerCase();
 
     // ✅ Duplicate prevention (DB desc INCLUDES req desc)
-    const duplicateTxn = wallet.transactions.find((txn) => {
-      const sameDesc =
-        txn.description &&
-        txn.description.toLowerCase().includes(normalizedReqDesc);
-      const sameCat =
-        txn.category && txn.category.toLowerCase() === normalizedCategory;
-
-      if (isCreditNote) {
-        return !txn.awb_number && sameDesc && sameCat;
-      }
-
-      return txn.awb_number === awbNumber && sameDesc && sameCat;
-    });
+    const duplicateTxn = await WalletTransaction.findOne({
+      walletId: wallet._id,
+      ...(isCreditNote
+        ? { awb_number: { $exists: false } }
+        : { awb_number: awbNumber }),
+      description: { $regex: normalizedReqDesc, $options: "i" },
+      category: { $regex: `^${normalizedCategory}$`, $options: "i" },
+    }).lean();
 
     if (duplicateTxn) {
       return res.status(409).json({
@@ -643,12 +638,12 @@ const reverseTransaction = async (req, res) => {
     }
     const reversedDescription = getReversedDescription(description);
     // 2. Check if already reversed ("credit" transaction with this AWB number exists)
-    const alreadyReversed = wallet.transactions.some(
-      (txn) =>
-        txn.awb_number === awbNumber &&
-        txn.category === "credit" &&
-        txn.description === reversedDescription
-    );
+    const alreadyReversed = await WalletTransaction.exists({
+      walletId: wallet._id,
+      awb_number: awbNumber,
+      category: "credit",
+      description: reversedDescription,
+    });
     if (alreadyReversed) {
       return res
         .status(400)
@@ -657,12 +652,12 @@ const reverseTransaction = async (req, res) => {
 
     // 3. Find original transaction to get balance before reversal
     // (optional: for accurate balance if needed)
-    const originalTxn = wallet.transactions.find(
-      (txn) =>
-        txn.awb_number === awbNumber &&
-        txn.category === category &&
-        txn.description === description
-    );
+    const originalTxn = await WalletTransaction.findOne({
+      walletId: wallet._id,
+      awb_number: awbNumber,
+      category: category,
+      description: description,
+    }).lean();
     if (!originalTxn) {
       return res
         .status(404)

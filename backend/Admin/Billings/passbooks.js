@@ -58,72 +58,34 @@ const getAllPassbookTransactions = async (req, res) => {
       }
     }
 
-    // --- Transaction filters ---
+    const parsedLimit = limit === "all" ? 0 : Number(limit);
+    const skip = (Number(page) - 1) * parsedLimit;
+
+    // --- Transaction match stage ---
+    const txnMatchStage = {};
     if (fromDate && toDate) {
       const startDate = new Date(new Date(fromDate).setHours(0, 0, 0, 0));
       const endDate = new Date(new Date(toDate).setHours(23, 59, 59, 999));
-      transactionFilterConditions.push({
-        $and: [
-          { $gte: ["$$t.date", startDate] },
-          { $lte: ["$$t.date", endDate] },
-        ],
-      });
+      txnMatchStage.date = { $gte: startDate, $lte: endDate };
     }
-
-    if (category) {
-      transactionFilterConditions.push({ $eq: ["$$t.category", category] });
-    }
-
-    if (description) {
-      transactionFilterConditions.push({ $eq: ["$$t.description", description] });
-    }
-
-    if (awbNumber) {
-      transactionFilterConditions.push({ $eq: ["$$t.awb_number", awbNumber] });
-    }
-
-    if (orderId) {
-      transactionFilterConditions.push({
-        $eq: ["$$t.channelOrderId", orderId],
-      });
-    }
-
-    const transactionFilter =
-      transactionFilterConditions.length > 0
-        ? { $and: transactionFilterConditions }
-        : true;
-
-    const parsedLimit = limit === "all" ? 0 : Number(limit);
-    const skip = (Number(page) - 1) * parsedLimit;
+    if (category) txnMatchStage.category = category;
+    if (description) txnMatchStage.description = description;
+    if (awbNumber) txnMatchStage.awb_number = awbNumber;
+    if (orderId) txnMatchStage.channelOrderId = orderId;
 
     // --- Aggregation pipeline ---
     const pipeline = [
       { $match: { Wallet: { $ne: null }, ...userMatchStage } },
       {
         $lookup: {
-          from: "wallets",
+          from: "wallettransactions",
           localField: "Wallet",
-          foreignField: "_id",
-          as: "wallet",
-        },
-      },
-      { $unwind: "$wallet" },
-      {
-        $project: {
-          fullname: 1,
-          email: 1,
-          userId: 1,
-          phoneNumber: 1,
-          transactions: {
-            $filter: {
-              input: "$wallet.transactions",
-              as: "t",
-              cond: transactionFilter,
-            },
-          },
+          foreignField: "walletId",
+          as: "transactions",
         },
       },
       { $unwind: "$transactions" },
+      { $match: txnMatchStage },
       { $sort: { "transactions.date": -1 } },
 
       {
@@ -237,23 +199,22 @@ const exportPassbook = async (req, res) => {
       { $match: { Wallet: { $ne: null } } },
       {
         $lookup: {
-          from: "wallets",
+          from: "wallettransactions",
           localField: "Wallet",
-          foreignField: "_id",
-          as: "wallet",
+          foreignField: "walletId",
+          as: "txn",
         },
       },
-      { $unwind: "$wallet" },
-      { $unwind: "$wallet.transactions" },
+      { $unwind: "$txn" },
       {
         $match: {
-          "wallet.transactions._id": { $in: objectIds },
+          "txn._id": { $in: objectIds },
         },
       },
       {
         $lookup: {
           from: "neworders",
-          let: { awb: "$wallet.transactions.awb_number" },
+          let: { awb: "$txn.awb_number" },
           pipeline: [
             { $match: { $expr: { $eq: ["$awb_number", "$$awb"] } } },
             {
@@ -280,22 +241,22 @@ const exportPassbook = async (req, res) => {
             userId: "$userId",
             phoneNumber: "$phoneNumber",
           },
-          id: "$wallet.transactions._id",
-          category: "$wallet.transactions.category",
-          amount: "$wallet.transactions.amount",
+          id: "$txn._id",
+          category: "$txn.category",
+          amount: "$txn.amount",
           balanceAfterTransaction:
-            "$wallet.transactions.balanceAfterTransaction",
-          date: "$wallet.transactions.date",
-          awb_number: "$wallet.transactions.awb_number",
-          orderId: "$wallet.transactions.channelOrderId",
-          description: "$wallet.transactions.description",
+            "$txn.balanceAfterTransaction",
+          date: "$txn.date",
+          awb_number: "$txn.awb_number",
+          orderId: "$txn.channelOrderId",
+          description: "$txn.description",
           courierServiceName: {
             $arrayElemAt: ["$orderInfo.courierServiceName", 0],
           },
           provider: { $arrayElemAt: ["$orderInfo.provider", 0] },
           priceBreakup: {
             $ifNull: [
-              "$wallet.transactions.priceBreakup",
+              "$txn.priceBreakup",
               { $arrayElemAt: ["$orderInfo.priceBreakup", 0] },
             ],
           },

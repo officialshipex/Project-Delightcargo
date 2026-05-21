@@ -12,6 +12,7 @@ const moment = require("moment");
 const Pan = require("../models/Pan.model");
 
 const Wallet = require("../models/wallet"); // adjust path
+const WalletTransaction = require("../models/WalletTransaction.model");
 const Order = require("../models/newOrder.model"); // adjust path
 const Invoice = require("./invoice.model"); // adjust path
 const User = require("../models/User.model"); // adjust path
@@ -565,20 +566,18 @@ async function buildChargesFromWalletTransactions(
   const wallet = await Wallet.findOne({ _id: user.Wallet });
   if (!wallet) return { taxableValue: 0, tax: 0, total: 0, txns: [] };
 
-  const candidateTxns = (wallet.transactions || []).filter((t) => {
-    if (!t) return false;
-
-    const d = new Date(t.date);
-    if (d < periodStart || d > periodEnd) return false;
-    if ((t.category || "").toLowerCase() !== "debit") return false;
-    if (!allowedDescription(t.description)) return false;
-
-    return true;
-  });
+  const candidateTxns = await WalletTransaction.find({
+    walletId: wallet._id,
+    category: "debit",
+    date: { $gte: periodStart, $lte: periodEnd },
+  }).lean();
 
   const validTxns = [];
 
   for (const t of candidateTxns) {
+    if (!t) continue;
+    if (!allowedDescription(t.description)) continue;
+
     const awb = extractAwbFromTransaction(t);
     if (!awb) continue;
     if (previousAwbs.includes(awb)) continue;

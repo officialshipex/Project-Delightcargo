@@ -244,12 +244,12 @@ const ProshipWebhook = async (req, res) => {
             if (userDoc) {
               const currentWallet = await Wallet.findById(userDoc.Wallet);
               if (currentWallet) {
-                const alreadyRefunded = currentWallet.transactions.some(
-                  (t) =>
-                    t.awb_number === order.awb_number &&
-                    t.category === "credit" &&
-                    (t.description === "Freight Charges Received")
-                );
+                const alreadyRefunded = await WalletTransaction.exists({
+                  walletId: currentWallet._id,
+                  awb_number: order.awb_number,
+                  category: "credit",
+                  description: "Freight Charges Received"
+                });
 
                 if (!alreadyRefunded) {
                   const newBalance = (currentWallet.balance || 0) + balanceToBeAdded;

@@ -180,12 +180,12 @@ const cancelOrdersAtBooked = async (req, res) => {
 
       if (balanceToBeAdded > 0) {
         const walletInSession = await Wallet.findById(currentWallet._id).session(session);
-        const alreadyRefunded = walletInSession.transactions.some(
-          (t) =>
-            t.awb_number === currentOrderInSession.awb_number &&
-            t.category === "credit" &&
-            t.description === "Freight Charges Received"
-        );
+        const alreadyRefunded = await WalletTransaction.exists({
+          walletId: currentWallet._id,
+          awb_number: currentOrderInSession.awb_number,
+          category: "credit",
+          description: "Freight Charges Received"
+        });
 
         if (!alreadyRefunded) {
           const newBalance = walletInSession.balance + balanceToBeAdded;

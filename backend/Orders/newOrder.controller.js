@@ -112,6 +112,24 @@ const newOrder = async (req, res) => {
       return res.status(400).json({ error: "Invalid payment method" });
     }
 
+    if (!productDetails || !Array.isArray(productDetails) || productDetails.length === 0) {
+      return res.status(400).json({ error: "At least one product is required" });
+    }
+
+    const computedTotal = productDetails.reduce((sum, p) => {
+      const qty = Number(p.quantity) || 1;
+      const price = Number(p.unitPrice) || 0;
+      return sum + qty * price;
+    }, 0);
+
+    const declaredAmount = Number(paymentDetails.amount) || 0;
+
+    if (Math.abs(computedTotal - declaredAmount) > 0.01) {
+      return res.status(400).json({
+        error: `Payment amount mismatch: declared ₹${declaredAmount} but product total is ₹${computedTotal}`,
+      });
+    }
+
     // Generate a unique order ID
     const orderId = await generateUniqueOrderIds(1);
     const compositeOrderId = `${req.user._id}-${orderId}`;
@@ -1726,12 +1744,12 @@ const cancelOrdersAtBooked = async (req, res) => {
 
     try {
       // ✅ Guard: Check if this AWB was already refunded (credit exists)
-      const alreadyRefunded = currentWallet.transactions.some(
-        (t) =>
-          t.awb_number === currentOrder.awb_number &&
-          t.category === "credit" &&
-          t.description === "Freight Charges Received"
-      );
+      const alreadyRefunded = await WalletTransaction.exists({
+        walletId: currentWallet._id,
+        awb_number: currentOrder.awb_number,
+        category: "credit",
+        description: "Freight Charges Received"
+      });
 
       if (balanceTobeAdded > 0 && !alreadyRefunded) {
         const updatedWallet = await Wallet.findOneAndUpdate(
@@ -1740,40 +1758,21 @@ const cancelOrdersAtBooked = async (req, res) => {
           { new: true, session },
         );
 
-        await Promise.all([
-          Wallet.updateOne(
-            { _id: updatedWallet._id },
+        await WalletTransaction.create(
+          [
             {
-              $push: {
-                transactions: {
-                  channelOrderId: currentOrder.orderId || null,
-                  category: "credit",
-                  amount: balanceTobeAdded,
-                  balanceAfterTransaction: updatedWallet.balance,
-                  date: new Date(),
-                  awb_number: allOrders.awb_number || "",
-                  description: `Freight Charges Received`,
-                },
-              },
-            },
-            { session },
-          ),
-          WalletTransaction.create(
-            [
-              {
-                walletId: updatedWallet._id,
-                channelOrderId: currentOrder.orderId || null,
-                category: "credit",
-                amount: balanceTobeAdded,
-                balanceAfterTransaction: updatedWallet.balance,
-                date: new Date(),
-                awb_number: allOrders.awb_number || "",
-                description: `Freight Charges Received`,
-              }
-            ],
-            { session }
-          )
-        ]);
+              walletId: updatedWallet._id,
+              channelOrderId: currentOrder.orderId || null,
+              category: "credit",
+              amount: balanceTobeAdded,
+              balanceAfterTransaction: updatedWallet.balance,
+              date: new Date(),
+              awb_number: allOrders.awb_number || "",
+              description: `Freight Charges Received`,
+            }
+          ],
+          { session }
+        );
       } else if (balanceTobeAdded > 0 && alreadyRefunded) {
         console.log(`[Cancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
       }
@@ -2202,12 +2201,12 @@ const bulkCancelOrder = async (req, res) => {
 
         if (balanceToAdd > 0) {
           // ✅ Guard: Check if this AWB was already refunded (credit exists)
-          const alreadyRefunded = walletDoc.transactions.some(
-            (t) =>
-              t.awb_number === currentOrder.awb_number &&
-              t.category === "credit" &&
-              t.description === "Freight Charges Received"
-          );
+          const alreadyRefunded = await WalletTransaction.exists({
+            walletId: walletId,
+            awb_number: currentOrder.awb_number,
+            category: "credit",
+            description: "Freight Charges Received"
+          });
 
           if (!alreadyRefunded) {
             const updatedWallet = await Wallet.findOneAndUpdate(

@@ -69,7 +69,7 @@ const bookOrder = async (req, res) => {
   try {
     // ✅ Fetch order, user in parallel (fast DB reads)
     const [order, user] = await Promise.all([
-      Order.findOne({ orderId }),
+      Order.findOne({ orderId, userId }),
       User.findById(userId),
     ]);
 

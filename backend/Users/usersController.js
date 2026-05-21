@@ -58,9 +58,7 @@ const refundFreightIfSingleDebit = async () => {
       }
 
       // 4️⃣ Get wallet transactions for this AWB
-      const walletTxns = wallet.transactions.filter(
-        (txn) => txn.awb_number === awb
-      );
+      const walletTxns = await WalletTransaction.find({ walletId: wallet._id, awb_number: awb }).lean();
 
       // ---------------------------------------------------------
       // ⭐ CASE A → TWO transactions → Cancel Order + mark txns
@@ -158,7 +156,8 @@ const checkGstForUser = async (userIdToFind = 40344) => {
     }
 
     const wallet = user.Wallet;
-    if (!wallet || !wallet.transactions || wallet.transactions.length === 0) {
+    const walletTxns = await WalletTransaction.find({ walletId: wallet._id }).lean();
+    if (!walletTxns || walletTxns.length === 0) {
       console.log(`No wallet or transactions found for user ${userIdToFind}.`);
       return;
     }
@@ -168,7 +167,7 @@ const checkGstForUser = async (userIdToFind = 40344) => {
 
     console.log(`Checking transactions for user: ${user.fullname} (ID: ${userIdToFind})`);
 
-    for (const transaction of wallet.transactions) {
+    for (const transaction of walletTxns) {
       if (transaction.category === "debit") {
         let priceBreakup = transaction.priceBreakup;
 
