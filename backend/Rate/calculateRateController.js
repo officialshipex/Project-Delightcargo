@@ -291,7 +291,18 @@ async function calculateRateForService(payload) {
       Plan.findOne({ userId: userID }).lean(),
     ]);
 
-    const currentZone = zoneResult.zone;
+    const currentZone = zoneResult?.zone;
+
+    const ans = [];
+    const l = parseFloat(length);
+    const b = parseFloat(breadth);
+    const h = parseFloat(height);
+    const deadweight = parseFloat(weight) / 1000;
+    const volumetricWeight = (l * b * h) / 5000;
+    const chargedWeight = weight * 1000;
+    const gstRate = 18;
+
+    const RateCards = plan?.rateCard || [];
 
     // ✅ Build isFlatRate lookup by _id — parallel fetch to save ~50-100ms
     const rcIds = RateCards.map((r) => r._id).filter(Boolean);
