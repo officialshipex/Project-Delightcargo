@@ -8,8 +8,6 @@ const CourierService = require("../models/CourierService.Schema");
 const Plan = require("../models/Plan.model");
 const Wallet = require("../models/wallet");
 const WalletTransaction = require("../models/WalletTransaction.model");
-const Bottleneck = require("bottleneck");
-const cron = require("node-cron");
 const EDDMap = require("../models/EDDMap.model");
 const EPDMap = require("../models/EPDMap.model");
 const { getZone } = require("../Rate/zoneManagementController");
@@ -26,8 +24,6 @@ const {
 } = require("../AllCouriers/Xpressbees/MainServices/mainServices.controller");
 const {
   trackShipmentDelhivery,
-} = require("../AllCouriers/Delhivery/Courier/couriers.controller");
-const {
   cancelOrderDelhivery,
 } = require("../AllCouriers/Delhivery/Courier/couriers.controller");
 const {
@@ -45,8 +41,6 @@ const { checkServiceabilityAll } = require("./shipment.controller");
 const { calculateRateForService } = require("../Rate/calculateRateController");
 const csv = require("csv-parser");
 const fs = require("fs");
-const { log } = require("console");
-const { message } = require("../addons/utils/shippingRulesValidation");
 const mongoose = require("mongoose");
 const {
   cancelOrderDTDC,
@@ -453,16 +447,12 @@ const getOrders = async (req, res) => {
 
 
     const totalCount = await Order.countDocuments(filter);
-    let sortOption = { updatedAt: -1 };
-    if (
-      filter.status &&
-      filter.status.$in &&
-      filter.status.$in.includes("new")
-    ) {
-      sortOption = { createdAt: -1 };
-    } else if (filter.status === "new") {
-      sortOption = { createdAt: -1 };
-    }
+    const statusCondition = andConditions.find((c) => c.status);
+    const sortOption =
+      statusCondition?.status?.$in?.includes("new") ||
+      statusCondition?.status === "new"
+        ? { createdAt: -1 }
+        : { updatedAt: -1 };
     let query = Order.find(filter).sort(sortOption);
     if (limit) query = query.skip(skip).limit(limit);
 
@@ -1324,6 +1314,9 @@ const ShipeNowOrder = async (req, res) => {
     }
 
     const plan = await Plan.findOne({ userId: order.userId }).lean();
+    if (!plan) {
+      return res.status(404).json({ error: "No plan found for this user" });
+    }
 
     const [EDDRates, EPDRates, services] = await Promise.all([
       EDDMap.find().lean(),
@@ -1574,9 +1567,13 @@ const cancelOrdersAtNotShipped = async (req, res) => {
   const { orderId } = req.body;
   // console.log(orderData)
   try {
-    const currentOrder = await Order.findByIdAndDelete({ _id: orderId });
+    const currentOrder = await Order.findByIdAndDelete(orderId);
 
-    res.status(201).json({ message: "Order delete successfully" });
+    if (!currentOrder) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    res.status(200).json({ message: "Order deleted successfully" });
   } catch (error) {
     console.error("Error canceling orders:", {
       // error,
@@ -1594,7 +1591,7 @@ const cancelOrdersAtBooked = async (req, res) => {
     const userId = allOrders.userId?._id || allOrders.userId;
     const users = await user.findOne({ _id: userId });
     // console.log(users)
-    const currentWallet = await Wallet.findById({ _id: users.Wallet }).select("_id");
+    const currentWallet = await Wallet.findById(users.Wallet).select("_id");
 
     const currentOrder = await Order.findById({ _id: allOrders._id });
     if (currentOrder.awb_number === "N/A" || !currentOrder.awb_number) {
@@ -1611,7 +1608,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       return res.status(400).send({ error: "Order is not ready to Cancelled" });
     }
 
-    if (currentOrder.provider === "Xpressbeesss") {
+    if (currentOrder.provider === "Xpressbees") {
       const result = await cancelShipmentXpressBees(currentOrder.awb_number);
       if (result.error) {
         return res.status(400).send({ error: "Failed to cancel order" });
@@ -1703,10 +1700,10 @@ const cancelOrdersAtBooked = async (req, res) => {
         return res.status(400).send({ error: result.message || "Failed to cancel order with Shadowfax" });
       }
     } else {
-      return {
+      return res.status(400).json({
         error: "Unsupported courier provider",
         orderId: currentOrder._id,
-      };
+      });
     }
 
     // Remove from pickup manifest if exists
@@ -1903,7 +1900,7 @@ const getUser = async (req, res) => {
 };
 const deleteOrder = async (req, res) => {
   try {
-    const orderId = req.user._id;
+    const orderId = req.params.id || req.body.orderId;
 
     // Validate orderId
     if (!orderId) {

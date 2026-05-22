@@ -2587,6 +2587,7 @@ const transferCOD = async (req, res) => {
       payableRemittanceIds = [],
       topUpRemittanceIds = [],
       frozenRemittanceIds = [],
+      negativeOnlyAdjust = null,
     } = req.body;
 
     // Normalize IDs
@@ -2594,13 +2595,6 @@ const transferCOD = async (req, res) => {
     payableRemittanceIds = payableRemittanceIds.map(String);
     topUpRemittanceIds = topUpRemittanceIds.map(String);
     frozenRemittanceIds = frozenRemittanceIds.map(String);
-
-    // UTR required only if money is paid to client
-    if (payableRemittanceIds.length > 0 && !utr) {
-      return res.status(400).json({
-        message: "UTR is required when paying remittances.",
-      });
-    }
 
     // Fetch user remittance record
     const remRecord = await codRemittance.findOne({ userId: id });
@@ -2639,7 +2633,16 @@ const transferCOD = async (req, res) => {
 
       // 1️⃣ PAYABLE entries → Paid
       if (payableRemittanceIds.includes(idStr)) {
-        totalPayable += Number(item.codAvailable || 0);
+        const codAmt = Number(item.codAvailable || 0);
+
+        // Partial wallet adjustment for "negative only" mode
+        if (negativeOnlyAdjust && String(negativeOnlyAdjust.remittanceId) === idStr) {
+          const adjustAmt = Math.min(Number(negativeOnlyAdjust.amount) || 0, codAmt);
+          totalAdjusted += adjustAmt;
+          totalPayable += codAmt - adjustAmt;
+        } else {
+          totalPayable += codAmt;
+        }
 
         return {
           ...item,
@@ -2683,6 +2686,13 @@ const transferCOD = async (req, res) => {
         reason: "Held due to hold amount requirement",
       };
     });
+
+    // UTR required only when actual money is paid to client
+    if (totalPayable > 0 && !utr) {
+      return res.status(400).json({
+        message: "UTR is required when paying remittances.",
+      });
+    }
 
     // ============================================================
     // WALLET ADJUSTMENT (TopUp)
@@ -2728,7 +2738,10 @@ const transferCOD = async (req, res) => {
 
       if (payableRemittanceIds.includes(remId)) {
         status = "Paid";
-        reason = "Paid to client";
+        reason =
+          negativeOnlyAdjust && String(negativeOnlyAdjust.remittanceId) === remId
+            ? "Partially paid to client, partial wallet adjustment"
+            : "Paid to client";
       } else if (topUpRemittanceIds.includes(remId)) {
         status = "Paid";
         reason = "";
