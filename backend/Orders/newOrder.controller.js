@@ -1750,7 +1750,7 @@ const cancelOrdersAtBooked = async (req, res) => {
         );
 
         await WalletTransaction.create(
-          {
+          [{
             walletId: updatedWallet._id,
             channelOrderId: currentOrder.orderId || null,
             category: "credit",
@@ -1759,7 +1759,7 @@ const cancelOrdersAtBooked = async (req, res) => {
             date: new Date(),
             awb_number: allOrders.awb_number || "",
             description: `Freight Charges Received`,
-          },
+          }],
           { session }
         );
       } else if (balanceTobeAdded > 0 && alreadyRefunded) {
@@ -2193,7 +2193,7 @@ const bulkCancelOrder = async (req, res) => {
               description: "Freight Charges Received",
             };
 
-            await WalletTransaction.create({
+            await WalletTransaction.create([{
               walletId: walletId,
               channelOrderId: transactionObj.channelOrderId,
               category: transactionObj.category,
@@ -2202,7 +2202,7 @@ const bulkCancelOrder = async (req, res) => {
               date: transactionObj.date,
               awb_number: transactionObj.awb_number,
               description: transactionObj.description,
-            }).catch(err => console.error("⚠️ WalletTransaction create failed in newOrder (bulk cancel):", err.message));
+            }]);
           } else {
             console.log(`[BulkCancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
           }

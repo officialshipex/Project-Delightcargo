@@ -283,7 +283,7 @@ const delhiveryManifestCallback = async (req, res) => {
           $set: { balance: newBalance },
         });
 
-        await WalletTransaction.create({
+        await WalletTransaction.create([{
           walletId: user.Wallet,
           category: "credit",
           channelOrderId: order.orderId,
@@ -291,7 +291,7 @@ const delhiveryManifestCallback = async (req, res) => {
           balanceAfterTransaction: newBalance,
           description: "Freight Charges Received",
           date: new Date(),
-        }).catch(e => console.error("⚠️ WalletTransaction B2B credit dual-write failed:", e.message));
+        }]);
 
         await Order.findByIdAndUpdate(order._id, {
           status: "Cancelled",

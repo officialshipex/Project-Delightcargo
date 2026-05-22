@@ -276,7 +276,7 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
         $set: { balance: newBalance },
       });
 
-      await WalletTransaction.create({
+      await WalletTransaction.create([{
         walletId: user.Wallet,
         category: "credit",
         channelOrderId: order.orderId,
@@ -285,7 +285,7 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
         balanceAfterTransaction: newBalance,
         description: "Freight Charges Received",
         date: new Date(),
-      }).catch(e => console.error("⚠️ WalletTransaction B2B ShipRocket credit dual-write failed:", e.message));
+      }]);
 
       await Order.findByIdAndUpdate(order._id, {
         walletRefunded: true,
