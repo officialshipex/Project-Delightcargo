@@ -116,7 +116,7 @@ const createShipmentFunctionXpressBees = async (
         awb_number: `${result.awb_number}`,
         date: new Date(),
         description: "Freight Charges Applied",
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createShipmentFunctionXpressBees):", e.message));
+      });
 
       return { status: 201, message: "Shipment Created Successfully" };
     } else {

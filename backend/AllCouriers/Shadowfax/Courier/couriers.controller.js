@@ -226,7 +226,7 @@ const createOrder = async (req, res) => {
           awb_number: sfxData.data.awb_number,
           description: "Freight Charges Applied",
           priceBreakup
-        }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createShadowfaxOrder):", e.message));
+        }], { session });
       }
 
       // ── Update order document ─────────────────────────────────────────────

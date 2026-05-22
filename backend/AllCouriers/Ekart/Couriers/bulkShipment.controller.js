@@ -354,11 +354,11 @@ const createOrderEkart = async (
         awb_number: awb,
         description: "Freight Charges Applied",
         priceBreakup
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrderEkart bulk):", e.message));
+      });
     }
 
     /* --------------------------------------------------
-       10️⃣ FINAL RETURN (SAME AS DTDC)
+        10️⃣ FINAL RETURN (SAME AS DTDC)
     -------------------------------------------------- */
     return {
       success: true,

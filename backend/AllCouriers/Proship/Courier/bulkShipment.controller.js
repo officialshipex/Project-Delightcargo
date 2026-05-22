@@ -216,11 +216,11 @@ const createOrderProship = async (
         awb_number: awb,
         description: "Freight Charges Applied",
         priceBreakup,
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrderProship):", e.message));
+      });
     }
 
     /* --------------------------------------------------
-       9️⃣ FINAL RETURN
+        9️⃣ FINAL RETURN
     -------------------------------------------------- */
     return {
       success: true,

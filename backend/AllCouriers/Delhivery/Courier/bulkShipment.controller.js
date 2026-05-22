@@ -190,17 +190,6 @@ const createShipmentFunctionDelhivery = async (
           console.error("[Pickup] assignPickupManifest failed:", pErr.message);
         }
 
-        const transaction = {
-          channelOrderId: currentOrder.orderId,
-          category: "debit",
-          amount: finalCharges,
-          date: new Date(),
-          awb_number: result.waybill,
-          description: "Freight Charges Applied",
-          balanceAfterTransaction: null, // temporary placeholder
-          priceBreakup
-        };
-
         const updatedWallet = await Wallet.findOneAndUpdate(
           { _id: walletId },
           {

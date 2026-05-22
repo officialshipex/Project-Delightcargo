@@ -510,7 +510,7 @@ const cancelOrdersAtBooked = async (req, res) => {
           txnType: "Shipping",
           action: "credit",
           category: "credit",
-          amount: currentBalance,
+          amount: balanceTobeAdded,
           balanceAfterTransaction: currentWallet.balance + balanceTobeAdded,
           awb_number: `${currentOrder.awb_number}`,
           description: "Cancellation Refund",

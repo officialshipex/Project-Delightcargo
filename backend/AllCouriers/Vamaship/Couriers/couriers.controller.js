@@ -186,11 +186,11 @@ const createVamashipShipment = async (req, res) => {
         channelOrderId: currentOrder.orderId,
         category: "debit",
         amount: parseInt(finalCharges),
-        balanceAfterTransaction: effectiveBalance - parseInt(finalCharges),
+        balanceAfterTransaction: currentWallet.balance - parseInt(finalCharges),
         date: new Date(),
         awb_number: shipmentInfo.awb,
         description: "Freight Charges Applied",
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createVamashipShipment):", e.message));
+      });
     }
 
     return res.status(200).json({

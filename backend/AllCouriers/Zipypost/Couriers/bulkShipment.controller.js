@@ -328,7 +328,7 @@ const createOrderZipypost = async (
         awb_number: awb,
         description: "Freight Charges Applied",
         priceBreakup
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrderZipypost):", e.message));
+      });
 
       return {
         success: true,

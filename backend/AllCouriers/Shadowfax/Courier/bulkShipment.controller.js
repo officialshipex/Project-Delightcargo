@@ -162,7 +162,7 @@ const createOrderShadowfax = async (
           awb_number: awb,
           description: "Freight Charges Applied",
           priceBreakup,
-        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrderShadowfax bulk):", e.message));
+        });
       }
 
       // Auto-assign pickup manifest

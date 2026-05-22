@@ -4,7 +4,7 @@ const fetch = require('node-fetch');
 const adjustDispute = async (Info, req) => {
     try {
         const id = req.user.wallet;
-        const userWallet = await Wallet.findById(id);
+        const userWallet = await Wallet.findById(id).select("balance");
 
         if (!userWallet) {
             throw new Error("Wallet not found!");
@@ -43,7 +43,7 @@ const adjustDispute = async (Info, req) => {
 const reduceWallet = async (motion, type, freightCharges, codCharge, req) => {
     try {
         const id = req.user.wallet;
-        const userWallet = await Wallet.findById(id);
+        const userWallet = await Wallet.findById(id).select("balance");
 
         if (!userWallet) {
             throw new Error("Wallet not found!");

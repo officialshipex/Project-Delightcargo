@@ -335,7 +335,7 @@ const createOrder = async (req, res) => {
         awb_number: result.awbNumber || "",
         description: "Freight Charges Applied",
         priceBreakup
-      }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrder ShreeMaruti):", e.message));
+      }], { session });
 
       await session.commitTransaction();
       session.endSession();

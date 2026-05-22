@@ -694,7 +694,7 @@ async function generateWalletReport() {
       .map((u) => u.Wallet.toString());
 
     // 2️⃣ Fetch all Wallets
-    const allWallets = await Wallet.find({});
+    const allWallets = await Wallet.find({}).select("_id balance holdAmount transactions walletHistory");
     const allWalletIds = allWallets.map((w) => w._id.toString());
 
     console.log("\n==================== WALLET REPORT ====================");

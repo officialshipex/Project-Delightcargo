@@ -194,7 +194,7 @@ const createShipmentFunctionShipRocket = async (
         awb_number,
         description: "Freight Charges Applied",
         priceBreakup,
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createShipmentFunctionShipRocket bulk):", e.message));
+      });
     }
 
     return { status: 201, message: "Shipment Created Successfully", waybill: awb_number, orderId: currentOrder.orderId };

@@ -509,7 +509,7 @@ const orderCreationEkart = async (req, res) => {
             awb_number: response.data.tracking_id,
             description: "Freight Charges Applied",
             priceBreakup
-          }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createEkartOrder async):", e.message));
+          });
         }
       } catch (err) {
         console.error("Wallet update error:", err);

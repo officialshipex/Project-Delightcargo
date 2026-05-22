@@ -168,7 +168,7 @@ const rtoCharges = async (specificOrderId = null) => {
           const balanceAfter = parseFloat((upd.balance || 0).toFixed(2));
 
           await WalletTransaction.create(
-            {
+            [{
               walletId: userWallet._id,
               channelOrderId: item.orderId || null,
               category: "credit",
@@ -177,7 +177,7 @@ const rtoCharges = async (specificOrderId = null) => {
               date: codDate,
               awb_number: awb,
               description: codDescription,
-            },
+            }],
             { session }
           );
 
@@ -202,7 +202,7 @@ const rtoCharges = async (specificOrderId = null) => {
           finalBalanceForOrder = balanceAfterDebit;
 
           await WalletTransaction.create(
-            {
+            [{
               walletId: userWallet._id,
               channelOrderId: item.orderId || null,
               category: "debit",
@@ -215,7 +215,7 @@ const rtoCharges = async (specificOrderId = null) => {
                 freight: charges,
                 gst: gstAmount,
               },
-            },
+            }],
             { session }
           );
           console.log(`➖ RTO debit applied for AWB ${awb}: -${totalChargesReverse}, balanceAfter=${balanceAfterDebit}`);

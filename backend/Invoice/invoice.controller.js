@@ -563,7 +563,7 @@ async function buildChargesFromWalletTransactions(
   previousAwbs = [],
 ) {
   const user = await User.findById(userId);
-  const wallet = await Wallet.findOne({ _id: user.Wallet });
+  const wallet = await Wallet.findOne({ _id: user.Wallet }).select("_id");
   if (!wallet) return { taxableValue: 0, tax: 0, total: 0, txns: [] };
 
   const candidateTxns = await WalletTransaction.find({

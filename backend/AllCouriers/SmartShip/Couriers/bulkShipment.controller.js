@@ -230,7 +230,7 @@ const orderRegistrationOneStep = async (
           date: new Date(),
           awb_number: result.awb_number,
           description: "Freight Charges Applied",
-        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (orderRegistrationOneStep SmartShip bulk):", e.message));
+        });
       }
     } else {
       return { message: "Error creating shipment" };

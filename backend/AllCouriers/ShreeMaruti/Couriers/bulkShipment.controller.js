@@ -257,7 +257,7 @@ const createShipmentFunctionShreeMaruti = async (
           awb_number: result.awbNumber,
           description: "Freight Charges Applied",
           priceBreakup
-        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createShipmentFunctionShreeMaruti ShreeMaruti):", e.message));
+        });
       }
 
       // --- Call Manifest API ---

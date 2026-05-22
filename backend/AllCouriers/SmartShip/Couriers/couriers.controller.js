@@ -316,11 +316,11 @@ const orderRegistrationOneStep = async (req, res) => {
       channelOrderId: currentOrder.orderId,
       category: "debit",
       amount: parseFloat(finalCharges),
-      balanceAfterTransaction: effectiveBalance - parseFloat(finalCharges),
+      balanceAfterTransaction: currentWallet.balance - parseFloat(finalCharges),
       date: new Date(),
       awb_number: result.awb_number,
       description: "Freight Charges Applied",
-    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (orderRegistrationOneStep SmartShip):", e.message));
+    }], { session });
 
     await session.commitTransaction();
     session.endSession();
