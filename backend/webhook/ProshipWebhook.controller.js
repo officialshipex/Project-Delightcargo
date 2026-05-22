@@ -242,7 +242,7 @@ const ProshipWebhook = async (req, res) => {
           if (balanceToBeAdded > 0 && !order.walletRefunded) {
             const userDoc = await User.findById(order.userId);
             if (userDoc) {
-              const currentWallet = await Wallet.findById(userDoc.Wallet);
+              const currentWallet = await Wallet.findById(userDoc.Wallet).select("balance");
               if (currentWallet) {
                 const alreadyRefunded = await WalletTransaction.exists({
                   walletId: currentWallet._id,
@@ -257,17 +257,6 @@ const ProshipWebhook = async (req, res) => {
                     { _id: currentWallet._id },
                     {
                       $inc: { balance: balanceToBeAdded },
-                      $push: {
-                        transactions: {
-                          channelOrderId: order.orderId || null,
-                          category: "credit",
-                          amount: balanceToBeAdded,
-                          balanceAfterTransaction: newBalance,
-                          date: new Date(),
-                          awb_number: order.awb_number,
-                          description: "Freight Charges Received",
-                        },
-                      },
                     }
                   );
 

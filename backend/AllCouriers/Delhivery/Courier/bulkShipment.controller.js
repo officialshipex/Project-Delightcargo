@@ -146,7 +146,7 @@ const createShipmentFunctionDelhivery = async (
     )}`;
 
     // Fetch the latest wallet details before proceeding
-    let currentWallet = await Wallet.findById(walletId);
+    let currentWallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
     const walletHoldAmount = currentWallet?.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
     const balance = effectiveBalance + currentWallet.creditLimit;
@@ -205,27 +205,11 @@ const createShipmentFunctionDelhivery = async (
           { _id: walletId },
           {
             $inc: { balance: -parseFloat(finalCharges) },
-            $push: { transactions: transaction },
           },
           { new: true }
         );
 
-        // Patch the last inserted transaction with the correct balanceAfterTransaction
-        if (updatedWallet) {
-          const updatedBalance = updatedWallet.balance;
-
-          await Wallet.updateOne(
-            { _id: walletId, "transactions.awb_number": result.waybill },
-            {
-              $set: {
-                "transactions.$.balanceAfterTransaction": updatedBalance,
-              },
-            }
-          );
-        }
-
-        // 🔁 Dual-write: mirror to WalletTransaction for future migration
-        WalletTransaction.create({
+        await WalletTransaction.create({
           walletId: walletId,
           channelOrderId: currentOrder.orderId,
           category: "debit",
@@ -235,7 +219,7 @@ const createShipmentFunctionDelhivery = async (
           awb_number: result.waybill,
           description: "Freight Charges Applied",
           priceBreakup
-        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk Delhivery):", e.message));
+        });
 
         return {
           status: 201,

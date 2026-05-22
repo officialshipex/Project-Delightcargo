@@ -16,7 +16,7 @@ const triggerStatusNotification = async (order) => {
     const user = await User.findById(order.userId).select("Wallet");
     if (!user || !user.Wallet) return;
 
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("creditBalance");
     const credit = wallet?.creditBalance || 0;
 
     const notificationData = {

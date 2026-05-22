@@ -32,7 +32,7 @@ const createDelhiveryB2BShipment = async (req, res) => {
        2️⃣ WALLET CHECK
     ================================= */
     const user = await User.findById(order.userId).session(session);
-    const wallet = await Wallet.findById(user.Wallet).session(session);
+    const wallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
 
     const effectiveBalance = wallet.balance - (wallet.holdAmount || 0);
     const balance = effectiveBalance + wallet.creditLimit;
@@ -49,20 +49,10 @@ const createDelhiveryB2BShipment = async (req, res) => {
         user.Wallet,
         {
           $inc: { balance: -finalCharges },
-          $push: {
-            transactions: {
-              channelOrderId: order.orderId,
-              category: "debit",
-              amount: finalCharges,
-              balanceAfterTransaction: newBalance,
-              description: "Freight Charges Applied",
-              date: new Date(),
-            },
-          },
         },
         { session }
       ),
-      WalletTransaction.create([
+      await WalletTransaction.create([
         {
           walletId: user.Wallet,
           channelOrderId: order.orderId,
@@ -72,7 +62,7 @@ const createDelhiveryB2BShipment = async (req, res) => {
           description: "Freight Charges Applied",
           date: new Date(),
         }
-      ], { session }).catch(e => console.error("⚠️ WalletTransaction B2B debit dual-write failed:", e.message))
+      ], { session })
     ]);
 
     /* ================================
@@ -279,7 +269,7 @@ const delhiveryManifestCallback = async (req, res) => {
     if (!order) return res.json({ success: true });
 
     const user = await User.findById(order.userId);
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit");
 
     /* ================================
        ❌ FAILED → REFUND
@@ -291,16 +281,6 @@ const delhiveryManifestCallback = async (req, res) => {
 
         await Wallet.findByIdAndUpdate(user.Wallet, {
           $set: { balance: newBalance },
-          $push: {
-            transactions: {
-              category: "credit",
-              channelOrderId: order.orderId,
-              amount: refundAmount,
-              balanceAfterTransaction: newBalance,
-              description: "Freight Charges Received",
-              date: new Date(),
-            },
-          },
         });
 
         await WalletTransaction.create({
@@ -349,32 +329,18 @@ const delhiveryManifestCallback = async (req, res) => {
         },
       });
 
-      await Promise.all([
-        Wallet.updateOne(
-          {
-            _id: user.Wallet,
-            "transactions.channelOrderId": order.orderId,
-            "transactions.category": "debit",
-          },
-          {
-            $set: {
-              "transactions.$.awb_number": payload.awbs?.[0] || null,
-            },
+      await WalletTransaction.updateOne(
+        {
+          walletId: user.Wallet,
+          channelOrderId: order.orderId,
+          category: "debit"
+        },
+        {
+          $set: {
+            awb_number: payload.awbs?.[0] || null
           }
-        ),
-        WalletTransaction.updateOne(
-          {
-            walletId: user.Wallet,
-            channelOrderId: order.orderId,
-            category: "debit"
-          },
-          {
-            $set: {
-              awb_number: payload.awbs?.[0] || null
-            }
-          }
-        ).catch(e => console.error("⚠️ WalletTransaction B2B AWB update failed:", e.message))
-      ]);
+        }
+      ).catch(e => console.error("⚠️ WalletTransaction B2B AWB update failed:", e.message));
     }
 
     res.json({ success: true });

@@ -81,7 +81,7 @@ const createOneClickShipment = async (req, res) => {
     }
 
     // Step 3️⃣ Fetch wallet
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
+    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
     if (!currentWallet) {
       await Order.findByIdAndUpdate(id, { status: "new" }, { session });
       await session.abortTransaction();
@@ -205,19 +205,6 @@ const createOneClickShipment = async (req, res) => {
       currentWallet.updateOne(
         {
           $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId || null,
-              category: "debit",
-              amount: balanceToBeDeducted,
-              balanceAfterTransaction:
-                currentWallet.balance - balanceToBeDeducted,
-              date: new Date(),
-              awb_number: trackingId,
-              description: "Freight Charges Applied",
-              priceBreakup,
-            },
-          },
         },
         { session },
       ),
@@ -232,7 +219,7 @@ const createOneClickShipment = async (req, res) => {
     ]);
 
     // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create([{
+    await WalletTransaction.create([{
       walletId: currentWallet._id,
       channelOrderId: currentOrder.orderId || null,
       category: "debit",
@@ -242,7 +229,7 @@ const createOneClickShipment = async (req, res) => {
       awb_number: trackingId,
       description: "Freight Charges Applied",
       priceBreakup
-    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOneClickShipment Amazon):", e.message));
+    }], { session });
 
     await session.commitTransaction();
     session.endSession();

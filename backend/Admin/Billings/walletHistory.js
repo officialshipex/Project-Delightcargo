@@ -187,7 +187,7 @@ const addWalletHistory = async (req, res) => {
     }
 
     // 3. Fetch wallet
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("walletHistory balance");
     if (!wallet) {
       return res.status(404).json({ message: "Wallet not found" });
     }
@@ -222,22 +222,14 @@ const addWalletHistory = async (req, res) => {
     if (status === "success") {
       wallet.balance += numericAmount;
 
-      wallet.transactions.push({
-        category: "credit",
-        amount: Number(amount),
-        balanceAfterTransaction: wallet.balance,
-        description: `Recharge From Gateway(Razorpay)`,
-        channelOrderId: orderId,
-      });
-      // 🔁 Dual-write: mirror to WalletTransaction for future migration
-      WalletTransaction.create({
+      await WalletTransaction.create({
         walletId: wallet._id,
         category: "credit",
         amount: Number(amount),
         balanceAfterTransaction: wallet.balance,
         description: `Recharge From Gateway(Razorpay)`,
         channelOrderId: orderId,
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (addWalletHistory):", e.message));
+      });
     }
 
     await wallet.save();
@@ -294,7 +286,7 @@ const addPassbook = async (req, res) => {
     }
 
     const walletId = user.Wallet;
-    const wallet = await Wallet.findById(walletId);
+    const wallet = await Wallet.findById(walletId).select("balance");
     if (!wallet) {
       return res.status(404).json({ error: "Wallet not found" });
     }
@@ -328,17 +320,7 @@ const addPassbook = async (req, res) => {
     //   status: status || "success",
     // });
 
-    // Add to transactions
-    wallet.transactions.push({
-      channelOrderId: orderId,
-      category: transactionType,
-      amount: parseFloat(amount),
-      balanceAfterTransaction: newBalance,
-      awb_number: awbNumber,
-      description,
-    });
-    // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create({
+    await WalletTransaction.create({
       walletId: wallet._id,
       channelOrderId: orderId,
       category: transactionType,
@@ -346,7 +328,7 @@ const addPassbook = async (req, res) => {
       balanceAfterTransaction: newBalance,
       awb_number: awbNumber,
       description,
-    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (addPassbook):", e.message));
+    });
 
     // Update wallet balance
     wallet.balance = newBalance;
@@ -395,7 +377,7 @@ const walletUpdation = async (req, res) => {
     }
 
     // ✅ Find Wallet
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("balance");
     if (!wallet) {
       return res.status(404).json({ error: "Wallet not found" });
     }
@@ -556,16 +538,7 @@ const walletUpdation = async (req, res) => {
       updatedCategory = "Applied";
     }
 
-    wallet.transactions.push({
-      channelOrderId: order?.orderId || null,
-      awb_number: isCreditNote ? null : awbNumber,
-      description: `${description} ${updatedCategory}`,
-      category,
-      amount: parsedAmount,
-      balanceAfterTransaction: newBalance,
-    });
-    // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create({
+    await WalletTransaction.create({
       walletId: wallet._id,
       channelOrderId: order?.orderId || null,
       awb_number: isCreditNote ? null : awbNumber,
@@ -573,7 +546,7 @@ const walletUpdation = async (req, res) => {
       category,
       amount: parsedAmount,
       balanceAfterTransaction: newBalance,
-    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (walletUpdation):", e.message));
+    });
 
     wallet.balance = newBalance; // ✅ Update balance
 
@@ -632,7 +605,7 @@ const reverseTransaction = async (req, res) => {
       return res.status(404).json({ error: "User or wallet not found" });
     }
 
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("balance");
     if (!wallet) {
       return res.status(404).json({ error: "Wallet not found" });
     }
@@ -673,16 +646,7 @@ const reverseTransaction = async (req, res) => {
     const newBalance =
       (typeof wallet.balance === "number" ? wallet.balance : 0) + parsedAmount;
 
-    wallet.transactions.push({
-      channelOrderId: orderId,
-      category: "credit",
-      amount: parsedAmount,
-      balanceAfterTransaction: newBalance,
-      awb_number: awbNumber,
-      description: reversedDescription,
-    });
-    // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create({
+    await WalletTransaction.create({
       walletId: wallet._id,
       channelOrderId: orderId,
       category: "credit",
@@ -690,7 +654,7 @@ const reverseTransaction = async (req, res) => {
       balanceAfterTransaction: newBalance,
       awb_number: awbNumber,
       description: reversedDescription,
-    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (reverseTransaction):", e.message));
+    });
 
     wallet.balance = newBalance;
     await wallet.save();

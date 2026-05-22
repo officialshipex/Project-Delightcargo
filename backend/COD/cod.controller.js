@@ -364,7 +364,7 @@ const processAndRemit = async (plan) => {
   }
 
   // Now fetch the wallet using the user's wallet reference
-  const wallet = await Wallet.findById(user.Wallet);
+  const wallet = await Wallet.findById(user.Wallet).select("balance");
 
   if (!wallet) {
     console.log(`Missing wallet for user ${plan.userId}, skipping...`);
@@ -425,7 +425,6 @@ const processAndRemit = async (plan) => {
         { _id: wallet._id },
         {
           $set: { balance: afterWallet },
-          $push: { transactions: transactionEntry },
         }
       ),
       WalletTransaction.create({
@@ -437,7 +436,7 @@ const processAndRemit = async (plan) => {
         awb_number: transactionEntry.awb_number,
         description: transactionEntry.description,
       })
-    ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in cod.controller (adjustAmount):", err.message));
+    ]).catch(err => console.error("⚠️ WalletTransaction create failed in cod.controller (adjustAmount):", err.message));
   } else {
     // No adjustment → only update balance
     await Wallet.updateOne(
@@ -746,7 +745,7 @@ const codRemittanceRecharge = async (req, res) => {
       });
     }
 
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance");
     if (!currentWallet) {
       return res.status(404).json({ message: "Wallet not found" });
     }
@@ -796,15 +795,6 @@ const codRemittanceRecharge = async (req, res) => {
     await Promise.all([
       currentWallet.updateOne({
         $inc: { balance: amount },
-        $push: {
-          transactions: {
-            category: "credit",
-            amount,
-            balanceAfterTransaction: currentWallet.balance + amount,
-            date: new Date(),
-            description: "Recharge from COD Remittance",
-          },
-        },
       }),
       WalletTransaction.create({
         walletId: currentWallet._id,
@@ -814,7 +804,7 @@ const codRemittanceRecharge = async (req, res) => {
         date: new Date(),
         description: "Recharge from COD Remittance",
       })
-    ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in cod.controller (recharge):", err.message));
+    ]).catch(err => console.error("⚠️ WalletTransaction create failed in cod.controller (recharge):", err.message));
 
     return res.status(200).json({
       success: true,
@@ -1231,7 +1221,7 @@ const remittanceTransactionData = async (req, res) => {
     ]);
 
     const wallet = user?.Wallet
-      ? await Wallet.findById(user.Wallet).lean()
+      ? await Wallet.findById(user.Wallet).lean().select("balance")
       : null;
 
     // Construct the response object (aligned with seller controller)
@@ -2482,7 +2472,7 @@ const getCODTransferData = async (req, res) => {
         .json({ message: "Wallet not found for this user." });
     }
 
-    const wallet = await Wallet.findById(user.Wallet).lean();
+    const wallet = await Wallet.findById(user.Wallet).lean().select("balance holdAmount creditLimit");
     if (!wallet) {
       return res.status(404).json({ message: "Wallet data not found." });
     }
@@ -2622,7 +2612,7 @@ const transferCOD = async (req, res) => {
 
     // Fetch user + wallet
     const user = await User.findById(id);
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("balance");
 
     if (!wallet) {
       return res.status(404).json({ message: "Wallet not found" });
@@ -2705,15 +2695,6 @@ const transferCOD = async (req, res) => {
           { _id: wallet._id },
           {
             $set: { balance: newBalance },
-            $push: {
-              transactions: {
-                category: "credit",
-                amount: totalAdjusted,
-                balanceAfterTransaction: newBalance,
-                description: "COD adjustment credited to wallet",
-                date: new Date(),
-              },
-            },
           }
         ),
         WalletTransaction.create({
@@ -2724,7 +2705,7 @@ const transferCOD = async (req, res) => {
           description: "COD adjustment credited to wallet",
           date: new Date(),
         })
-      ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in cod.controller (bulk adjust):", err.message));
+      ]).catch(err => console.error("⚠️ WalletTransaction create failed in cod.controller (bulk adjust):", err.message));
     }
 
     // ============================================================
@@ -2968,7 +2949,7 @@ const exportBankTemplate = async (req, res) => {
       if (!user) { userErrors.push(`User not found: ${userId}`); continue; }
 
       const [walletDoc, bankDetails] = await Promise.all([
-        Wallet.findById(user.Wallet).lean(),
+        Wallet.findById(user.Wallet).lean().select("balance holdAmount"),
         BankAccountDetails.findOne({ user: userId }).lean(),
       ]);
 

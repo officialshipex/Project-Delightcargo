@@ -44,7 +44,7 @@ const createVamashipShipment = async (req, res) => {
     }
 
     // Fetch wallet
-    const currentWallet = await Wallet.findById(user.Wallet);
+    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit");
     if (!currentWallet) {
       return res
         .status(404)
@@ -178,17 +178,6 @@ const createVamashipShipment = async (req, res) => {
 
       await currentWallet.updateOne({
         $inc: { balance: -parseInt(finalCharges) },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId,
-            category: "debit",
-            amount: parseInt(finalCharges),
-            balanceAfterTransaction: effectiveBalance - parseInt(finalCharges),
-            date: new Date(),
-            awb_number: shipmentInfo.awb,
-            description: `Freight Charges Applied`,
-          },
-        },
       });
 
       // 🔁 Dual-write: mirror to WalletTransaction for future migration

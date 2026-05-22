@@ -111,7 +111,7 @@ const orderCreationEkart = async (req, res) => {
 
     // 3. Fetch Wallet
     const user = await User.findById(currentOrder.userId).session(session);
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
+    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
     const holdAmount = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - holdAmount;
 
@@ -494,19 +494,6 @@ const orderCreationEkart = async (req, res) => {
           { _id: user.Wallet },
           {
             $inc: { balance: -balanceToBeDeducted },
-            $push: {
-              transactions: {
-                channelOrderId: currentOrder.orderId,
-                category: "debit",
-                amount: balanceToBeDeducted,
-                balanceAfterTransaction:
-                  currentWallet.balance - balanceToBeDeducted,
-                date: new Date(),
-                awb_number: response.data.tracking_id,
-                description: "Freight Charges Applied",
-                priceBreakup
-              },
-            },
           },
           { new: true }
         );

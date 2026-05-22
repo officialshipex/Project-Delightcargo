@@ -79,7 +79,7 @@ const rateCardSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ["Active", "Inactive", "Pending"],
+    enum: ["Active", "Inactive"],
     required: true,
   },
   shipmentType: {

@@ -42,7 +42,7 @@ const createOrderProship = async (
     /* --------------------------------------------------
        3️⃣ WALLET CHECK
     -------------------------------------------------- */
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
     if (!currentWallet) {
       return { success: false, message: "Wallet not found" };
     }
@@ -200,18 +200,6 @@ const createOrderProship = async (
       { _id: walletId },
       {
         $inc: { balance: -charges },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId,
-            category: "debit",
-            amount: charges,
-            balanceAfterTransaction: currentWallet.balance - parseFloat(charges),
-            date: new Date(),
-            awb_number: awb,
-            description: "Freight Charges Applied",
-            priceBreakup,
-          },
-        },
       },
       { new: true }
     );

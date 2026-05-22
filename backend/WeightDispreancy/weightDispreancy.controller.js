@@ -663,7 +663,7 @@ const AcceptDiscrepancy = async (req, res) => {
     const user = await User.findById(userId, null, { session });
     if (!user) throw new Error("User not found");
 
-    const wallet = await Wallet.findById(user.Wallet, null, { session });
+    const wallet = await Wallet.findById(user.Wallet, "balance holdAmount", { session });
     if (!wallet) throw new Error("Wallet not found");
 
     if (wallet.balance < extraCharges) {
@@ -686,11 +686,7 @@ const AcceptDiscrepancy = async (req, res) => {
       description: `Weight Dispute Charges Applied`,
       priceBreakup: discrepancies.excessWeightCharges?.priceBreakup,
     };
-    wallet.transactions.push(newTransaction);
-
-    // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session })
-      .catch(e => console.error("⚠️ WalletTransaction dual-write failed (AcceptDiscrepancy):", e.message));
+    await WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session });
 
     await wallet.save({ session });
 
@@ -745,7 +741,7 @@ const AcceptAllDiscrepancies = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
-    const wallet = await Wallet.findById(user.Wallet).session(session);
+    const wallet = await Wallet.findById(user.Wallet).select("balance holdAmount").session(session);
     if (!wallet) {
       await session.abortTransaction();
       return res
@@ -806,11 +802,7 @@ const AcceptAllDiscrepancies = async (req, res) => {
         createdAt: new Date(),
       };
 
-      wallet.transactions.push(newTransaction);
-
-      // 🔁 Dual-write: mirror to WalletTransaction for future migration
-      WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session })
-        .catch(e => console.error("⚠️ WalletTransaction dual-write failed (AcceptAllDiscrepancies):", e.message));
+      await WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session });
 
       // update discrepancy
       discrepancy.status = "Accepted";
@@ -868,7 +860,7 @@ const autoAcceptDiscrepancies = async () => {
         continue;
       }
 
-      const wallet = await Wallet.findById(user.Wallet).session(session);
+      const wallet = await Wallet.findById(user.Wallet).select("balance holdAmount").session(session);
       if (!wallet) {
         console.log(`Wallet not found for user ${user._id}`);
         continue;
@@ -902,11 +894,7 @@ const autoAcceptDiscrepancies = async () => {
         createdAt: new Date(),
       };
 
-      wallet.transactions.push(newTransaction);
-
-      // 🔁 Dual-write: mirror to WalletTransaction for future migration
-      WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session })
-        .catch(e => console.error("⚠️ WalletTransaction dual-write failed (autoAcceptDiscrepancies):", e.message));
+      await WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session });
 
       await wallet.save({ session });
 
@@ -1021,7 +1009,7 @@ const adminAcceptDiscrepancy = async (req, res) => {
         .json({ message: "User not found for this discrepancy" });
     }
 
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("balance holdAmount");
     if (!wallet) {
       return res.status(404).json({ message: "Wallet not found for user" });
     }

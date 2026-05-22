@@ -395,18 +395,6 @@ const createEkartShipment = async ({
         { _id: walletId },
         {
           $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId,
-              category: "debit",
-              amount: balanceToBeDeducted,
-              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
-              date: new Date(),
-              awb_number: response.data.tracking_id,
-              description: "Freight Charges Applied",
-              priceBreakup
-            },
-          },
         },
         { session }
       ),

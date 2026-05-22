@@ -47,7 +47,7 @@ const createOrderShadowfax = async (
     }
 
     // Wallet check with credit limit
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
     const walletHoldAmount = currentWallet?.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
     const totalBalance = effectiveBalance + (currentWallet.creditLimit || 0);
@@ -146,18 +146,6 @@ const createOrderShadowfax = async (
         { _id: walletId },
         {
           $inc: { balance: -parseFloat(finalCharges) },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId,
-              category: "debit",
-              amount: finalCharges,
-              date: new Date(),
-              awb_number: awb,
-              description: "Freight Charges Applied",
-              priceBreakup,
-              balanceAfterTransaction: currentWallet.balance - parseFloat(finalCharges),
-            },
-          },
         },
         { new: true }
       );

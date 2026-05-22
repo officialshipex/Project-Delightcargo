@@ -156,7 +156,7 @@ const orderRegistrationOneStep = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
+    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
     if (!currentWallet) {
       await session.abortTransaction();
       session.endSession();
@@ -306,17 +306,6 @@ const orderRegistrationOneStep = async (req, res) => {
       { _id: currentWallet._id },
       {
         $inc: { balance: -parseFloat(finalCharges) },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId,
-            category: "debit",
-            amount: parseFloat(finalCharges),
-            balanceAfterTransaction: effectiveBalance - parseFloat(finalCharges),
-            date: new Date(),
-            awb_number: result.awb_number,
-            description: `Freight Charges Applied`,
-          },
-        },
       },
       { session }
     );

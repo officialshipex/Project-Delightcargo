@@ -86,7 +86,7 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
+    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
     if (!currentWallet) {
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
@@ -286,23 +286,10 @@ const createOrder = async (req, res) => {
           { _id: user.Wallet },
           {
             $inc: { balance: -balanceToBeDeducted },
-            $push: {
-              transactions: {
-                channelOrderId: currentOrder.orderId || null,
-                category: "debit",
-                amount: balanceToBeDeducted,
-                balanceAfterTransaction:
-                  currentWallet.balance - balanceToBeDeducted,
-                date: new Date(),
-                awb_number: result.reference_number || "",
-                description: "Freight Charges Applied",
-                priceBreakup
-              },
-            },
           }
         );
         // 🔁 Dual-write: mirror to WalletTransaction for future migration
-        WalletTransaction.create({
+        await WalletTransaction.create({
           walletId: user.Wallet,
           channelOrderId: currentOrder.orderId || null,
           category: "debit",
@@ -312,7 +299,7 @@ const createOrder = async (req, res) => {
           awb_number: result.reference_number || "",
           description: "Freight Charges Applied",
           priceBreakup
-        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrder DTDC):", e.message));
+        });
       } catch (err) {
         console.error("Wallet update error:", err.message);
       }

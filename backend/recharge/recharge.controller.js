@@ -142,7 +142,7 @@ const razorpayWebhook = async (req, res) => {
         return;
       }
 
-      const wallet = await Wallet.findById(walletId).session(session);
+      const wallet = await Wallet.findById(walletId).select("walletHistory balance").session(session);
       if (!wallet) {
         console.error("❌ Wallet not found for walletId:", walletId);
         await session.abortTransaction();
@@ -181,23 +181,14 @@ const razorpayWebhook = async (req, res) => {
 
         wallet.balance = newBalance;
         wallet.walletHistory.push({ status: "success", paymentDetails });
-        // ✅ Add transaction schema entry (for balance impact)
-        wallet.transactions.push({
-          category: "credit", // since wallet is recharged
-          amount,
-          balanceAfterTransaction: newBalance,
-          description: `Recharge From Gateway(Razorpay)`,
-          channelOrderId: payment.order_id,
-        });
-        // 🔁 Dual-write: mirror to WalletTransaction for future migration
-        WalletTransaction.create([{
+        await WalletTransaction.create([{
           walletId: wallet._id,
           category: "credit",
           amount,
           balanceAfterTransaction: newBalance,
           description: `Recharge From Gateway(Razorpay)`,
           channelOrderId: payment.order_id,
-        }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (razorpayWebhook):", e.message));
+        }], { session });
         await wallet.save({ session });
         await session.commitTransaction();
         session.endSession();

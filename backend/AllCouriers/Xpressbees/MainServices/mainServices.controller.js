@@ -48,7 +48,7 @@ const createShipment = async (req, res) => {
     { id: "12938", name: "Xpressbees Same Day Delivery" },
   ];
 
-  const currentWallet = await Wallet.findById({ _id: users.Wallet });
+  const currentWallet = await Wallet.findById({ _id: users.Wallet }).select("balance holdAmount creditLimit");
   const order_items = new Array(currentOrder.productDetails.length);
 
   currentOrder.productDetails.map((item, index) => {
@@ -153,18 +153,6 @@ const createShipment = async (req, res) => {
       // console.log("sjakjska",balanceToBeDeducted)
       await currentWallet.updateOne({
         $inc: { balance: -balanceToBeDeducted },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId || null, // Include if available
-            category: "debit",
-            amount: balanceToBeDeducted, // Fixing incorrect reference
-            balanceAfterTransaction:
-              currentWallet.balance - balanceToBeDeducted,
-            date: new Date().toISOString().slice(0, 16).replace("T", " "),
-            awb_number: result.awb_number || "", // Ensuring it follows the schema
-            description: `Freight Charges Applied`,
-          },
-        },
       });
 
       // 🔁 Dual-write: mirror to WalletTransaction for future migration

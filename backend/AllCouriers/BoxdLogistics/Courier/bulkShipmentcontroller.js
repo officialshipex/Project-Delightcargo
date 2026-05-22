@@ -25,7 +25,7 @@ const createOrderBoxdLogistics = async (
         // Parallelize DB fetches, zone checks, and warehouse creation
         const [user, currentWallet, zone, warehouseId] = await Promise.all([
             User.findById(currentOrder.userId),
-            Wallet.findById(walletId),
+            Wallet.findById(walletId).select("balance holdAmount creditLimit"),
             getZone(
                 currentOrder.pickupAddress.pinCode,
                 currentOrder.receiverAddress.pinCode
@@ -125,23 +125,11 @@ const createOrderBoxdLogistics = async (
             { _id: walletId },
             {
                 $inc: { balance: -finalCharges },
-                $push: {
-                    transactions: {
-                        channelOrderId: currentOrder.orderId || null,
-                        category: "debit",
-                        amount: finalCharges,
-                        balanceAfterTransaction: currentWallet.balance - finalCharges,
-                        date: new Date(),
-                        awb_number: awb,
-                        description: "Freight Charges Applied",
-                        priceBreakup,
-                    },
-                },
             }
         );
 
         // 🔁 Dual-write: mirror to WalletTransaction for future migration
-        WalletTransaction.create({
+        await WalletTransaction.create({
             walletId: walletId,
             channelOrderId: currentOrder.orderId || null,
             category: "debit",
@@ -151,7 +139,7 @@ const createOrderBoxdLogistics = async (
             awb_number: awb,
             description: "Freight Charges Applied",
             priceBreakup
-        }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk BoxdLogistics):", e.message));
+        });
 
         return {
             success: true,

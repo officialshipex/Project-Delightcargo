@@ -125,19 +125,20 @@ const rtoCharges = async (specificOrderId = null) => {
         const rtoDescription = "RTO Freight Charges Applied";
 
         // 4️⃣ Check for duplicate transactions to avoid balance mismatch
-        const existingTxs = userWallet.transactions || [];
-        const hasCodTx = existingTxs.some(
-          (t) =>
-            t.awb_number === awb &&
-            t.description === codDescription &&
-            t.category === "credit"
-        );
-        const hasRtoTx = existingTxs.some(
-          (t) =>
-            t.awb_number === awb &&
-            t.description === rtoDescription &&
-            t.category === "debit"
-        );
+        const [hasCodTx, hasRtoTx] = await Promise.all([
+          WalletTransaction.exists({
+            walletId: userWallet._id,
+            awb_number: awb,
+            description: codDescription,
+            category: "credit",
+          }),
+          WalletTransaction.exists({
+            walletId: userWallet._id,
+            awb_number: awb,
+            description: rtoDescription,
+            category: "debit",
+          }),
+        ]);
 
         if (hasCodTx && hasRtoTx) {
           console.log(`ℹ️ Both COD and RTO transactions already exist for AWB ${awb}, checking if order needs update.`);
@@ -166,40 +167,19 @@ const rtoCharges = async (specificOrderId = null) => {
           const upd = await applyIncAndGet(userWallet._id, codCharges);
           const balanceAfter = parseFloat((upd.balance || 0).toFixed(2));
 
-          await Promise.all([
-            wallet.updateOne(
-              { _id: userWallet._id },
-              {
-                $push: {
-                  transactions: {
-                    channelOrderId: item.orderId || null,
-                    category: "credit",
-                    amount: codCharges,
-                    balanceAfterTransaction: balanceAfter,
-                    date: codDate,
-                    awb_number: awb,
-                    description: codDescription,
-                  },
-                },
-              },
-              { session }
-            ),
-            WalletTransaction.create(
-              [
-                {
-                  walletId: userWallet._id,
-                  channelOrderId: item.orderId || null,
-                  category: "credit",
-                  amount: codCharges,
-                  balanceAfterTransaction: balanceAfter,
-                  date: codDate,
-                  awb_number: awb,
-                  description: codDescription,
-                }
-              ],
-              { session }
-            )
-          ]);
+          await WalletTransaction.create(
+            {
+              walletId: userWallet._id,
+              channelOrderId: item.orderId || null,
+              category: "credit",
+              amount: codCharges,
+              balanceAfterTransaction: balanceAfter,
+              date: codDate,
+              awb_number: awb,
+              description: codDescription,
+            },
+            { session }
+          );
 
           console.log(
             `➕ COD applied for AWB ${awb}: +${codCharges}, balanceAfter=${balanceAfter}`
@@ -221,48 +201,23 @@ const rtoCharges = async (specificOrderId = null) => {
           );
           finalBalanceForOrder = balanceAfterDebit;
 
-          await Promise.all([
-            wallet.updateOne(
-              { _id: userWallet._id },
-              {
-                $push: {
-                  transactions: {
-                    channelOrderId: item.orderId || null,
-                    category: "debit",
-                    amount: totalChargesReverse,
-                    balanceAfterTransaction: balanceAfterDebit,
-                    date: rtoDate,
-                    awb_number: awb,
-                    description: rtoDescription,
-                    priceBreakup: {
-                      freight: charges,
-                      gst: gstAmount,
-                    },
-                  },
-                },
+          await WalletTransaction.create(
+            {
+              walletId: userWallet._id,
+              channelOrderId: item.orderId || null,
+              category: "debit",
+              amount: totalChargesReverse,
+              balanceAfterTransaction: balanceAfterDebit,
+              date: rtoDate,
+              awb_number: awb,
+              description: rtoDescription,
+              priceBreakup: {
+                freight: charges,
+                gst: gstAmount,
               },
-              { session }
-            ),
-            WalletTransaction.create(
-              [
-                {
-                  walletId: userWallet._id,
-                  channelOrderId: item.orderId || null,
-                  category: "debit",
-                  amount: totalChargesReverse,
-                  balanceAfterTransaction: balanceAfterDebit,
-                  date: rtoDate,
-                  awb_number: awb,
-                  description: rtoDescription,
-                  priceBreakup: {
-                    freight: charges,
-                    gst: gstAmount,
-                  },
-                }
-              ],
-              { session }
-            )
-          ]);
+            },
+            { session }
+          );
           console.log(`➖ RTO debit applied for AWB ${awb}: -${totalChargesReverse}, balanceAfter=${balanceAfterDebit}`);
         } else if (hasRtoTx) {
           console.log(`ℹ️ Skipping RTO debit for AWB ${awb} (Duplicate)`);

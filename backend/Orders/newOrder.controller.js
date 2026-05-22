@@ -1318,48 +1318,39 @@ const searchReceiver = async (req, res) => {
 
 const ShipeNowOrder = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
-    // console.log("order", order);
+    const order = await Order.findById(req.params.id).lean();
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    const plan = await Plan.findOne({ userId: order.userId });
-    // console.log("plan", plan);
-    const users = await user.findOne({ _id: order.userId });
-    const userWallet = await Wallet.findOne({ _id: users.Wallet });
+    const plan = await Plan.findOne({ userId: order.userId }).lean();
 
-    // ✅ fetch EDDMap & EPDMap
-    const EDDRates = await EDDMap.find();
-    const EPDRates = await EPDMap.find();
-
-    // ✅ fetch enabled + active courier services
-    const services = await CourierService.find({ status: "Enable" });
-    const enabledServices = [];
+    const [EDDRates, EPDRates, services] = await Promise.all([
+      EDDMap.find().lean(),
+      EPDMap.find().lean(),
+      CourierService.find({ status: "Enable" }).lean(),
+    ]);
     const normalize = (str) => str?.toLowerCase().replace(/\s+/g, "").trim();
-    for await (const srvc of services) {
-      const provider = await Courier.findOne({
-        courierProvider: srvc.provider,
-      });
-      // console.log("service",srvc)
-      // ✅ check both provider & courier service statuses
-      if (provider?.status === "Enable" && srvc.status === "Enable") {
-        // console.log("plan", plan);
-        const planRateCard = plan.rateCard.filter(
-          (card) => {
-            const sameProvider = normalize(card.courierProviderName) === normalize(srvc.provider);
-            const sameName = normalize(card.courierServiceName) === normalize(srvc.name);
-            const isBoxdSpecial = normalize(srvc.provider) === "boxdlogistics";
-
-            return sameProvider && (sameName || isBoxdSpecial) && card.status === "Active";
-          }
-        );
-        // console.log("planRateCard",planRateCard)
-        if (planRateCard && planRateCard.length > 0) {
-          enabledServices.push(srvc);
-        }
-      }
+    const providers = await Courier.find({
+      courierProvider: { $in: services.map((s) => s.provider) },
+    }).lean();
+    const providerMap = {};
+    for (const p of providers) {
+      providerMap[normalize(p.courierProvider)] = p;
     }
+    const enabledServices = services.filter((srvc) => {
+      const provider = providerMap[normalize(srvc.provider)];
+      if (provider?.status !== "Enable" || srvc.status !== "Enable") return false;
+      const planRateCard = plan.rateCard.filter(
+        (card) => {
+          const sameProvider = normalize(card.courierProviderName) === normalize(srvc.provider);
+          const sameName = normalize(card.courierServiceName) === normalize(srvc.name);
+          const isBoxdSpecial = normalize(srvc.provider) === "boxdlogistics";
+          return sameProvider && (sameName || isBoxdSpecial) && card.status === "Active";
+        }
+      );
+      return planRateCard && planRateCard.length > 0;
+    });
 
     const serviceabilityCache = {};
     const availableServicesResults = await Promise.all(
@@ -1603,7 +1594,7 @@ const cancelOrdersAtBooked = async (req, res) => {
     const userId = allOrders.userId?._id || allOrders.userId;
     const users = await user.findOne({ _id: userId });
     // console.log(users)
-    const currentWallet = await Wallet.findById({ _id: users.Wallet });
+    const currentWallet = await Wallet.findById({ _id: users.Wallet }).select("_id");
 
     const currentOrder = await Order.findById({ _id: allOrders._id });
     if (currentOrder.awb_number === "N/A" || !currentOrder.awb_number) {
@@ -1748,7 +1739,7 @@ const cancelOrdersAtBooked = async (req, res) => {
         walletId: currentWallet._id,
         awb_number: currentOrder.awb_number,
         category: "credit",
-        description: "Freight Charges Received"
+        description: "Freight Charges Received",
       });
 
       if (balanceTobeAdded > 0 && !alreadyRefunded) {
@@ -1759,18 +1750,16 @@ const cancelOrdersAtBooked = async (req, res) => {
         );
 
         await WalletTransaction.create(
-          [
-            {
-              walletId: updatedWallet._id,
-              channelOrderId: currentOrder.orderId || null,
-              category: "credit",
-              amount: balanceTobeAdded,
-              balanceAfterTransaction: updatedWallet.balance,
-              date: new Date(),
-              awb_number: allOrders.awb_number || "",
-              description: `Freight Charges Received`,
-            }
-          ],
+          {
+            walletId: updatedWallet._id,
+            channelOrderId: currentOrder.orderId || null,
+            category: "credit",
+            amount: balanceTobeAdded,
+            balanceAfterTransaction: updatedWallet.balance,
+            date: new Date(),
+            awb_number: allOrders.awb_number || "",
+            description: `Freight Charges Received`,
+          },
           { session }
         );
       } else if (balanceTobeAdded > 0 && alreadyRefunded) {
@@ -1827,54 +1816,30 @@ const passbook = async (req, res) => {
     const parsedLimit = limit === "all" ? 0 : Number(limit);
     const skip = (Number(page) - 1) * parsedLimit;
 
-    // Build server-side $filter conditions for MongoDB to run on the single Wallet document
-    const filterConditions = [];
+    const filterConditions = { walletId: new mongoose.Types.ObjectId(currentUser.Wallet) };
     if (fromDate && toDate) {
-      const from = new Date(new Date(fromDate).setHours(0, 0, 0, 0));
-      const to = new Date(new Date(toDate).setHours(23, 59, 59, 999));
-      filterConditions.push({ $gte: ["$$t.date", from] });
-      filterConditions.push({ $lte: ["$$t.date", to] });
+      filterConditions.date = {
+        $gte: new Date(new Date(fromDate).setHours(0, 0, 0, 0)),
+        $lte: new Date(new Date(toDate).setHours(23, 59, 59, 999)),
+      };
     }
-    if (category) filterConditions.push({ $eq: ["$$t.category", category] });
-    if (description) filterConditions.push({ $eq: ["$$t.description", description] });
-    if (awbNumber) filterConditions.push({ $eq: ["$$t.awb_number", awbNumber] });
-    if (orderId) filterConditions.push({ $eq: ["$$t.channelOrderId", orderId] });
+    if (category) filterConditions.category = category;
+    if (description) filterConditions.description = description;
+    if (awbNumber) filterConditions.awb_number = awbNumber;
+    if (orderId) filterConditions.channelOrderId = orderId;
 
-    const filterExpr = filterConditions.length > 0 ? { $and: filterConditions } : true;
-
-    // Run extremely fast aggregation targeting only a SINGLE Wallet document by _id
-    // Since input is exactly 1 document, this has zero MongoDB memory limit risks (no global unwinding)
-    const result = await Wallet.aggregate([
-      { $match: { _id: new mongoose.Types.ObjectId(currentUser.Wallet) } },
-      {
-        $project: {
-          transactions: {
-            $filter: {
-              input: "$transactions",
-              as: "t",
-              cond: filterExpr,
-            },
-          },
-        },
-      },
-      { $unwind: "$transactions" },
-      { $sort: { "transactions.date": -1 } },
-      {
-        $facet: {
-          metadata: [{ $count: "total" }],
-          data: [
-            ...(parsedLimit > 0 ? [{ $skip: skip }, { $limit: parsedLimit }] : []),
-          ],
-        },
-      },
+    const [totalCount, walletTransactions] = await Promise.all([
+      WalletTransaction.countDocuments(filterConditions),
+      WalletTransaction.find(filterConditions)
+        .sort({ date: -1 })
+        .skip(parsedLimit > 0 ? skip : 0)
+        .limit(parsedLimit > 0 ? parsedLimit : 0)
+        .lean(),
     ]);
 
-    const totalCount = result[0]?.metadata[0]?.total || 0;
-    const paginated = result[0]?.data.map(d => d.transactions) || [];
     const totalPages = parsedLimit === 0 ? 1 : Math.ceil(totalCount / parsedLimit);
 
-    // Enrich only the 20 paginated records with order details (high-performance bulk lookup)
-    const awbsToLookup = [...new Set(paginated.map((t) => t.awb_number).filter(Boolean))];
+    const awbsToLookup = [...new Set(walletTransactions.map((t) => t.awb_number).filter(Boolean))];
     const orderInfoMap = {};
     if (awbsToLookup.length > 0) {
       const orders = await Order.find(
@@ -1886,7 +1851,7 @@ const passbook = async (req, res) => {
       }
     }
 
-    const results = paginated.map((t) => {
+    const results = walletTransactions.map((t) => {
       const info = orderInfoMap[String(t.awb_number)] || {};
       return {
         _id: String(t._id),
@@ -2172,7 +2137,7 @@ const bulkCancelOrder = async (req, res) => {
 
         let walletDoc = walletCache[walletId];
         if (!walletDoc) {
-          walletDoc = await Wallet.findById(walletId);
+          walletDoc = await Wallet.findById(walletId).select("balance");
           if (walletDoc) walletCache[walletId] = walletDoc;
         }
 
@@ -2205,7 +2170,7 @@ const bulkCancelOrder = async (req, res) => {
             walletId: walletId,
             awb_number: currentOrder.awb_number,
             category: "credit",
-            description: "Freight Charges Received"
+            description: "Freight Charges Received",
           });
 
           if (!alreadyRefunded) {
@@ -2228,29 +2193,16 @@ const bulkCancelOrder = async (req, res) => {
               description: "Freight Charges Received",
             };
 
-            await Promise.all([
-              Wallet.updateOne(
-                { _id: walletId },
-                {
-                  $push: {
-                    transactions: transactionObj,
-                  },
-                },
-              ),
-              WalletTransaction.create({
-                walletId: walletId,
-                channelOrderId: transactionObj.channelOrderId,
-                category: transactionObj.category,
-                amount: transactionObj.amount,
-                balanceAfterTransaction: transactionObj.balanceAfterTransaction,
-                date: transactionObj.date,
-                awb_number: transactionObj.awb_number,
-                description: transactionObj.description,
-              })
-            ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in newOrder (bulk cancel):", err.message));
-
-            // Push to cached document's transactions to handle multiple orders of same user
-            walletDoc.transactions.push(transactionObj);
+            await WalletTransaction.create({
+              walletId: walletId,
+              channelOrderId: transactionObj.channelOrderId,
+              category: transactionObj.category,
+              amount: transactionObj.amount,
+              balanceAfterTransaction: transactionObj.balanceAfterTransaction,
+              date: transactionObj.date,
+              awb_number: transactionObj.awb_number,
+              description: transactionObj.description,
+            }).catch(err => console.error("⚠️ WalletTransaction create failed in newOrder (bulk cancel):", err.message));
           } else {
             console.log(`[BulkCancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
           }

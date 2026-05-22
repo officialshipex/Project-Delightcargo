@@ -210,7 +210,7 @@ const ShadowfaxWebhook = async (req, res) => {
       if (shouldUpdateWallet && balanceTobeAdded > 0 && !order.walletRefunded) {
         const userDoc = await User.findById(order.userId);
         if (userDoc) {
-          const currentWallet = await Wallet.findById(userDoc.Wallet);
+          const currentWallet = await Wallet.findById(userDoc.Wallet).select("balance");
           if (currentWallet) {
              // Check if already refunded
              const alreadyRefunded = await WalletTransaction.exists({
@@ -222,23 +222,12 @@ const ShadowfaxWebhook = async (req, res) => {
 
              if (!alreadyRefunded) {
                 const newBalance = (currentWallet.balance || 0) + balanceTobeAdded;
-                await Wallet.findOneAndUpdate(
-                   { _id: currentWallet._id },
-                   {
-                      $inc: { balance: balanceTobeAdded },
-                      $push: {
-                         transactions: {
-                            channelOrderId: order.orderId || null,
-                            category: "credit",
-                            amount: balanceTobeAdded,
-                            balanceAfterTransaction: newBalance,
-                            date: new Date(),
-                            awb_number: order.awb_number,
-                            description: "Freight Charges Received",
-                         },
-                      },
-                   }
-                );
+                 await Wallet.findOneAndUpdate(
+                    { _id: currentWallet._id },
+                    {
+                       $inc: { balance: balanceTobeAdded },
+                    }
+                 );
 
                 await WalletTransaction.create({
                    walletId: currentWallet._id,

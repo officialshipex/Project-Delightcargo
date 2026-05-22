@@ -20,7 +20,7 @@ const createShipmentFunctionXpressBees = async (
 ) => {
   try {
     const currentOrder = await Order.findById(id);
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
     if (currentOrder.status !== "new") {
       return {
         status: 400,
@@ -105,15 +105,6 @@ const createShipmentFunctionXpressBees = async (
 
       await currentWallet.updateOne({
         $inc: { balance: -balanceToBeDeducted },
-        $push: {
-          transactions: {
-            txnType: "Shipping",
-            action: "debit",
-            amount: currentBalance,
-            balanceAfterTransaction: currentBalance,
-            awb_number: `${result.awb_number}`,
-          },
-        },
       });
 
       // 🔁 Dual-write: mirror to WalletTransaction for future migration

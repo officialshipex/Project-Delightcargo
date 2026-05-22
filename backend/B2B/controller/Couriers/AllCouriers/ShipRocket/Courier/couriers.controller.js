@@ -41,7 +41,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
        2️⃣ WALLET CHECK
     ================================= */
     const user = await User.findById(order.userId).session(session);
-    const wallet = await Wallet.findById(user.Wallet).session(session);
+    const wallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
 
     const effectiveBalance = wallet.balance - (wallet.holdAmount || 0);
     const balance = effectiveBalance + wallet.creditLimit;
@@ -57,20 +57,10 @@ exports.createShiprocketCargoShipment = async (req, res) => {
         user.Wallet,
         {
           $inc: { balance: -finalCharges },
-          $push: {
-            transactions: {
-              channelOrderId: order.orderId,
-              category: "debit",
-              amount: finalCharges,
-              balanceAfterTransaction: newBalance,
-              description: "Freight Charges Applied",
-              date: new Date(),
-            },
-          },
         },
         { session }
       ),
-      WalletTransaction.create([
+      await WalletTransaction.create([
         {
           walletId: user.Wallet,
           channelOrderId: order.orderId,
@@ -80,7 +70,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
           description: "Freight Charges Applied",
           date: new Date(),
         }
-      ], { session }).catch(e => console.error("⚠️ WalletTransaction B2B ShipRocket debit dual-write failed:", e.message))
+      ], { session })
     ]);
 
     const orderCreationPayload = {
@@ -270,7 +260,7 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
 
     console.log("Shiprocket Cargo Shipment Details:", data);
     const user = await User.findById(order.userId);
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit");
     /* ================================
        ❌ SHIPMENT FAILED → REFUND
     ================================= */
@@ -284,17 +274,6 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
       const awbRef = data.waybill_no || order.awb_number || null;
       await Wallet.findByIdAndUpdate(user.Wallet, {
         $set: { balance: newBalance },
-        $push: {
-          transactions: {
-            category: "credit",
-            channelOrderId: order.orderId,
-            awb_number: awbRef,
-            amount: refundAmount,
-            balanceAfterTransaction: newBalance,
-            description: "Freight Charges Received",
-            date: new Date(),
-          },
-        },
       });
 
       await WalletTransaction.create({
@@ -354,32 +333,18 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
         },
       },
     });
-    await Promise.all([
-      Wallet.updateOne(
-        {
-          _id: user.Wallet,
-          "transactions.channelOrderId": order.orderId,
-          "transactions.category": "debit",
-        },
-        {
-          $set: {
-            "transactions.$.awb_number": data.waybill_no,
-          },
+    await WalletTransaction.updateOne(
+      {
+        walletId: user.Wallet,
+        channelOrderId: order.orderId,
+        category: "debit"
+      },
+      {
+        $set: {
+          awb_number: data.waybill_no
         }
-      ),
-      WalletTransaction.updateOne(
-        {
-          walletId: user.Wallet,
-          channelOrderId: order.orderId,
-          category: "debit"
-        },
-        {
-          $set: {
-            awb_number: data.waybill_no
-          }
-        }
-      ).catch(e => console.error("⚠️ WalletTransaction B2B ShipRocket AWB update failed:", e.message))
-    ]);
+      }
+    ).catch(e => console.error("⚠️ WalletTransaction B2B ShipRocket AWB update failed:", e.message));
   } catch (err) {
     console.error("Shiprocket async error:", err.message);
   }

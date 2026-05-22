@@ -491,27 +491,20 @@ const withdrawCommission = async (req, res) => {
       return res.status(404).json({ message: "User or Wallet not found" });
     }
 
-    const wallet = await Wallet.findById(user.Wallet).session(session);
+    const wallet = await Wallet.findById(user.Wallet).select("balance").session(session);
     if (!wallet) {
       return res.status(404).json({ message: "Wallet not found" });
     }
 
     // 3. Update Wallet Balance and add transaction
     const newBalance = wallet.balance + amount;
-    wallet.transactions.push({
-      category: "credit",
-      amount: amount,
-      balanceAfterTransaction: newBalance,
-      description: "Referral Commission Received",
-    });
-    // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create([{
+    await WalletTransaction.create([{
       walletId: wallet._id,
       category: "credit",
       amount,
       balanceAfterTransaction: newBalance,
       description: "Referral Commission Received",
-    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (withdrawCommission):", e.message));
+    }], { session });
     wallet.balance = newBalance;
     await wallet.save({ session });
 

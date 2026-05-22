@@ -148,7 +148,7 @@ const createOrder = async (req, res) => {
     const users = await user
       .findById({ _id: currentOrder.userId })
       .session(session);
-    const currentWallet = await Wallet.findById({ _id: users.Wallet }).session(
+    const currentWallet = await Wallet.findById({ _id: users.Wallet }).select("balance holdAmount creditLimit").session(
       session,
     );
     const zone = await getZone(
@@ -320,19 +320,6 @@ const createOrder = async (req, res) => {
       await currentWallet.updateOne(
         {
           $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId || null,
-              category: "debit",
-              amount: balanceToBeDeducted,
-              balanceAfterTransaction:
-                currentWallet.balance - balanceToBeDeducted,
-              date: new Date(),
-              awb_number: result.awbNumber || "",
-              description: `Freight Charges Applied`,
-              priceBreakup
-            },
-          },
         },
         { session },
       );

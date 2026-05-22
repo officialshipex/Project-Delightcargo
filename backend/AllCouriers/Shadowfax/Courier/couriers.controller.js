@@ -104,7 +104,7 @@ const createOrder = async (req, res) => {
       const userDoc = await User.findById(currentOrder.userId).session(session);
       if (!userDoc) throw new Error("User linked with order not found.");
 
-      const currentWallet = await Wallet.findById(userDoc.Wallet).session(session);
+      const currentWallet = await Wallet.findById(userDoc.Wallet).select("balance holdAmount creditLimit").session(session);
       if (!currentWallet) throw new Error("Wallet linked with user not found.");
 
       const balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
@@ -211,18 +211,6 @@ const createOrder = async (req, res) => {
           { _id: currentWallet._id },
           {
             $inc: { balance: -balanceToBeDeducted },
-            $push: {
-              transactions: {
-                channelOrderId: currentOrder.orderId || null,
-                category: "debit",
-                amount: balanceToBeDeducted,
-                balanceAfterTransaction: newBalance,
-                date: new Date(),
-                awb_number: sfxData.data.awb_number,
-                description: "Freight Charges Applied",
-                priceBreakup
-              },
-            },
           },
           { session }
         );

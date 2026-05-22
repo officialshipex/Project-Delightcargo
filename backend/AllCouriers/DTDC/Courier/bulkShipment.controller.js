@@ -79,7 +79,7 @@ const createOrderDTDC = async (
       }
     }
 
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
     if (!currentWallet) {
       return { success: false, message: "Wallet not found" };
     }
@@ -210,27 +210,14 @@ const createOrderDTDC = async (
       // console.log("sjakjska",balanceToBeDeducted)
       // Deduct wallet balance using atomic operation and update transaction
       const updatedWallet = await Wallet.findOneAndUpdate(
-        { _id: walletId }, // Ensure sufficient balance
+        { _id: walletId },
         {
-          $inc: { balance: -charges }, // Deduct balance
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId,
-              category: "debit",
-              amount: charges,
-              balanceAfterTransaction:
-                currentWallet.balance - parseFloat(charges),
-              date: new Date(),
-              awb_number: result.reference_number,
-              description: "Freight Charges Applied",
-              priceBreakup
-            },
-          },
+          $inc: { balance: -charges },
         },
         { new: true }
       );
       // 🔁 Dual-write: mirror to WalletTransaction for future migration
-      WalletTransaction.create({
+      await WalletTransaction.create({
         walletId: walletId,
         channelOrderId: currentOrder.orderId,
         category: "debit",
@@ -240,7 +227,7 @@ const createOrderDTDC = async (
         awb_number: result.reference_number,
         description: "Freight Charges Applied",
         priceBreakup
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk DTDC):", e.message));
+      });
     } else {
       console.log("ererer", response.data);
       return { message: "Error creating shipment" };

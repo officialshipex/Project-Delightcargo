@@ -73,7 +73,7 @@ const trackSingleOrder = async (order) => {
     const currentWallet = await Wallet.findById(
       (await User.findById((await Order.findOne({ awb_number })).userId))
         .Wallet,
-    );
+    ).select("_id");
 
     const trackingFunctions = {
       Xpressbees: trackShipment,
@@ -1620,14 +1620,10 @@ const trackSingleOrder = async (order) => {
     // Wallet update logic (moved outside array check to handle single object responses)
     if (shouldUpdateWallet && balanceTobeAdded > 0) {
       // Step 0: Check if same awb_number already exists twice
-      const awbCount = await Wallet.aggregate([
-        { $match: { _id: currentWallet._id } },
-        { $unwind: "$transactions" },
-        { $match: { "transactions.awb_number": order.awb_number || "" } },
-        { $count: "count" },
-      ]);
-
-      const existingCount = awbCount[0]?.count || 0;
+      const existingCount = await WalletTransaction.countDocuments({
+        walletId: currentWallet._id,
+        awb_number: order.awb_number || "",
+      });
 
       if (existingCount >= 2) {
         console.log(
@@ -1643,37 +1639,19 @@ const trackSingleOrder = async (order) => {
       );
 
       // Step 2: Get updated wallet balance
-      const updatedWallet = await Wallet.findById(currentWallet._id);
+      const updatedWallet = await Wallet.findById(currentWallet._id).select("balance");
 
-      // Step 3: Push the transaction with correct balance
-      await Promise.all([
-        Wallet.updateOne(
-          { _id: currentWallet._id },
-          {
-            $push: {
-              transactions: {
-                channelOrderId: order.orderId || null,
-                category: "credit",
-                amount: balanceTobeAdded,
-                balanceAfterTransaction: updatedWallet.balance,
-                date: new Date(),
-                awb_number: order.awb_number || "",
-                description: "Freight Charges Received",
-              },
-            },
-          },
-        ),
-        WalletTransaction.create({
-          walletId: currentWallet._id,
-          channelOrderId: order.orderId || null,
-          category: "credit",
-          amount: balanceTobeAdded,
-          balanceAfterTransaction: updatedWallet.balance,
-          date: new Date(),
-          awb_number: order.awb_number || "",
-          description: "Freight Charges Received",
-        })
-      ]).catch(err => console.error("⚠️ WalletTransaction dual-write failed in tracking controller:", err.message));
+      // Step 3: Create the transaction
+      await WalletTransaction.create({
+        walletId: currentWallet._id,
+        channelOrderId: order.orderId || null,
+        category: "credit",
+        amount: balanceTobeAdded,
+        balanceAfterTransaction: updatedWallet.balance,
+        date: new Date(),
+        awb_number: order.awb_number || "",
+        description: "Freight Charges Received",
+      }).catch(err => console.error("⚠️ WalletTransaction create failed in tracking controller:", err.message));
 
       console.log(
         "Wallet updated for AWB:",

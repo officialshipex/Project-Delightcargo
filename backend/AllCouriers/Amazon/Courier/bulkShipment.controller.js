@@ -74,7 +74,7 @@ const createShipmentAmazon = async (
       }
     }
 
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
     if (!currentWallet) {
       return { success: false, message: "Wallet not found" };
     }
@@ -210,31 +210,11 @@ const createShipmentAmazon = async (
       { _id: walletId },
       {
         $inc: { balance: -parseFloat(charges) },
-        $push: { transactions: transaction },
       },
       { new: true }
     );
 
-    // Patch the last inserted transaction with the correct balanceAfterTransaction
-    if (updatedWallet) {
-      const updatedBalance = updatedWallet.balance;
-
-      await Wallet.updateOne(
-        {
-          _id: walletId,
-          "transactions.awb_number":
-            result.packageDocumentDetails[0].trackingId,
-        },
-        {
-          $set: {
-            "transactions.$.balanceAfterTransaction": updatedBalance,
-          },
-        }
-      );
-    }
-
-    // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create({
+    await WalletTransaction.create({
       walletId: walletId,
       channelOrderId: currentOrder.orderId,
       category: "debit",
@@ -244,7 +224,7 @@ const createShipmentAmazon = async (
       awb_number: result.packageDocumentDetails[0].trackingId,
       description: "Freight Charges Applied",
       priceBreakup
-    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk Amazon):", e.message));
+    });
 
     return {
       success: true,

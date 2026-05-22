@@ -79,7 +79,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       });
     }
 
-    const currentWallet = await Wallet.findById(userDoc.Wallet);
+    const currentWallet = await Wallet.findById(userDoc.Wallet).select("_id");
     if (!currentWallet) {
       return res.status(404).json({
         success: false,
@@ -179,7 +179,7 @@ const cancelOrdersAtBooked = async (req, res) => {
           : parseFloat(currentOrderInSession.totalFreightCharges);
 
       if (balanceToBeAdded > 0) {
-        const walletInSession = await Wallet.findById(currentWallet._id).session(session);
+        const walletInSession = await Wallet.findById(currentWallet._id).select("balance").session(session);
         const alreadyRefunded = await WalletTransaction.exists({
           walletId: currentWallet._id,
           awb_number: currentOrderInSession.awb_number,
@@ -195,17 +195,6 @@ const cancelOrdersAtBooked = async (req, res) => {
               { _id: currentWallet._id },
               {
                 $inc: { balance: balanceToBeAdded },
-                $push: {
-                  transactions: {
-                    channelOrderId: currentOrderInSession.orderId || null,
-                    category: "credit",
-                    amount: balanceToBeAdded,
-                    balanceAfterTransaction: newBalance,
-                    date: new Date(),
-                    awb_number: currentOrderInSession.awb_number,
-                    description: "Freight Charges Received",
-                  },
-                },
               },
               { session }
             ),

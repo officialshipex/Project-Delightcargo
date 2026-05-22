@@ -411,7 +411,7 @@ const cancelOrdersAtBooked = async (req, res) => {
   }
 
   try {
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance");
 
     const ordersFromDb = await Promise.all(
       allOrders.map((order) =>
@@ -517,11 +517,9 @@ const cancelOrdersAtBooked = async (req, res) => {
         };
         await currentWallet.updateOne({
           $inc: { balance: balanceTobeAdded },
-          $push: { transactions: cancelTxn },
         });
         // 🔁 Dual-write: mirror to WalletTransaction for future migration
-        WalletTransaction.create([{ walletId: currentWallet._id, ...cancelTxn }])
-          .catch(e => console.error("⚠️ WalletTransaction dual-write failed (order.controller cancelOrder):", e.message));
+        await WalletTransaction.create([{ walletId: currentWallet._id, ...cancelTxn }]);
         currentOrder.freightCharges = 0;
         await currentOrder.save();
         await currentWallet.save();

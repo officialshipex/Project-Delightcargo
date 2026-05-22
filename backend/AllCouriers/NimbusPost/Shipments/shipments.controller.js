@@ -14,7 +14,7 @@ const url = process.env.NIMBUSPOST_URL;
 const createShipment = async (req, res) => {
     const { selectedServiceDetails, id, wh } = req.body.payload;
     const currentOrder = await Order.findById(id);
-    const currentWallet = await Wallet.findById(req.body.walletId);
+    const currentWallet = await Wallet.findById(req.body.walletId).select("balance holdAmount creditLimit");
     const order_items = new Array(currentOrder.Product_details.length);
 
     currentOrder.Product_details.map((item, index) => {
@@ -88,19 +88,10 @@ const createShipment = async (req, res) => {
             let currentBalance = currentWallet.balance - balanceToBeDeducted;
             await currentWallet.updateOne({
                 $inc: { balance: -balanceToBeDeducted },
-                $push: {
-                    transactions: {
-                        txnType: "Shipping",
-                        action: "debit",
-                        amount: currentBalance,
-                        balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
-                        awb_number: `${result.awb_number}`,
-                    },
-                },
             });
 
             // 🔁 Dual-write: mirror to WalletTransaction for future migration
-            WalletTransaction.create({
+            await WalletTransaction.create({
                 walletId: currentWallet._id,
                 category: "debit",
                 amount: balanceToBeDeducted,
@@ -108,7 +99,7 @@ const createShipment = async (req, res) => {
                 awb_number: `${result.awb_number}`,
                 date: new Date(),
                 description: "Freight Charges Applied"
-            }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createShipment NimbusPost):", e.message));
+            });
 
             return res.status(201).json({ message: "Shipment Created Succesfully" });
         } else {

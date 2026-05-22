@@ -106,7 +106,7 @@ const buyCredits = async (req, res) => {
     const user = await User.findById(targetUserId).select("Wallet");
     if (!user || !user.Wallet) return res.status(404).json({ error: "Wallet not found" });
 
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("balance creditBalance notificationTransactions");
     if (!wallet) return res.status(404).json({ error: "Wallet not found" });
 
     const purchaseAmount = Number(amount);
@@ -124,23 +124,14 @@ const buyCredits = async (req, res) => {
 
     // 4. Record DEBIT in main passbook (transactions)
     const transactionId = Math.floor(10000000 + Math.random() * 90000000).toString();
-    wallet.transactions.push({
-      channelOrderId: transactionId,
-      category: "debit",
-      amount: purchaseAmount,
-      description: `Notification Credits Purchased`,
-      balanceAfterTransaction: wallet.balance,
-      date: new Date(),
-    });
-    // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create({
+    await WalletTransaction.create({
       walletId: wallet._id,
       channelOrderId: transactionId,
       category: "debit",
       amount: purchaseAmount,
       description: `Notification Credits Purchased`,
       balanceAfterTransaction: wallet.balance,
-    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (buyCredits):", e.message));
+    });
 
     // 5. Record CREDIT in notificationTransactions history
     wallet.notificationTransactions.push({
@@ -174,7 +165,7 @@ const getCreditBalance = async (req, res) => {
     if (!user || !user.Wallet) {
       return res.json({ creditBalance: 0 });
     }
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("creditBalance");
     res.json({ creditBalance: wallet ? wallet.creditBalance : 0 });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -196,7 +187,7 @@ const getUserPassbookTransactions = async (req, res) => {
 
     const { category, description, orderId, awbNumber, fromDate, toDate } = req.query;
 
-    const wallet = await Wallet.findById(user.Wallet).lean();
+    const wallet = await Wallet.findById(user.Wallet).lean().select("notificationTransactions");
     if (!wallet || !wallet.notificationTransactions) return res.json({ results: [], total: 0 });
 
     let filteredTransactions = wallet.notificationTransactions;
@@ -394,14 +385,14 @@ const sendWhatsAppMessage = async ({
       const userWithWallet = await User.findById(userId).select("Wallet");
       if (userWithWallet?.Wallet) {
         const Wallet = require("../models/wallet");
-        const wallet = await Wallet.findById(userWithWallet.Wallet);
+        const wallet = await Wallet.findById(userWithWallet.Wallet).select("creditBalance notificationTransactions");
         if (wallet) {
           wallet.creditBalance = Math.max(0, wallet.creditBalance - 1);
           wallet.notificationTransactions.push({
-            channelOrderId: awb_number, // 🔹 Map AWB as Order ID
+            channelOrderId: logEntry.awb_number || logEntry.orderId?.toString(),
             category: "debit",
             amount: 1,
-            description: `Notification Debit - WhatsApp (${status})`,
+            description: `Call Debit - Verification (${logEntry.awb_number || logEntry.orderDisplayId})`,
             balanceAfterTransaction: wallet.creditBalance,
             date: new Date(),
           });
@@ -641,14 +632,14 @@ const sendSMSMessage = async ({
       const userWithWallet = await User.findById(userId).select("Wallet");
       if (userWithWallet?.Wallet) {
         const Wallet = require("../models/wallet");
-        const wallet = await Wallet.findById(userWithWallet.Wallet);
+        const wallet = await Wallet.findById(userWithWallet.Wallet).select("creditBalance notificationTransactions");
         if (wallet) {
           wallet.creditBalance = Math.max(0, wallet.creditBalance - 1);
           wallet.notificationTransactions.push({
-            channelOrderId: awb_number, // 🔹 Map AWB as Order ID
+            channelOrderId: logEntry.awb_number || logEntry.orderId?.toString(),
             category: "debit",
             amount: 1,
-            description: `Notification Debit - SMS (${status})`,
+            description: `Call Debit - NDR Follow-up (${logEntry.awb_number || logEntry.orderDisplayId})`,
             balanceAfterTransaction: wallet.creditBalance,
             date: new Date(),
           });

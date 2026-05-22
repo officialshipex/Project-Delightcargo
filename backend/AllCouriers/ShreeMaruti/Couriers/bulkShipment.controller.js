@@ -36,7 +36,7 @@ const createShipmentFunctionShreeMaruti = async (
     //   };
     // }
 
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
     const zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
@@ -238,24 +238,11 @@ const createShipmentFunctionShreeMaruti = async (
       }
 
       const updatedWallet = await Wallet.findOneAndUpdate(
-        { _id: walletId }, // Ensure sufficient balance
+        { _id: walletId },
         {
           $inc: { balance: -parseFloat(finalCharges) },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId,
-              category: "debit",
-              amount: finalCharges,
-              balanceAfterTransaction:
-                currentWallet.balance - parseFloat(finalCharges),
-              date: new Date(),
-              awb_number: result.awbNumber,
-              description: "Freight Charges Applied",
-              priceBreakup
-            },
-          },
-        }, // Deduct the charges
-        { new: true } // Return the updated document
+        },
+        { new: true }
       );
 
       // 🔁 Dual-write: mirror to WalletTransaction for future migration

@@ -368,26 +368,13 @@ const createOrder = async (req, res) => {
       currentWallet.updateOne(
         {
           $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId || null,
-              category: "debit",
-              amount: balanceToBeDeducted,
-              balanceAfterTransaction:
-                currentWallet.balance - balanceToBeDeducted,
-              date: new Date(),
-              awb_number: result.waybill || "",
-              description: `Freight Charges Applied`,
-              priceBreakup
-            },
-          },
         },
         { session },
       ),
     ]);
 
     // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create([{
+    await WalletTransaction.create([{
       walletId: currentWallet._id,
       channelOrderId: currentOrder.orderId || null,
       category: "debit",
@@ -397,7 +384,7 @@ const createOrder = async (req, res) => {
       awb_number: result.waybill || "",
       description: "Freight Charges Applied",
       priceBreakup
-    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createOrder Delhivery):", e.message));
+    }], { session });
 
     await session.commitTransaction();
     session.endSession();

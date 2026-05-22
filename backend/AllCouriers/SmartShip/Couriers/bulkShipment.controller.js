@@ -77,7 +77,7 @@ const orderRegistrationOneStep = async (
     );
     console.log("Smartship Hub:", smartshipHub);
 
-    const currentWallet = await Wallet.findById(user.Wallet);
+    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit");
     if (!currentWallet) {
       return { success: false, message: "Wallet not found" };
     }
@@ -213,24 +213,6 @@ const orderRegistrationOneStep = async (
           {
             $set: {
               balance: { $subtract: ["$balance", parseFloat(charges)] },
-              transactions: {
-                $concatArrays: [
-                  "$transactions",
-                  [
-                    {
-                      channelOrderId: currentOrder.orderId,
-                      category: "debit",
-                      amount: parseFloat(charges),
-                      balanceAfterTransaction: {
-                        $subtract: ["$balance", parseFloat(charges)],
-                      },
-                      date: new Date(),
-                      awb_number: result.awb_number,
-                      description: "Freight Charges Applied",
-                    },
-                  ],
-                ],
-              },
             },
           },
         ],

@@ -232,18 +232,6 @@ const createSmartshipShipment = async ({
         { _id: walletId },
         {
           $inc: { balance: -parseFloat(finalCharges) },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId,
-              category: "debit",
-              amount: parseFloat(finalCharges),
-              balanceAfterTransaction: walletBalance - parseFloat(finalCharges),
-              date: new Date(),
-              awb_number: result.awb_number,
-              description: `Freight Charges Applied`,
-              priceBreakup
-            },
-          },
         },
         { session }
       ),

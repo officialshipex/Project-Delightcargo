@@ -289,18 +289,6 @@ const createZipypostShipment = async ({
         { _id: walletId },
         {
           $inc: { balance: -finalCharges },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId,
-              category: "debit",
-              amount: finalCharges,
-              balanceAfterTransaction: walletBalance - finalCharges,
-              date: new Date(),
-              awb_number: result.awb,
-              description: "Freight Charges Applied",
-              priceBreakup
-            },
-          },
         },
         { session }
       ),

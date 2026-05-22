@@ -217,18 +217,6 @@ const createShadowfaxShipment = async ({
         { _id: walletId },
         {
           $inc: { balance: -balanceToBeDeducted },
-          $push: {
-            transactions: {
-              channelOrderId: currentOrder.orderId || null,
-              category: "debit",
-              amount: balanceToBeDeducted,
-              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
-              date: new Date(),
-              awb_number: sfxData.data.awb_number,
-              description: "Freight Charges Applied",
-              priceBreakup
-            },
-          },
         },
         { session }
       ),

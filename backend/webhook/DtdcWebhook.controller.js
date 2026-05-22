@@ -179,24 +179,13 @@ const DTDCWebhook = async (req, res) => {
     // ✔ Update Wallet if needed
     // -------------------------------------------
     if (shouldUpdateWallet && balanceTobeAdded > 0) {
-      const walletDoc = await Wallet.findById(order.walletId);
+      const walletDoc = await Wallet.findById(order.walletId).select("balance");
       if (walletDoc) {
         const newBalance = (walletDoc.balance || 0) + balanceTobeAdded;
         await Wallet.updateOne(
           { _id: walletDoc._id },
           {
             $inc: { balance: balanceTobeAdded },
-            $push: {
-              transactions: {
-                channelOrderId: order.orderId || null,
-                category: "credit",
-                amount: balanceTobeAdded,
-                balanceAfterTransaction: newBalance,
-                date: new Date(),
-                awb_number: order.awb_number,
-                description: "Freight Charges Received",
-              }
-            }
           }
         );
 

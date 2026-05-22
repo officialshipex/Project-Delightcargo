@@ -247,18 +247,6 @@ const createDTDCShipment = async ({
           { _id: walletId },
           {
             $inc: { balance: -balanceToBeDeducted },
-            $push: {
-              transactions: {
-                channelOrderId: currentOrder.orderId || null,
-                category: "debit",
-                amount: balanceToBeDeducted,
-                balanceAfterTransaction: walletBalance - balanceToBeDeducted,
-                date: new Date(),
-                awb_number: result.reference_number || "",
-                description: "Freight Charges Applied",
-                priceBreakup
-              },
-            },
           }
         ),
         WalletTransaction.create({

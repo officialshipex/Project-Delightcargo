@@ -353,7 +353,7 @@ const createBoxdLogisticsOrder = async (req, res) => {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        const currentWallet = await Wallet.findById(user.Wallet).session(session);
+        const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
         if (!currentWallet) {
             await Order.findByIdAndUpdate(id, { status: "new" });
             await session.abortTransaction();
@@ -488,22 +488,10 @@ const createBoxdLogisticsOrder = async (req, res) => {
                     { _id: user.Wallet },
                     {
                         $inc: { balance: -balanceToDeduct },
-                        $push: {
-                            transactions: {
-                                channelOrderId: currentOrder.orderId || null,
-                                category: "debit",
-                                amount: balanceToDeduct,
-                                balanceAfterTransaction: currentWallet.balance - balanceToDeduct,
-                                date: new Date(),
-                                awb_number: awb,
-                                description: "Freight Charges Applied",
-                                priceBreakup,
-                            },
-                        },
                     }
                 );
                 // 🔁 Dual-write: mirror to WalletTransaction for future migration
-                WalletTransaction.create({
+                await WalletTransaction.create({
                     walletId: user.Wallet,
                     channelOrderId: currentOrder.orderId || null,
                     category: "debit",
@@ -513,7 +501,7 @@ const createBoxdLogisticsOrder = async (req, res) => {
                     awb_number: awb,
                     description: "Freight Charges Applied",
                     priceBreakup
-                }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (BoxdLogistics single):", e.message));
+                });
             } catch (err) {
                 console.error("BoxdLogistics wallet update error:", err.message);
             }

@@ -97,7 +97,7 @@ const createProshipOrder = async (req, res) => {
     const user = await User.findById(currentOrder.userId).session(session);
     if (!user) throw new Error("User not found");
 
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
+    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
     if (!currentWallet) throw new Error("Wallet not found");
 
     // 3. Balance Check
@@ -238,18 +238,7 @@ const createProshipOrder = async (req, res) => {
 
     // 9. Update Wallet inside transaction
     currentWallet.balance -= finalCharges;
-    currentWallet.transactions.push({
-      channelOrderId: currentOrder.orderId,
-      category: "debit",
-      amount: finalCharges,
-      balanceAfterTransaction: currentWallet.balance,
-      date: new Date(),
-      awb_number: awb_number,
-      description: "Freight Charges Applied",
-      priceBreakup,
-    });
-    // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create([{
+    await WalletTransaction.create([{
       walletId: currentWallet._id,
       channelOrderId: currentOrder.orderId,
       category: "debit",
@@ -258,7 +247,7 @@ const createProshipOrder = async (req, res) => {
       awb_number: awb_number,
       description: "Freight Charges Applied",
       priceBreakup,
-    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createProshipOrder):", e.message));
+    }], { session });
 
     await Promise.all([
       currentOrder.save({ session }),

@@ -124,7 +124,7 @@ const createManifest = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
-    const currentWallet = await Wallet.findById(userRecord.Wallet);
+    const currentWallet = await Wallet.findById(userRecord.Wallet).select("balance holdAmount creditLimit");
 
     // Generate AWB number (assuming you have a function to fetch it)
     const awbResponse = await fetchBulkWaybills(1);
@@ -246,22 +246,10 @@ const createManifest = async (req, res) => {
       //   let currentBalance = currentWallet.balance - balanceToBeDeducted;
       await currentWallet.updateOne({
         $inc: { balance: -balanceToBeDeducted },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId || null, // Include if available
-            category: "debit",
-            amount: balanceToBeDeducted, // Fixing incorrect reference
-            balanceAfterTransaction:
-              currentWallet.balance - balanceToBeDeducted,
-            date: new Date().toISOString().slice(0, 16).replace("T", " "),
-            awb_number: result.awb || "", // Ensuring it follows the schema
-            description: `Freight Charges Applied`,
-          },
-        },
       });
 
       // 🔁 Dual-write: mirror to WalletTransaction for future migration
-      WalletTransaction.create({
+      await WalletTransaction.create({
         walletId: currentWallet._id,
         channelOrderId: currentOrder.orderId || null,
         category: "debit",
@@ -270,7 +258,7 @@ const createManifest = async (req, res) => {
         date: new Date(),
         awb_number: result.awb || "",
         description: "Freight Charges Applied"
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createManifest EcomExpress):", e.message));
+      });
 
       return res.status(201).json({
         message: "Shipment Created Succesfully",

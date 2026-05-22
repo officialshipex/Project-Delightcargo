@@ -19,7 +19,7 @@ const createShipmentFunctionEcomExpress = async (serviceDetails, orderId, wh, wa
     }
 
     // Check Wallet Balance before proceeding
-    const wallet = await Wallet.findById(walletId);
+    const wallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
     if (!wallet) {
       return { success: false, message: "Wallet not found" };
     }
@@ -80,33 +80,17 @@ const createShipmentFunctionEcomExpress = async (serviceDetails, orderId, wh, wa
     formData.append("password", process.env.ECOMEXPRESS_PASS);
     formData.append("json_input", JSON.stringify(shipmentData));
 
-    // Deduct wallet balance using atomic operation and update transaction
+    // Deduct wallet balance using atomic operation
     const updatedWallet = await Wallet.findOneAndUpdate(
-      { _id: walletId, balance: { $gte: charges } }, // Ensure sufficient balance
+      { _id: walletId, balance: { $gte: charges } },
       [
         {
           $set: {
-            balance: { $subtract: ["$balance", charges] }, // Deduct balance correctly
-            transactions: {
-              $concatArrays: [
-                "$transactions",
-                [
-                  {
-                    channelOrderId: order.orderId,
-                    category: "debit",
-                    amount: charges,
-                    balanceAfterTransaction: { $subtract: ["$balance", charges] }, // Updated correctly
-                    date: new Date().toISOString().slice(0, 16).replace("T", " "),
-                    awb_number: awbNumber,
-                    description: `Freight Charges Applied`,
-                  },
-                ],
-              ],
-            },
+            balance: { $subtract: ["$balance", charges] },
           },
         },
       ],
-      { new: true } // Return updated wallet
+      { new: true }
     );
 
     if (!updatedWallet) {
@@ -114,7 +98,7 @@ const createShipmentFunctionEcomExpress = async (serviceDetails, orderId, wh, wa
     }
 
     // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create({
+    await WalletTransaction.create({
       walletId: walletId,
       channelOrderId: order.orderId,
       category: "debit",
@@ -123,7 +107,7 @@ const createShipmentFunctionEcomExpress = async (serviceDetails, orderId, wh, wa
       date: new Date(),
       awb_number: awbNumber,
       description: "Freight Charges Applied"
-    }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk EcomExpress):", e.message));
+    });
 
     // Call Ecom Express API
     const response = await axios.post(url, formData, { headers: { ...formData.getHeaders() } });

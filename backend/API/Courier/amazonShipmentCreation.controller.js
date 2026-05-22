@@ -204,7 +204,6 @@ const createAmazonShipment = async ({
         { _id: walletId },
         {
           $inc: { balance: -charges },
-          $push: { transactions: transaction },
         },
         { session }
       ),

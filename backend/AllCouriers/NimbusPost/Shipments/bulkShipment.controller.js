@@ -15,7 +15,7 @@ const createShipmentFunctionNimbusPost = async (selectedServiceDetails, id, wh, 
   try {
     console.log("I am in bulk shipment");
     const currentOrder = await Order.findById(id);
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
 
     if (!currentOrder || !currentWallet) {
       throw new Error('Order or Wallet not found');
@@ -97,19 +97,10 @@ const createShipmentFunctionNimbusPost = async (selectedServiceDetails, id, wh, 
       const currentBalance = currentWallet.balance - balanceToBeDeducted;
       await currentWallet.updateOne({
         $inc: { balance: -balanceToBeDeducted },
-        $push: {
-          transactions: {
-            txnType: "Shipping",
-            action: "debit",
-            amount: balanceToBeDeducted,
-            balanceAfterTransaction: currentBalance,
-            awb_number: `${result.awb_number}`,
-          },
-        },
       });
 
       // 🔁 Dual-write: mirror to WalletTransaction for future migration
-      WalletTransaction.create({
+      await WalletTransaction.create({
         walletId: currentWallet._id,
         category: "debit",
         amount: balanceToBeDeducted,
@@ -117,7 +108,7 @@ const createShipmentFunctionNimbusPost = async (selectedServiceDetails, id, wh, 
         awb_number: `${result.awb_number}`,
         date: new Date(),
         description: "Freight Charges Applied"
-      }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (bulk NimbusPost):", e.message));
+      });
 
       return { status: 201, message: "Shipment Created Successfully" };
     } else {

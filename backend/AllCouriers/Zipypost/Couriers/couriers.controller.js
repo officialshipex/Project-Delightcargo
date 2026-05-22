@@ -143,7 +143,7 @@ const createZipypostOrder = async (req, res) => {
 
     // ✅ Get wallet using user.Wallet field
     if (!user.Wallet) throw new Error("User wallet not found");
-    const currentWallet = await Wallet.findById(user.Wallet).session(session);
+    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
     if (!currentWallet) throw new Error("Wallet not found");
 
     // ✅ Check balance with safety margin
@@ -369,18 +369,7 @@ const createZipypostOrder = async (req, res) => {
     });
 
     currentWallet.balance -= finalCharges;
-    currentWallet.transactions.push({
-      channelOrderId: currentOrder.orderId,
-      category: "debit",
-      amount: finalCharges,
-      balanceAfterTransaction: currentWallet.balance,
-      date: new Date(),
-      awb_number: result.awb,
-      description: "Freight Charges Applied",
-      priceBreakup
-    });
-    // 🔁 Dual-write: mirror to WalletTransaction for future migration
-    WalletTransaction.create([{
+    await WalletTransaction.create([{
       walletId: currentWallet._id,
       channelOrderId: currentOrder.orderId,
       category: "debit",
@@ -389,7 +378,7 @@ const createZipypostOrder = async (req, res) => {
       awb_number: result.awb,
       description: "Freight Charges Applied",
       priceBreakup
-    }], { session }).catch(e => console.error("⚠️ WalletTransaction dual-write failed (createZipypostOrder):", e.message));
+    }], { session });
 
     await Promise.all([
       currentOrder.save({ session }),

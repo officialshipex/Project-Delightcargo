@@ -51,7 +51,7 @@ const refundFreightIfSingleDebit = async () => {
         continue;
       }
 
-      const wallet = await Wallet.findById(user.Wallet);
+      const wallet = await Wallet.findById(user.Wallet).select("balance");
       if (!wallet) {
         console.log("❌ Wallet not found → Skipping.");
         continue;
@@ -68,20 +68,11 @@ const refundFreightIfSingleDebit = async () => {
 
         order.status = "Cancelled";
 
-        // Update both txns
-        wallet.transactions = wallet.transactions.map((txn) => {
-          if (txn.awb_number === awb) {
-            txn.transactionStatus = "Cancelled";
-          }
-          return txn;
-        });
-
         await WalletTransaction.updateMany(
           { walletId: wallet._id, awb_number: awb },
           { $set: { transactionStatus: "Cancelled" } }
         ).catch(err => console.error("⚠️ WalletTransaction status update failed in usersController:", err.message));
 
-        await wallet.save();
         await order.save();
         console.log("✔ Order + Wallet transactions updated.");
         continue;
@@ -101,19 +92,11 @@ const refundFreightIfSingleDebit = async () => {
         const newBalance = wallet.balance + refundAmount;
 
         // Add credit entry
-        wallet.transactions.push({
-          channelOrderId: orderId,
-          category: "credit",
-          amount: refundAmount,
-          balanceAfterTransaction: newBalance,
-          awb_number: awb,
-          description: "Freight Charges Received",
-        });
-        order.status = "Cancelled";
+    order.status = "Cancelled";
 
-        wallet.balance = newBalance;
+    wallet.balance = newBalance;
 
-        await WalletTransaction.create({
+    await WalletTransaction.create({
           walletId: wallet._id,
           channelOrderId: orderId,
           category: "credit",
@@ -1260,7 +1243,7 @@ const updateCreditLimit = async (req, res) => {
     }
 
     // ---- Fetch Wallet ----
-    const wallet = await Wallet.findById(user.Wallet);
+    const wallet = await Wallet.findById(user.Wallet).select("creditLimit");
     if (!wallet) {
       return res.status(404).json({
         success: false,

@@ -22,7 +22,7 @@ const SERVICE_ID_NDR_FOLLOWUP = 21;
 const getUserCreditBalance = async (userId) => {
   const user = await User.findById(userId).select("Wallet");
   if (!user?.Wallet) return 0;
-  const wallet = await Wallet.findById(user.Wallet);
+  const wallet = await Wallet.findById(user.Wallet).select("creditBalance");
   return wallet?.creditBalance || 0;
 };
 
@@ -268,7 +268,7 @@ const aiCallCallback = async (req, res) => {
       try {
         const user = await User.findById(logEntry.userId).select("Wallet");
         if (user?.Wallet) {
-          const wallet = await Wallet.findById(user.Wallet);
+          const wallet = await Wallet.findById(user.Wallet).select("creditBalance notificationTransactions");
           if (wallet && wallet.creditBalance > 0) {
             wallet.creditBalance = Math.max(0, wallet.creditBalance - 1);
             wallet.notificationTransactions.push({

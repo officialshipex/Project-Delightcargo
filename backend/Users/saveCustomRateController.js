@@ -40,7 +40,6 @@ const saveCustomRate = async (req, res) => {
             weightPriceAdditional: req.body.weightPriceAdditional,
             codPercent: req.body.codPercent,
             codCharge: req.body.codCharge,
-            status: "Pending",
         });
 
         await ratecard.save();
@@ -71,49 +70,8 @@ const printUserCount = async () => {
   }
 };
 
-const acceptCustomRate = async (req, res) => {
-  try {
-    const { ratecardId } = req.body;
 
-    const ratecard = await RateCard.findById(ratecardId);
-    if (!ratecard) {
-      return res.status(404).send({ message: "Rate card not found" });
-    }
-
-    ratecard.status = "Active";
-    await ratecard.save();
-
-    res.status(200).send({ message: "Custom rate accepted successfully", ratecard });
-  } catch (error) {
-    console.error("Error accepting custom rate:", error);
-    res.status(500).send({ message: "Server error" });
-  }
-};
-
-const rejectCustomRate = async (req, res) => {
-  try {
-    const { ratecardId } = req.body;
-
-    const ratecard = await RateCard.findById(ratecardId);
-    if (!ratecard) {
-      return res.status(404).send({ message: "Rate card not found" });
-    }
-
-    await CustomRate.updateMany(
-      { ratecards: ratecardId },
-      { $pull: { ratecards: ratecardId } }
-    );
-
-    await RateCard.findByIdAndDelete(ratecardId);
-
-    res.status(200).send({ message: "Custom rate rejected and removed successfully" });
-  } catch (error) {
-    console.error("Error rejecting custom rate:", error);
-    res.status(500).send({ message: "Server error" });
-  }
-};
-
-module.exports = { saveCustomRate, printUserCount, acceptCustomRate, rejectCustomRate };
+module.exports = { saveCustomRate, printUserCount};
 
 
 

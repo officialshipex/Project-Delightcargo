@@ -73,7 +73,7 @@ const createShipmentFunctionShipRocket = async (
     const zone = await getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode);
     if (!zone) return { status: 400, error: "Pincode not serviceable" };
 
-    const currentWallet = await Wallet.findById(walletId);
+    const currentWallet = await Wallet.findById(walletId).select("balance holdAmount creditLimit");
     if (!currentWallet) return { status: 404, error: "Wallet not found" };
 
     const effectiveBalance = currentWallet.balance - (currentWallet.holdAmount || 0) + (currentWallet.creditLimit || 0);
@@ -178,18 +178,6 @@ const createShipmentFunctionShipRocket = async (
       { _id: walletId },
       {
         $inc: { balance: -charges },
-        $push: {
-          transactions: {
-            channelOrderId: currentOrder.orderId,
-            category: "debit",
-            amount: charges,
-            balanceAfterTransaction: currentWallet.balance - charges,
-            date: new Date(),
-            awb_number,
-            description: "Freight Charges Applied",
-            priceBreakup,
-          },
-        },
       },
       { new: true }
     );
