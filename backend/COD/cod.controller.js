@@ -2758,7 +2758,7 @@ const transferCOD = async (req, res) => {
         return {
           ...item,
           status: "Paid",
-          adjustedAmount: remAmt,
+          adjustedAmount: (item.adjustedAmount || 0) + remAmt,
           remittanceMethod: "Wallet Adjustment",
           reason: "Used to adjust negative wallet balance",
         };

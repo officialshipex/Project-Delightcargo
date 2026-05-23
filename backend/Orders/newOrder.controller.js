@@ -515,8 +515,8 @@ const getShippingOrders = async (req, res) => {
       awbNumber,
       trackingId,
       paymentType,
-      startDate,
-      endDate,
+      fromDate,
+      toDate,
     } = req.query;
     // console.log("re",req.query)
     let userId;
@@ -594,10 +594,9 @@ const getShippingOrders = async (req, res) => {
       andConditions.push({ "paymentDetails.method": paymentType });
     }
 
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+    if (fromDate && toDate) {
+      const start = new Date(fromDate);
+      const end = new Date(toDate);
       andConditions.push({ createdAt: { $gte: start, $lte: end } });
     }
 
@@ -1816,8 +1815,8 @@ const passbook = async (req, res) => {
     const filterConditions = { walletId: new mongoose.Types.ObjectId(currentUser.Wallet) };
     if (fromDate && toDate) {
       filterConditions.date = {
-        $gte: new Date(new Date(fromDate).setHours(0, 0, 0, 0)),
-        $lte: new Date(new Date(toDate).setHours(23, 59, 59, 999)),
+        $gte: new Date(fromDate),
+        $lte: new Date(toDate),
       };
     }
     if (category) filterConditions.category = category;
