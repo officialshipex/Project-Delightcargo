@@ -27,11 +27,13 @@ const {
   uploadBankResponse,
   getBankExportBatches,
   validateExportedStatus,
+  saveCustomCodPlan,
 } = require("./cod.controller");
 const { isAuthorized } = require("../middleware/auth.middleware");
 router.get("/getBankExportBatches", getBankExportBatches);
 router.post("/validateExportedStatus", validateExportedStatus);
 router.post("/codPlanUpdate", codPlanUpdate);
+router.post("/saveCustomCodPlan", saveCustomCodPlan);
 router.get("/codRemittanceData", codRemittanceData);
 router.get("/getCodRemitance", getCodRemitance);
 router.post("/codRemittanceRecharge", codRemittanceRecharge);

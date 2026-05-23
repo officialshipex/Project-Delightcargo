@@ -205,6 +205,7 @@ const createDelhiveryShipment = async ({
 
     const result = response.data?.packages?.[0];
     if (!response.data.success || !result) {
+       console.log("Delhivery error",result)
       await Order.findByIdAndUpdate(id, { status: "new" });
       await session.abortTransaction();
       session.endSession();

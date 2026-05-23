@@ -8,27 +8,35 @@ const codPlanSchema = new mongoose.Schema({
   },
   planName: {
     type: String,
-    enum: ["D+1", "D+2", "D+3","D+4", "D+7"], // Allowed values
-    default: "D+7", // Default plan
+    enum: ["D+1", "D+2", "D+3", "D+4", "D+5", "D+6", "D+7"],
+    default: "D+7",
     required: true,
   },
-  planCharges: { 
+  planCharges: {
     type: Number,
-   
+  },
+  isCustom: {
+    type: Boolean,
+    default: false,
+  },
+  remittanceDay: {
+    type: String,
+    enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
   },
 });
 
-// Pre-save hook to set planCharges based on planName
 codPlanSchema.pre("save", function (next) {
+  if (this.isCustom) return next();
   const planChargesMap = {
     "D+1": 1.5,
     "D+2": 0.99,
-    "D+3": 0.70,
-    "D+4": 0.50,
-    "D+7":0
+    "D+3": 0.69,
+    "D+4": 0.49,
+    "D+5": 0,
+    "D+6": 0,
+    "D+7": 0,
   };
-
-  this.planCharges = planChargesMap[this.planName] || 0; // Default to D+7 charge if missing
+  this.planCharges = planChargesMap[this.planName] ?? 0;
   next();
 });
 

@@ -55,6 +55,8 @@ const codPlanUpdate = async (req, res) => {
       // Update existing COD Plan
       codPlan.planName = planName;
       codPlan.planCharges = codAmount;
+      codPlan.isCustom = false;
+      codPlan.remittanceDay = undefined;
       await codPlan.save();
 
       return res.status(200).json({
@@ -248,10 +250,10 @@ const remittanceScheduleData = async () => {
     );
 
     const todayIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-    const day = todayIST.getDay(); // 0 = Sunday (in IST)
-    const isNotSunday = day !== 0;
-    const isTodayMWF = [1, 3, 5].includes(day);
-    const isTodayTF = [2, 5].includes(day);
+    const day = todayIST.getDay(); // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
+    const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const todayDayName = DAY_NAMES[day];
+    const isTodayMWF = [1, 3, 5].includes(day); // Mon, Wed, Fri
 
     for (const remittance of existingSameDateDelivered) {
       const [codPlan, user] = await Promise.all([
@@ -277,27 +279,19 @@ const remittanceScheduleData = async () => {
         (startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24)
       );
 
-      // Only check remittance eligibility
-      const shouldRemitToday =
-        isNotSunday &&
-        // D+1, D+4, D+7
-        (([1, 4, 7].includes(planDays) && dayDiff >= planDays) ||
-          // D+2 → Mon/Wed/Fri only
-          (planDays === 2 && dayDiff >= 2 && isTodayMWF) ||
-          // D+3 → Tue/Fri only
-          (planDays === 3 && dayDiff >= 3 && isTodayTF));
+      // dayDiff > planDays: D+N period must be fully completed (strictly after, not on the same day)
+      // Non-custom: remit only on Mon/Wed/Fri
+      // Custom: remit on the specific remittanceDay stored in the plan
+      const shouldRemitToday = codPlan.isCustom
+        ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
+        : (isTodayMWF && dayDiff > planDays);
 
-      let uniqueId;
-      do {
-        uniqueId = Math.floor(10000 + Math.random() * 90000);
-      } while (await adminCodRemittance.findOne({ remitanceId: uniqueId }));
-
-      // Only store minimal info if not due (raw data, no business calculation)
+      // remittanceId is NOT generated here — it is generated in processAndRemit
+      // when the actual remittance happens, not when the entry is queued
       const remittanceEntry = {
         date: todayIST,
         userId: remittance.userId,
         userName: user ? user.fullname : "",
-        remitanceId: uniqueId,
         totalCod: remittance.totalCod,
         orderDetails: {
           date: todayIST,
@@ -351,6 +345,12 @@ if (process.env.NODE_ENV === "production") {
 
 // Helper for direct business logic (used in both controllers)
 const processAndRemit = async (plan) => {
+  // Generate remittanceId here — only at actual remittance time, not when queued
+  let remitanceId;
+  do {
+    remitanceId = Math.floor(10000 + Math.random() * 90000);
+  } while (await adminCodRemittance.findOne({ remitanceId }));
+
   // Fetch fresh user, codPlan, wallet, codRemittance:
   const [user, codPlan, remittanceData] = await Promise.all([
     User.findById(plan.userId),
@@ -460,7 +460,7 @@ const processAndRemit = async (plan) => {
   const totalCodResult = Number((remainingRecharge - charges).toFixed(2));
   const remittanceEntryForUser = {
     date: todayIST,
-    remittanceId: plan.remitanceId,
+    remittanceId: remitanceId,
     codAvailable: Number(totalCodResult.toFixed(2)),
     amountCreditedToWallet: extraAmount,
     adjustedAmount: creditedAmount,
@@ -490,7 +490,7 @@ const processAndRemit = async (plan) => {
     date: todayIST,
     userId: plan.userId,
     userName: user.fullname,
-    remitanceId: plan.remitanceId,
+    remitanceId: remitanceId,
     totalCod: Number(totalCodResult.toFixed(2)),
     amountCreditedToWallet: extraAmount,
     adjustedAmount: creditedAmount,
@@ -506,10 +506,10 @@ const processAndRemit = async (plan) => {
 const fetchExtraData = async () => {
   try {
     const todayIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-    const day = todayIST.getDay(); // 0 = Sunday (in IST)
-    const isNotSunday = day !== 0;
-    const isTodayMWF = [1, 3, 5].includes(day);
-    const isTodayTF = [2, 5].includes(day);
+    const day = todayIST.getDay(); // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
+    const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const todayDayName = DAY_NAMES[day];
+    const isTodayMWF = [1, 3, 5].includes(day); // Mon, Wed, Fri
 
     const afterCodPlans = await afterPlan.find();
 
@@ -533,11 +533,10 @@ const fetchExtraData = async () => {
         (startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24)
       );
 
-      const shouldMoveToAdmin =
-        isNotSunday &&
-        (([1, 4, 7].includes(planDays) && dayDiff >= planDays) ||
-          (planDays === 2 && dayDiff >= 2 && isTodayMWF) ||
-          (planDays === 3 && dayDiff >= 3 && isTodayTF));
+      // Same rule as remittanceScheduleData: strictly after D+N, on correct day
+      const shouldMoveToAdmin = codPlan.isCustom
+        ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
+        : (isTodayMWF && dayDiff > planDays);
 
       if (!shouldMoveToAdmin) {
         console.log(`⏭️ Skipping user ${plan.userId}: Not yet due (dayDiff: ${dayDiff})`);
@@ -1156,12 +1155,22 @@ const CheckCodplan = async (req, res) => {
     }
 
     const codplans = await CodPlan.findOne({ user: userId });
-    const codplaneName = codplans.planName;
-    // console.log("ffff",codplaneName)
-    // console.log("kkdkdkd",codplans)
-    res
-      .status(200)
-      .json({ message: "User ID retrieved successfully", codplaneName });
+    if (!codplans) {
+      return res.status(200).json({
+        message: "No plan found",
+        codplaneName: "D+7",
+        planCharges: 0,
+        isCustom: false,
+        remittanceDay: null,
+      });
+    }
+    res.status(200).json({
+      message: "User ID retrieved successfully",
+      codplaneName: codplans.planName,
+      planCharges: codplans.planCharges,
+      isCustom: codplans.isCustom,
+      remittanceDay: codplans.remittanceDay,
+    });
   } catch (error) {
     console.error("Error in checkCodPlan:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -2277,59 +2286,79 @@ const uploadCourierCodRemittance = async (req, res) => {
 const exportOrderInRemittance = async (req, res) => {
   try {
     const userID = req.user._id;
-    const ids = req.query.ids; // should be an array: ['REMID123', 'REMID456']
+    const rawIds = req.query.ids;
+    const ids = rawIds ? [].concat(rawIds) : [];
 
-    if (!ids || !Array.isArray(ids)) {
+    if (!ids.length) {
       return res
         .status(400)
-        .json({ message: "Remittance IDs must be an array." });
+        .json({ message: "Remittance IDs are required." });
     }
 
-    // Fetch remittance records
-    const remittances = await adminCodRemittance
-      .find({
-        remitanceId: { $in: ids },
-      })
-      .populate("orderDetails");
+    // Fetch remittance records (orderDetails is an embedded object, not a ref)
+    const remittances = await adminCodRemittance.find({ remitanceId: { $in: ids } });
 
-    // Flatten all order ObjectIds from each remittance's `orders` array
-    const allOrders = remittances.flatMap((remit) => remit.orderDetails);
-    const orderIds = allOrders.flatMap((i) => i.orders);
-    // Optional: Populate actual order data
+    // Collect all order ObjectIds and build a reverse map to remittanceId
+    const orderIdToRemittanceId = {};
+    for (const remittance of remittances) {
+      const remittanceOrderIds = remittance.orderDetails?.orders || [];
+      for (const oid of remittanceOrderIds) {
+        orderIdToRemittanceId[oid.toString()] = remittance.remitanceId;
+      }
+    }
+    const allOrderIds = Object.keys(orderIdToRemittanceId);
+
     const rawOrders = await Order.find(
-      { _id: { $in: orderIds } },
+      { _id: { $in: allOrderIds } },
       {
         orderId: 1,
         courierServiceName: 1,
         awb_number: 1,
         "paymentDetails.method": 1,
         "paymentDetails.amount": 1,
-        tracking: 1, // Include tracking to extract delivery date
+        tracking: 1,
       }
     );
 
-    // Extract only needed info and delivery date from tracking
-    const orderDetails = rawOrders.map((order) => {
-      const deliveryEvent = order.tracking.find(
-        (event) => event.status?.toLowerCase() === "delivered"
-      );
+    // Index fetched orders by _id for O(1) lookup
+    const orderMap = {};
+    for (const order of rawOrders) {
+      orderMap[order._id.toString()] = order;
+    }
 
-      return {
-        orderId: order.orderId,
-        courierServiceName: order.courierServiceName,
-        awb_number: order.awb_number,
-        paymentMethod: order.paymentDetails?.method,
-        paymentAmount: order.paymentDetails?.amount,
-        deliveryDate: deliveryEvent?.StatusDateTime
-          ? new Date(deliveryEvent.StatusDateTime).toLocaleDateString("en-US", {
-            weekday: "long",
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-          })
-          : null,
-      };
-    });
+    // Build result grouped by remittanceId, in the same order as the requested ids
+    const orderDetails = [];
+    for (const remitId of ids) {
+      const remittance = remittances.find((r) => String(r.remitanceId) === String(remitId));
+      if (!remittance) continue;
+      const remittanceOrderIds = remittance.orderDetails?.orders || [];
+      for (const oid of remittanceOrderIds) {
+        const order = orderMap[oid.toString()];
+        if (!order) continue;
+        const deliveryEvent = order.tracking.find(
+          (event) => event.status?.toLowerCase() === "delivered"
+        );
+        orderDetails.push({
+          remittanceId: remittance.remitanceId,
+          remittanceDate: remittance.date
+            ? new Date(remittance.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+            : null,
+          orderId: order.orderId,
+          courierServiceName: order.courierServiceName,
+          awb_number: order.awb_number,
+          paymentMethod: order.paymentDetails?.method,
+          paymentAmount: order.paymentDetails?.amount,
+          deliveryDate: deliveryEvent?.StatusDateTime
+            ? new Date(deliveryEvent.StatusDateTime).toLocaleDateString("en-US", {
+              weekday: "long",
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })
+            : null,
+        });
+      }
+    }
 
     res.json({
       success: true,
@@ -3277,6 +3306,44 @@ const validateExportedStatus = async (req, res) => {
   }
 };
 
+const saveCustomCodPlan = async (req, res) => {
+  try {
+    const { id } = req.query;
+    const userId = id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: "User not authenticated" });
+    }
+
+    const { planName, codCharge, remittanceDay } = req.body;
+    if (!planName || codCharge === undefined || codCharge === null || !remittanceDay) {
+      return res.status(400).json({ success: false, error: "planName, codCharge, and remittanceDay are required" });
+    }
+
+    let codPlan = await CodPlan.findOne({ user: userId });
+    if (codPlan) {
+      codPlan.planName = planName;
+      codPlan.planCharges = Number(codCharge);
+      codPlan.isCustom = true;
+      codPlan.remittanceDay = remittanceDay;
+      await codPlan.save();
+    } else {
+      codPlan = new CodPlan({
+        user: userId,
+        planName,
+        planCharges: Number(codCharge),
+        isCustom: true,
+        remittanceDay,
+      });
+      await codPlan.save();
+    }
+
+    return res.status(200).json({ success: true, message: "Custom COD plan saved successfully", codPlan });
+  } catch (error) {
+    console.error("Error in saveCustomCodPlan:", error);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
 module.exports = {
   codPlanUpdate,
   codToBeRemitteds,
@@ -3301,4 +3368,5 @@ module.exports = {
   uploadBankResponse,
   getBankExportBatches,
   validateExportedStatus,
+  saveCustomCodPlan,
 };

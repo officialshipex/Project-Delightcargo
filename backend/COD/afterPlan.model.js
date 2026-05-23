@@ -1,8 +1,9 @@
 const mongoose = require("mongoose");
 
 const afterPlanSchema=new mongoose.Schema({
- 
+
     date: { type: Date },
+    deliveryDate: { type: Date },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
