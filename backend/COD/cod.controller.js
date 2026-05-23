@@ -255,68 +255,110 @@ const remittanceScheduleData = async () => {
     const todayDayName = DAY_NAMES[day];
     const isTodayMWF = [1, 3, 5].includes(day); // Mon, Wed, Fri
 
+    // Group all entries by userId so all delivery dates for a user
+    // are combined into ONE remittanceId on the remittance day
+    const byUser = {};
     for (const remittance of existingSameDateDelivered) {
+      const uid = remittance.userId.toString();
+      if (!byUser[uid]) byUser[uid] = [];
+      byUser[uid].push(remittance);
+    }
+
+    for (const [userId, entries] of Object.entries(byUser)) {
       const [codPlan, user] = await Promise.all([
-        CodPlan.findOne({ user: remittance.userId }),
-        User.findById(remittance.userId),
+        CodPlan.findOne({ user: userId }),
+        User.findById(userId),
       ]);
 
       if (!codPlan || !codPlan.planName) {
-        console.log(
-          `No plan for user ${remittance.userId}. Assigning default D+7 plan.`
-        );
-        await new CodPlan({ user: remittance.userId, planName: "D+7" }).save();
-        continue;
+        console.log(`No plan for user ${userId}. Assigning default D+7 plan.`);
+        await new CodPlan({ user: userId, planName: "D+7" }).save();
+        continue; // entries stay "Pending" — retried next night with D+7 plan
       }
 
       const planDays = parseInt(codPlan.planName.replace(/\D/g, ""), 10);
+      const eligibleEntries = [];
+      const deferredEntries = [];
 
-      const deliveryDate = remittance.deliveryDate;
-      const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-      const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
-      const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
-      const dayDiff = Math.floor(
-        (startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24)
-      );
+      for (const remittance of entries) {
+        const deliveryDate = remittance.deliveryDate;
+        const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+        const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
+        const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
+        const dayDiff = Math.floor((startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24));
 
-      // dayDiff > planDays: D+N period must be fully completed (strictly after, not on the same day)
-      // Non-custom: remit only on Mon/Wed/Fri
-      // Custom: remit on the specific remittanceDay stored in the plan
-      const shouldRemitToday = codPlan.isCustom
-        ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
-        : (isTodayMWF && dayDiff > planDays);
+        const shouldRemitToday = codPlan.isCustom
+          ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
+          : (isTodayMWF && dayDiff > planDays);
 
-      // remittanceId is NOT generated here — it is generated in processAndRemit
-      // when the actual remittance happens, not when the entry is queued
-      const remittanceEntry = {
-        date: todayIST,
-        userId: remittance.userId,
-        userName: user ? user.fullname : "",
-        totalCod: remittance.totalCod,
-        orderDetails: {
-          date: todayIST,
-          codcal: remittance.totalCod,
-          orders: [...remittance.orderIds],
-        },
-        deliveryDate: remittance.deliveryDate,
-        status: "Pending",
-        planName: codPlan.planName,
-        planDays: planDays,
-      };
-      // console.log("remittanceEntry", remittanceEntry);
-      await runTransaction(async (session) => {
         if (shouldRemitToday) {
-          await processAndRemit(remittanceEntry, session);
+          eligibleEntries.push(remittance);
         } else {
-          await afterPlan.create([remittanceEntry], { session });
+          deferredEntries.push(remittance);
         }
+      }
 
-        await SameDateDelivered.updateOne(
-          { _id: remittance._id },
-          { $set: { status: "Completed" } },
-          { session }
+      // Defer non-eligible entries to afterPlan individually (each has its own deliveryDate)
+      for (const remittance of deferredEntries) {
+        const remittanceEntry = {
+          date: todayIST,
+          userId: remittance.userId,
+          userName: user ? user.fullname : "",
+          totalCod: remittance.totalCod,
+          orderDetails: {
+            date: todayIST,
+            codcal: remittance.totalCod,
+            orders: [...remittance.orderIds],
+          },
+          deliveryDate: remittance.deliveryDate,
+          status: "Pending",
+          planName: codPlan.planName,
+          planDays: planDays,
+        };
+        await runTransaction(async (session) => {
+          await afterPlan.create([remittanceEntry], { session });
+          await SameDateDelivered.updateOne(
+            { _id: remittance._id },
+            { $set: { status: "Completed" } },
+            { session }
+          );
+        });
+      }
+
+      // Aggregate ALL eligible entries for this user → ONE processAndRemit → ONE remittanceId
+      if (eligibleEntries.length > 0) {
+        const aggregatedTotalCod = eligibleEntries.reduce((sum, e) => sum + (e.totalCod || 0), 0);
+        const aggregatedOrderIds = eligibleEntries.flatMap((e) => [...e.orderIds]);
+        const earliestDeliveryDate = eligibleEntries.reduce(
+          (earliest, e) => (!earliest || e.deliveryDate < earliest ? e.deliveryDate : earliest),
+          null
         );
-      });
+
+        const aggregatedPlan = {
+          date: todayIST,
+          userId: entries[0].userId,
+          userName: user ? user.fullname : "",
+          totalCod: aggregatedTotalCod,
+          orderDetails: {
+            date: todayIST,
+            codcal: aggregatedTotalCod,
+            orders: aggregatedOrderIds,
+          },
+          deliveryDate: earliestDeliveryDate || todayIST,
+          status: "Pending",
+          planName: codPlan.planName,
+          planDays: planDays,
+        };
+
+        await runTransaction(async (session) => {
+          await processAndRemit(aggregatedPlan, session);
+          await SameDateDelivered.updateMany(
+            { _id: { $in: eligibleEntries.map((e) => e._id) } },
+            { $set: { status: "Completed" } },
+            { session }
+          );
+        });
+      }
     }
   } catch (error) {
     console.error("❌ Error in remittance schedule:", error);
@@ -513,43 +555,70 @@ const fetchExtraData = async () => {
 
     const afterCodPlans = await afterPlan.find();
 
+    // Group by userId so all deferred delivery dates are combined into ONE remittanceId
+    const byUser = {};
     for (const plan of afterCodPlans) {
-      const codPlan = await CodPlan.findOne({ user: plan.userId });
+      const uid = plan.userId.toString();
+      if (!byUser[uid]) byUser[uid] = [];
+      byUser[uid].push(plan);
+    }
+
+    for (const [userId, plans] of Object.entries(byUser)) {
+      const codPlan = await CodPlan.findOne({ user: userId });
       if (!codPlan || !codPlan.planName) {
-        console.log(`⛔ Skipping: No COD plan for user ${plan.userId}`);
+        console.log(`⛔ Skipping: No COD plan for user ${userId}`);
         continue;
       }
 
       const planDays = parseInt(codPlan.planName.replace(/\D/g, ""), 10);
-      const deliveryDate =
-        plan.deliveryDate ||
-        (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : todayIST);
+      const eligiblePlans = [];
 
-      const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-      const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
-      const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
+      for (const plan of plans) {
+        const deliveryDate =
+          plan.deliveryDate ||
+          (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : todayIST);
 
-      const dayDiff = Math.floor(
-        (startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24)
-      );
+        const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+        const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
+        const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
+        const dayDiff = Math.floor((startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24));
 
-      // Same rule as remittanceScheduleData: strictly after D+N, on correct day
-      const shouldMoveToAdmin = codPlan.isCustom
-        ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
-        : (isTodayMWF && dayDiff > planDays);
+        const shouldMoveToAdmin = codPlan.isCustom
+          ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
+          : (isTodayMWF && dayDiff > planDays);
 
-      if (!shouldMoveToAdmin) {
-        console.log(`⏭️ Skipping user ${plan.userId}: Not yet due (dayDiff: ${dayDiff})`);
-        continue;
+        if (shouldMoveToAdmin) {
+          eligiblePlans.push(plan);
+        } else {
+          console.log(`⏭️ Skipping user ${userId}: Not yet due (dayDiff: ${dayDiff})`);
+        }
       }
 
-      // ⇒ RECALCULATE before remitting
-      await processAndRemit(plan);
+      if (eligiblePlans.length === 0) continue;
 
-      // Remove from afterPlan
-      await afterPlan.findByIdAndDelete(plan._id);
+      // Aggregate all eligible afterPlan entries for this user → ONE remittanceId
+      const aggregatedTotalCod = eligiblePlans.reduce((sum, p) => sum + (p.totalCod || 0), 0);
+      const aggregatedOrderIds = eligiblePlans.flatMap((p) => p.orderDetails?.orders || []);
+      const earliestDeliveryDate = eligiblePlans.reduce((earliest, p) => {
+        const d = p.deliveryDate || (p.orderDetails?.date ? new Date(p.orderDetails.date) : todayIST);
+        return !earliest || d < earliest ? d : earliest;
+      }, null);
 
-      console.log(`✅ Migrated and recalculated COD for user: ${plan.userId}`);
+      const aggregatedPlan = {
+        userId: eligiblePlans[0].userId,
+        totalCod: aggregatedTotalCod,
+        orderDetails: {
+          date: todayIST,
+          codcal: aggregatedTotalCod,
+          orders: aggregatedOrderIds,
+        },
+        deliveryDate: earliestDeliveryDate || todayIST,
+      };
+
+      await processAndRemit(aggregatedPlan);
+      await afterPlan.deleteMany({ _id: { $in: eligiblePlans.map((p) => p._id) } });
+
+      console.log(`✅ Aggregated ${eligiblePlans.length} afterPlan entries for user ${userId} into one remittanceId`);
     }
   } catch (error) {
     console.error("❌ Error in fetchExtraData:", error.message);
