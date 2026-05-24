@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const NewOrder = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
 const AllocateRole = require("../../models/allocateRoleSchema");
+const WeightDiscrepancy = require("../../WeightDispreancy/weightDispreancy.model");
 
 const getAllShippingTransactions = async (req, res) => {
   try {
@@ -161,6 +162,18 @@ const getAllShippingTransactions = async (req, res) => {
       ...orderMatchStage,
       courierServiceName: { $exists: true, $ne: null, $ne: "" }
     });
+
+    // Attach WeightDiscrepancy data for each order
+    const awbNumbers = results.map(o => o.awb_number).filter(Boolean);
+    if (awbNumbers.length > 0) {
+      const discrepancies = await WeightDiscrepancy.find(
+        { awbNumber: { $in: awbNumbers } },
+        { chargedWeight: 1, chargeDimension: 1, excessWeightCharges: 1, awbNumber: 1 }
+      ).lean();
+      const discMap = {};
+      for (const d of discrepancies) discMap[d.awbNumber] = d;
+      for (const o of results) o.weightDiscrepancy = discMap[o.awb_number] || null;
+    }
 
     return res.json({
       total,

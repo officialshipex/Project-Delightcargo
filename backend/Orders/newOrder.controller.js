@@ -69,6 +69,7 @@ const {
   cancelOrder: cancelShiprocketOrder,
 } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 const { cancelShadowfaxOrder } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
+const WeightDiscrepancy = require("../WeightDispreancy/weightDispreancy.model");
 // Create a shipment
 const newOrder = async (req, res) => {
   try {
@@ -660,6 +661,18 @@ const getShippingOrders = async (req, res) => {
         },
       },
     ]);
+
+    // Attach WeightDiscrepancy data for each order
+    const awbNumbers = orders.map(o => o.awb_number).filter(Boolean);
+    if (awbNumbers.length > 0) {
+      const discrepancies = await WeightDiscrepancy.find(
+        { awbNumber: { $in: awbNumbers } },
+        { chargedWeight: 1, chargeDimension: 1, excessWeightCharges: 1, awbNumber: 1 }
+      ).lean();
+      const discMap = {};
+      for (const d of discrepancies) discMap[d.awbNumber] = d;
+      for (const o of orders) o.weightDiscrepancy = discMap[o.awb_number] || null;
+    }
 
     res.json({
       orders,

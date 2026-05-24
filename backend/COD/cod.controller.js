@@ -147,10 +147,12 @@ const codToBeRemitteds = async () => {
         continue;
       }
 
-      // Normalize date (start & end of UTC day)
-      const formattedDate = new Date(deliveryDate).toISOString().split("T")[0];
-      const startOfDay = new Date(`${formattedDate}T00:00:00.000Z`);
-      const endOfDay = new Date(`${formattedDate}T23:59:59.999Z`);
+      // Normalize date using IST day boundaries
+      const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+      const deliveryDateObj = new Date(deliveryDate);
+      const istDateStr = new Date(deliveryDateObj.getTime() + IST_OFFSET).toISOString().split("T")[0];
+      const startOfDay = new Date(new Date(`${istDateStr}T00:00:00.000Z`).getTime() - IST_OFFSET);
+      const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000 - 1);
 
       const codAmount = order.paymentDetails.amount || 0;
       const customOrderId = String(order.orderId || "");
@@ -386,7 +388,7 @@ if (process.env.NODE_ENV === "production") {
 // remittanceScheduleData();
 
 // Helper for direct business logic (used in both controllers)
-const processAndRemit = async (plan) => {
+const processAndRemit = async (plan,session) => {
   // Generate remittanceId here — only at actual remittance time, not when queued
   let remitanceId;
   do {
@@ -468,7 +470,7 @@ const processAndRemit = async (plan) => {
         {
           $set: { balance: afterWallet },
         }
-      ),
+      ,{session}),
       WalletTransaction.create({
         walletId: wallet._id,
         channelOrderId: transactionEntry.channelOrderId,
@@ -477,14 +479,14 @@ const processAndRemit = async (plan) => {
         balanceAfterTransaction: transactionEntry.balanceAfterTransaction,
         awb_number: transactionEntry.awb_number,
         description: transactionEntry.description,
-      })
-    ]).catch(err => console.error("⚠️ WalletTransaction create failed in cod.controller (adjustAmount):", err.message));
+      },{session})
+    ]);
   } else {
     // No adjustment → only update balance
     await Wallet.updateOne(
       { _id: wallet._id },
       { $set: { balance: afterWallet } }
-    );
+    ,{session});
   }
 
   // Charges
@@ -514,7 +516,7 @@ const processAndRemit = async (plan) => {
   const payoutToClient = Number((remainingRecharge - charges).toFixed(2));
 
   // Update codRemittance
-  await codRemittance.findOneAndUpdate(
+  const updatedRem = await codRemittance.findOneAndUpdate(
     { userId: plan.userId, CODToBeRemitted: { $gte: codToBeDeducted } }, // ensure enough COD
     {
       $inc: {
@@ -525,8 +527,13 @@ const processAndRemit = async (plan) => {
       $set: { rechargeAmount },
       $push: { remittanceData: remittanceEntryForUser },
     },
-    { new: true }
+    { new: true, session }
   );
+
+  if (!updatedRem) {
+    console.error(`❌ Insufficient CODToBeRemitted for user ${plan.userId}. Rolling back transaction (wallet credit + COD deduction).`);
+    throw new Error(`Insufficient CODToBeRemitted for user ${plan.userId}`);
+  }
 
   const adminEntry = {
     date: todayIST,
@@ -541,8 +548,8 @@ const processAndRemit = async (plan) => {
     orderDetails: plan.orderDetails,
   };
 
-  // Save to adminCodRemittance and remittanceData
-  await Promise.all([new adminCodRemittance(adminEntry).save()]);
+  // Save to adminCodRemittance
+  await new adminCodRemittance(adminEntry).save({ session });
 };
 
 const fetchExtraData = async () => {
@@ -615,8 +622,13 @@ const fetchExtraData = async () => {
         deliveryDate: earliestDeliveryDate || todayIST,
       };
 
-      await processAndRemit(aggregatedPlan);
-      await afterPlan.deleteMany({ _id: { $in: eligiblePlans.map((p) => p._id) } });
+      await runTransaction(async (session) => {
+        await processAndRemit(aggregatedPlan, session);
+        await afterPlan.deleteMany(
+          { _id: { $in: eligiblePlans.map((p) => p._id) } },
+          { session }
+        );
+      });
 
       console.log(`✅ Aggregated ${eligiblePlans.length} afterPlan entries for user ${userId} into one remittanceId`);
     }
@@ -766,6 +778,7 @@ const getCodRemitance = async (req, res) => {
 };
 
 const codRemittanceRecharge = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const userId = req.user._id;
     const { amount, walletId } = req.body;
@@ -818,6 +831,8 @@ const codRemittanceRecharge = async (req, res) => {
       return res.status(404).json({ message: "Wallet not found" });
     }
 
+    session.startTransaction();
+
     // ✅ Deduct amount against COD Orders
     let remainingAmount = amount;
     let fulfilledOrders = [];
@@ -829,7 +844,8 @@ const codRemittanceRecharge = async (req, res) => {
         // Full payment for this order
         await CodRemittanceOrdersModel.updateOne(
           { _id: order._id },
-          { $set: { status: "Paid" } }
+          { $set: { status: "Paid" } },
+          { session }
         );
         fulfilledOrders.push(order.orderID);
         remainingAmount -= codValue;
@@ -839,7 +855,8 @@ const codRemittanceRecharge = async (req, res) => {
 
         await CodRemittanceOrdersModel.updateOne(
           { _id: order._id },
-          { $set: { CODAmount: newValue } }
+          { $set: { CODAmount: newValue } },
+          { session }
         );
         remainingAmount = 0;
         break;
@@ -856,23 +873,26 @@ const codRemittanceRecharge = async (req, res) => {
           rechargeAmount: amount,
           // RemittanceInitiated: -amount,
         },
-      }
+      },
+      { session }
     );
 
     // ✅ Push transaction and update wallet balance
     await Promise.all([
       currentWallet.updateOne({
         $inc: { balance: amount },
-      }),
-      WalletTransaction.create({
+      }, { session }),
+      WalletTransaction.create([{
         walletId: currentWallet._id,
         category: "credit",
         amount,
         balanceAfterTransaction: currentWallet.balance + amount,
         date: new Date(),
         description: "Recharge from COD Remittance",
-      })
-    ]).catch(err => console.error("⚠️ WalletTransaction create failed in cod.controller (recharge):", err.message));
+      }], { session })
+    ]);
+
+    await session.commitTransaction();
 
     return res.status(200).json({
       success: true,
@@ -882,12 +902,15 @@ const codRemittanceRecharge = async (req, res) => {
       remainingBalance: remainingAmount,
     });
   } catch (error) {
+    await session.abortTransaction();
     console.error("Error processing COD remittance recharge:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to process COD remittance recharge.",
       error: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -939,7 +962,7 @@ function parseCSV(filePath, fileData) {
   return new Promise((resolve, reject) => {
     const orders = [];
     fs.createReadStream(filePath)
-      .pipe(csv())
+      .pipe(csvParser())
       .on("data", async (row) => {
         // orders.push(row);
         try {
@@ -1118,8 +1141,10 @@ const uploadCodRemittance = async (req, res) => {
             userRemittance.LastCODRemitted = actualAmount;
           } else {
             console.warn(
-              `RemittanceInitiated (${userRemittance.RemittanceInitiated}) less than actualAmount (${actualAmount}), skipping deduction to avoid negative value.`
+              `RemittanceInitiated (${userRemittance.RemittanceInitiated}) less than actualAmount (${actualAmount}), setting to 0 to avoid negative value.`
             );
+            userRemittance.LastCODRemitted = userRemittance.RemittanceInitiated;
+            userRemittance.RemittanceInitiated = 0;
           }
         } else {
           console.warn(
@@ -1128,16 +1153,18 @@ const uploadCodRemittance = async (req, res) => {
         }
 
         // Mark all orders as Paid
-        for (const item of remittance.orderDetails.orders) {
-          const order = await Order.findOne({ _id: item });
-          if (!order) {
-            console.log(`Order with ID ${item} not found.`);
-            continue;
+        if (remittance.orderDetails && Array.isArray(remittance.orderDetails.orders)) {
+          for (const item of remittance.orderDetails.orders) {
+            const order = await Order.findOne({ _id: item });
+            if (!order) {
+              console.log(`Order with ID ${item} not found.`);
+              continue;
+            }
+            await CodRemittanceOrdersModel.findOneAndUpdate(
+              { orderID: order.orderId },
+              { $set: { status: "Paid" } }
+            );
           }
-          await CodRemittanceOrdersModel.findOneAndUpdate(
-            { orderID: order.orderId },
-            { $set: { status: "Paid" } }
-          );
         }
       } else {
         console.warn(
@@ -1145,7 +1172,7 @@ const uploadCodRemittance = async (req, res) => {
         );
       }
 
-      // ✅ Only update TotalCODRemitted
+      // ✅ Only update TotalCODRemitted (always safe — this tracks total ever paid)
       userRemittance.TotalCODRemitted += Number(remittance.totalCod || 0);
 
       // ✅ Safety check
@@ -2310,7 +2337,6 @@ const uploadCourierCodRemittance = async (req, res) => {
 
     for (const row of codRemittances) {
       const awbNumber = normalize(row["*AWB Number"] || row["AWBNumber"]);
-      const codAmount = parseFloat(row["*COD Amount"] || row["CODAmount"]) || 0;
 
       const orderIndex = userRemittance.CourierCodRemittanceData.findIndex(
         (data) => normalize(data.AwbNumber) === awbNumber
@@ -2320,13 +2346,17 @@ const uploadCourierCodRemittance = async (req, res) => {
         orderIndex !== -1 &&
         userRemittance.CourierCodRemittanceData[orderIndex].status === "Pending"
       ) {
+        const storedCodAmount = Number(userRemittance.CourierCodRemittanceData[orderIndex].CODAmount || 0);
+
         userRemittance.CourierCodRemittanceData[orderIndex].status = "Paid";
         userRemittance.TransferredRemittance =
-          (userRemittance.TransferredRemittance || 0) + codAmount;
+          (userRemittance.TransferredRemittance || 0) + storedCodAmount;
         userRemittance.TotalRemittanceDue =
-          (userRemittance.TotalRemittanceDue || 0) - codAmount;
+          (userRemittance.TotalRemittanceDue || 0) - storedCodAmount;
 
         updated = true;
+      } else if (orderIndex === -1) {
+        console.warn(`AWB ${awbNumber} not found in user's courier remittance data — skipped`);
       }
     }
 
@@ -2676,6 +2706,7 @@ const getCODTransferData = async (req, res) => {
 // };
 
 const transferCOD = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const { id } = req.params;
 
@@ -2792,28 +2823,27 @@ const transferCOD = async (req, res) => {
       });
     }
 
+    session.startTransaction();
+
     // ============================================================
     // WALLET ADJUSTMENT (TopUp)
     // ============================================================
     if (totalAdjusted > 0) {
       const newBalance = wallet.balance + totalAdjusted;
 
-      await Promise.all([
-        Wallet.updateOne(
-          { _id: wallet._id },
-          {
-            $set: { balance: newBalance },
-          }
-        ),
-        WalletTransaction.create({
-          walletId: wallet._id,
-          category: "credit",
-          amount: totalAdjusted,
-          balanceAfterTransaction: newBalance,
-          description: "COD adjustment credited to wallet",
-          date: new Date(),
-        })
-      ]).catch(err => console.error("⚠️ WalletTransaction create failed in cod.controller (bulk adjust):", err.message));
+      await Wallet.updateOne(
+        { _id: wallet._id },
+        { $set: { balance: newBalance } },
+        { session }
+      );
+      await WalletTransaction.create([{
+        walletId: wallet._id,
+        category: "credit",
+        amount: totalAdjusted,
+        balanceAfterTransaction: newBalance,
+        description: "COD adjustment credited to wallet",
+        date: new Date(),
+      }], { session });
     }
 
     // ============================================================
@@ -2825,7 +2855,7 @@ const transferCOD = async (req, res) => {
     remRecord.TotalCODRemitted =
       (Number(remRecord.TotalCODRemitted) || 0) + totalPayable;
 
-    await remRecord.save();
+    await remRecord.save({ session });
 
     // ============================================================
     // Update admin table
@@ -2854,15 +2884,13 @@ const transferCOD = async (req, res) => {
       await adminCodRemittance.findOneAndUpdate(
         { remitanceId: remId },
         {
-          $set: {
-            status,
-            // utr: payableRemittanceIds.includes(remId) ? utr : null,
-            reason,
-          },
+          $set: { status, reason },
         },
-        { new: true }
+        { new: true, session }
       );
     }
+
+    await session.commitTransaction();
 
     // ============================================================
     // Response
@@ -2874,11 +2902,14 @@ const transferCOD = async (req, res) => {
       totalAdjusted,
     });
   } catch (error) {
+    await session.abortTransaction();
     console.error("Error in transferCOD:", error);
     return res.status(500).json({
       message: "Internal server error",
       error: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -3183,6 +3214,7 @@ const exportBankTemplate = async (req, res) => {
 //   2. Fallback: If no exact ID, matches by Beneficiary Account + Amount.
 // ============================================================
 const uploadBankResponse = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const { rows, selectedRemittanceIds } = req.body;
     // rows = [{ remarks, referenceNumber, utrNumber, beneficiaryName, beneficiaryAccount, amount, status, reason }]
@@ -3208,6 +3240,8 @@ const uploadBankResponse = async (req, res) => {
     }
 
     const results = [];
+
+    session.startTransaction();
 
     for (const row of rows) {
       const utrNumber = String(row.utrNumber || "").trim();
@@ -3278,7 +3312,7 @@ const uploadBankResponse = async (req, res) => {
 
       // Update remittanceData entry in-place
       remRecord.remittanceData[entryIndex] = {
-        ...matchedEntry.toObject(),
+        ...(typeof matchedEntry.toObject === "function" ? matchedEntry.toObject() : matchedEntry),
         status: "Paid",
         utr: utrNumber,
         remittanceMethod: "Bank Transfer",
@@ -3290,7 +3324,7 @@ const uploadBankResponse = async (req, res) => {
       remRecord.RemittanceInitiated = Math.max(0, (remRecord.RemittanceInitiated || 0) - paidAmount);
       remRecord.TotalCODRemitted = (Number(remRecord.TotalCODRemitted) || 0) + paidAmount;
 
-      await remRecord.save();
+      await remRecord.save({ session });
 
       // Sync adminCodRemittance using matched remittanceId
       await adminCodRemittance.findOneAndUpdate(
@@ -3302,11 +3336,13 @@ const uploadBankResponse = async (req, res) => {
             reason: "Paid via bank bulk transfer",
           },
         },
-        { new: true }
+        { new: true, session }
       );
 
       results.push({ beneficiaryAccount, amount: paymentAmount, remittanceId, status: "success", utr: utrNumber });
     }
+
+    await session.commitTransaction();
 
     const successCount = results.filter(r => r.status === "success").length;
     const skippedCount = results.filter(r => r.status === "skipped").length;
@@ -3327,8 +3363,11 @@ const uploadBankResponse = async (req, res) => {
     });
 
   } catch (error) {
+    await session.abortTransaction();
     console.error("Error in uploadBankResponse:", error);
     return res.status(500).json({ message: "Internal server error", error: error.message });
+  } finally {
+    session.endSession();
   }
 };
 
