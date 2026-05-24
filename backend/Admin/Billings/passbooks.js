@@ -66,12 +66,12 @@ const getAllPassbookTransactions = async (req, res) => {
     if (fromDate && toDate) {
       const startDate = new Date(new Date(fromDate).setHours(0, 0, 0, 0));
       const endDate = new Date(new Date(toDate).setHours(23, 59, 59, 999));
-      txnMatchStage.date = { $gte: startDate, $lte: endDate };
+      txnMatchStage["transactions.date"] = { $gte: startDate, $lte: endDate };
     }
-    if (category) txnMatchStage.category = category;
-    if (description) txnMatchStage.description = description;
-    if (awbNumber) txnMatchStage.awb_number = awbNumber;
-    if (orderId) txnMatchStage.channelOrderId = orderId;
+    if (category) txnMatchStage["transactions.category"] = category;
+    if (description) txnMatchStage["transactions.description"] = description;
+    if (awbNumber) txnMatchStage["transactions.awb_number"] = awbNumber;
+    if (orderId) txnMatchStage["transactions.channelOrderId"] = orderId;
 
     // --- Aggregation pipeline ---
     const pipeline = [
