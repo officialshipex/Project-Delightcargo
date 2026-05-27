@@ -243,12 +243,13 @@ if (process.env.NODE_ENV === "production") {
 
 const remittanceScheduleData = async () => {
   try {
-    const existingSameDateDelivered = await SameDateDelivered.find({
-      status: "Pending",
-    });
+    const [existingSameDateDelivered, afterCodPlans] = await Promise.all([
+      SameDateDelivered.find({ status: "Pending" }),
+      afterPlan.find(),
+    ]);
 
     console.log(
-      `Found ${existingSameDateDelivered.length} pending SameDateDelivered entries.`
+      `Found ${existingSameDateDelivered.length} pending SameDateDelivered entries and ${afterCodPlans.length} afterPlan entries.`
     );
 
     const todayIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -257,16 +258,12 @@ const remittanceScheduleData = async () => {
     const todayDayName = DAY_NAMES[day];
     const isTodayMWF = [1, 3, 5].includes(day); // Mon, Wed, Fri
 
-    // Group all entries by userId so all delivery dates for a user
-    // are combined into ONE remittanceId on the remittance day
-    const byUser = {};
-    for (const remittance of existingSameDateDelivered) {
-      const uid = remittance.userId.toString();
-      if (!byUser[uid]) byUser[uid] = [];
-      byUser[uid].push(remittance);
-    }
+    // Gather all unique user IDs
+    const allUserIds = new Set();
+    existingSameDateDelivered.forEach((e) => allUserIds.add(e.userId.toString()));
+    afterCodPlans.forEach((p) => allUserIds.add(p.userId.toString()));
 
-    for (const [userId, entries] of Object.entries(byUser)) {
+    for (const userId of allUserIds) {
       const [codPlan, user] = await Promise.all([
         CodPlan.findOne({ user: userId }),
         User.findById(userId),
@@ -275,14 +272,19 @@ const remittanceScheduleData = async () => {
       if (!codPlan || !codPlan.planName) {
         console.log(`No plan for user ${userId}. Assigning default D+7 plan.`);
         await new CodPlan({ user: userId, planName: "D+7" }).save();
-        continue; // entries stay "Pending" — retried next night with D+7 plan
+        continue; // entries stay "Pending" or outstanding — retried next night
       }
 
       const planDays = parseInt(codPlan.planName.replace(/\D/g, ""), 10);
-      const eligibleEntries = [];
-      const deferredEntries = [];
 
-      for (const remittance of entries) {
+      // Process new SameDateDelivered entries for this user
+      const userSameDateEntries = existingSameDateDelivered.filter(
+        (e) => e.userId.toString() === userId
+      );
+      const eligibleSameDate = [];
+      const deferredSameDate = [];
+
+      for (const remittance of userSameDateEntries) {
         const deliveryDate = remittance.deliveryDate;
         const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
         const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
@@ -294,72 +296,158 @@ const remittanceScheduleData = async () => {
           : (isTodayMWF && dayDiff > planDays);
 
         if (shouldRemitToday) {
-          eligibleEntries.push(remittance);
+          eligibleSameDate.push(remittance);
         } else {
-          deferredEntries.push(remittance);
+          deferredSameDate.push(remittance);
         }
       }
 
-      // Defer non-eligible entries to afterPlan individually (each has its own deliveryDate)
-      for (const remittance of deferredEntries) {
-        const remittanceEntry = {
-          date: todayIST,
-          userId: remittance.userId,
-          userName: user ? user.fullname : "",
-          totalCod: remittance.totalCod,
-          orderDetails: {
-            date: todayIST,
-            codcal: remittance.totalCod,
-            orders: [...remittance.orderIds],
-          },
-          deliveryDate: remittance.deliveryDate,
-          status: "Pending",
-          planName: codPlan.planName,
-          planDays: planDays,
-        };
-        await runTransaction(async (session) => {
-          await afterPlan.create([remittanceEntry], { session });
-          await SameDateDelivered.updateOne(
-            { _id: remittance._id },
-            { $set: { status: "Completed" } },
-            { session }
-          );
-        });
+      // Process existing deferred afterPlan entries for this user
+      const userAfterPlanEntries = afterCodPlans.filter(
+        (p) => p.userId.toString() === userId
+      );
+      const eligibleAfterPlan = [];
+
+      for (const plan of userAfterPlanEntries) {
+        const deliveryDate =
+          plan.deliveryDate ||
+          (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : todayIST);
+
+        const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+        const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
+        const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
+        const dayDiff = Math.floor((startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24));
+
+        const shouldMoveToAdmin = codPlan.isCustom
+          ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
+          : (isTodayMWF && dayDiff > planDays);
+
+        if (shouldMoveToAdmin) {
+          eligibleAfterPlan.push(plan);
+        }
       }
 
-      // Aggregate ALL eligible entries for this user → ONE processAndRemit → ONE remittanceId
-      if (eligibleEntries.length > 0) {
-        const aggregatedTotalCod = eligibleEntries.reduce((sum, e) => sum + (e.totalCod || 0), 0);
-        const aggregatedOrderIds = eligibleEntries.flatMap((e) => [...e.orderIds]);
-        const earliestDeliveryDate = eligibleEntries.reduce(
-          (earliest, e) => (!earliest || e.deliveryDate < earliest ? e.deliveryDate : earliest),
-          null
-        );
-
-        const aggregatedPlan = {
-          date: todayIST,
-          userId: entries[0].userId,
-          userName: user ? user.fullname : "",
-          totalCod: aggregatedTotalCod,
-          orderDetails: {
+      // Execute database operations in a single consolidated transaction per user
+      await runTransaction(async (session) => {
+        // 1. Save new deferred entries to afterPlan and mark SameDateDelivered as Completed
+        if (deferredSameDate.length > 0) {
+          const remittanceEntries = deferredSameDate.map((remittance) => ({
             date: todayIST,
-            codcal: aggregatedTotalCod,
-            orders: aggregatedOrderIds,
-          },
-          deliveryDate: earliestDeliveryDate || todayIST,
-          status: "Pending",
-          planName: codPlan.planName,
-          planDays: planDays,
-        };
+            userId: remittance.userId,
+            userName: user ? user.fullname : "",
+            totalCod: remittance.totalCod,
+            orderDetails: {
+              date: todayIST,
+              codcal: remittance.totalCod,
+              orders: [...remittance.orderIds],
+            },
+            deliveryDate: remittance.deliveryDate,
+            status: "Pending",
+            planName: codPlan.planName,
+            planDays: planDays,
+          }));
 
-        await runTransaction(async (session) => {
-          await processAndRemit(aggregatedPlan, session);
+          await afterPlan.create(remittanceEntries, { session });
           await SameDateDelivered.updateMany(
-            { _id: { $in: eligibleEntries.map((e) => e._id) } },
+            { _id: { $in: deferredSameDate.map((e) => e._id) } },
             { $set: { status: "Completed" } },
             { session }
           );
-        });
+        }
+
+        // 2. Process all eligible entries (SameDateDelivered + afterPlan)
+        if (eligibleSameDate.length > 0 || eligibleAfterPlan.length > 0) {
+          const rawOrderIds = [
+            ...eligibleSameDate.flatMap((e) => [...e.orderIds]),
+            ...eligibleAfterPlan.flatMap((p) => p.orderDetails?.orders || []),
+          ];
+
+          // Deduplicate order IDs in memory
+          const uniqueOrderIds = [...new Set(rawOrderIds.map((id) => id.toString()))];
+
+          // Fetch user's existing remittance entries to avoid duplicate processing
+          const userRemittance = await codRemittance.findOne({ userId });
+          const alreadyRemittedOrderIds = new Set(
+            userRemittance?.remittanceData?.flatMap((r) => r.orderDetails?.orders?.map((id) => id.toString()) || []) || []
+          );
+
+          // Filter out already processed/remitted order IDs
+          const nonRemittedOrderIds = uniqueOrderIds.filter((id) => !alreadyRemittedOrderIds.has(id));
+
+          let finalOrderIds = [];
+          let aggregatedTotalCod = 0;
+
+          if (nonRemittedOrderIds.length > 0) {
+            const actualOrders = await Order.find({ _id: { $in: nonRemittedOrderIds } }).lean().select("paymentDetails");
+            finalOrderIds = actualOrders.map((o) => o._id);
+            aggregatedTotalCod = Number(
+              actualOrders.reduce((sum, o) => sum + Number(o.paymentDetails?.amount || 0), 0).toFixed(2)
+            );
+          }
+
+          if (finalOrderIds.length > 0) {
+            const earliestSameDate = eligibleSameDate.reduce(
+              (earliest, e) => (!earliest || e.deliveryDate < earliest ? e.deliveryDate : earliest),
+              null
+            );
+            const earliestAfterPlanDate = eligibleAfterPlan.reduce((earliest, p) => {
+              const d = p.deliveryDate || (p.orderDetails?.date ? new Date(p.orderDetails.date) : todayIST);
+              return !earliest || d < earliest ? d : earliest;
+            }, null);
+
+            let earliestDeliveryDate = earliestSameDate;
+            if (
+              earliestAfterPlanDate &&
+              (!earliestDeliveryDate || earliestAfterPlanDate < earliestDeliveryDate)
+            ) {
+              earliestDeliveryDate = earliestAfterPlanDate;
+            }
+
+            const aggregatedPlan = {
+              date: todayIST,
+              userId: userId,
+              userName: user ? user.fullname : "",
+              totalCod: aggregatedTotalCod,
+              orderDetails: {
+                date: todayIST,
+                codcal: aggregatedTotalCod,
+                orders: finalOrderIds,
+              },
+              deliveryDate: earliestDeliveryDate || todayIST,
+              status: "Pending",
+              planName: codPlan.planName,
+              planDays: planDays,
+            };
+
+            // This generates exactly ONE remittance ID and performs adjustments
+            await processAndRemit(aggregatedPlan, session);
+          } else {
+            console.log(`⚠️ All eligible order IDs for user ${userId} were already remitted or invalid. Skipping remittance creation.`);
+          }
+
+          // Mark processed SameDateDelivered as Completed
+          if (eligibleSameDate.length > 0) {
+            await SameDateDelivered.updateMany(
+              { _id: { $in: eligibleSameDate.map((e) => e._id) } },
+              { $set: { status: "Completed" } },
+              { session }
+            );
+          }
+
+          // Delete processed afterPlan entries
+          if (eligibleAfterPlan.length > 0) {
+            await afterPlan.deleteMany(
+              { _id: { $in: eligibleAfterPlan.map((p) => p._id) } },
+              { session }
+            );
+          }
+        }
+      });
+
+      if (eligibleSameDate.length > 0 || eligibleAfterPlan.length > 0) {
+        console.log(
+          `✅ Aggregated ${eligibleSameDate.length} new and ${eligibleAfterPlan.length} deferred entries for user ${userId} into one remittanceId`
+        );
       }
     }
   } catch (error) {
@@ -388,7 +476,7 @@ if (process.env.NODE_ENV === "production") {
 // remittanceScheduleData();
 
 // Helper for direct business logic (used in both controllers)
-const processAndRemit = async (plan,session) => {
+const processAndRemit = async (plan, session) => {
   // Generate remittanceId here — only at actual remittance time, not when queued
   let remitanceId;
   do {
@@ -450,43 +538,55 @@ const processAndRemit = async (plan,session) => {
   // Deduction/adjustment logic
   if (wallet.balance < 0) {
     const adjustAmount = Math.min(remainingRecharge, Math.abs(wallet.balance));
-    creditedAmount = adjustAmount;
-    remainingRecharge -= adjustAmount;
-    afterWallet += adjustAmount;
+    if (adjustAmount > 0) {
+      creditedAmount = adjustAmount;
+      remainingRecharge -= adjustAmount;
+      afterWallet += adjustAmount;
 
-    // ✅ Create transaction only when adjustment happens
-    const transactionEntry = {
-      channelOrderId: "" || null,
-      category: "credit",
-      amount: creditedAmount,
-      balanceAfterTransaction: afterWallet,
-      awb_number: "" || null,
-      description: "COD Adjustment credited to wallet",
-    };
+      // ✅ Create transaction only when adjustment happens
+      const transactionEntry = {
+        channelOrderId: "" || null,
+        category: "credit",
+        amount: creditedAmount,
+        balanceAfterTransaction: afterWallet,
+        awb_number: "" || null,
+        description: "COD Adjustment credited to wallet",
+      };
 
-    await Promise.all([
-      Wallet.updateOne(
+      await Wallet.updateOne(
         { _id: wallet._id },
         {
           $set: { balance: afterWallet },
+        },
+        { session }
+      );
+
+      await WalletTransaction.create([
+        {
+          walletId: wallet._id,
+          channelOrderId: transactionEntry.channelOrderId,
+          category: transactionEntry.category,
+          amount: transactionEntry.amount,
+          balanceAfterTransaction: transactionEntry.balanceAfterTransaction,
+          awb_number: transactionEntry.awb_number,
+          description: transactionEntry.description,
         }
-      ,{session}),
-      WalletTransaction.create({
-        walletId: wallet._id,
-        channelOrderId: transactionEntry.channelOrderId,
-        category: transactionEntry.category,
-        amount: transactionEntry.amount,
-        balanceAfterTransaction: transactionEntry.balanceAfterTransaction,
-        awb_number: transactionEntry.awb_number,
-        description: transactionEntry.description,
-      },{session})
-    ]);
+      ], { session });
+    } else {
+      // adjustAmount is 0 → only update balance
+      await Wallet.updateOne(
+        { _id: wallet._id },
+        { $set: { balance: afterWallet } },
+        { session }
+      );
+    }
   } else {
     // No adjustment → only update balance
     await Wallet.updateOne(
       { _id: wallet._id },
-      { $set: { balance: afterWallet } }
-    ,{session});
+      { $set: { balance: afterWallet } },
+      { session }
+    );
   }
 
   // Charges
@@ -637,24 +737,26 @@ const fetchExtraData = async () => {
   }
 };
 
-if (process.env.NODE_ENV === "production") {
-  cron.schedule(
-    "25 2 * * *",
-    () => {
-      console.log(
-        "⏰ Running scheduled task at 2:25 AM IST (production): Migrating afterPlan with recalculation..."
-      );
-      fetchExtraData();
-    },
-    {
-      scheduled: true,
-      timezone: "Asia/Kolkata",
-    }
-  );
-} else {
-  console.log("⚙️ Cron job not started (development/local environment)");
-}
-
+// NOTE: fetchExtraData cron job has been deactivated because its logic is now consolidated
+// into remittanceScheduleData to ensure exactly ONE remittance ID is created per user per remittance day.
+//
+// if (process.env.NODE_ENV === "production") {
+//   cron.schedule(
+//     "25 2 * * *",
+//     () => {
+//       console.log(
+//         "⏰ Running scheduled task at 2:25 AM IST (production): Migrating afterPlan with recalculation..."
+//       );
+//       fetchExtraData();
+//     },
+//     {
+//       scheduled: true,
+//       timezone: "Asia/Kolkata",
+//     }
+//   );
+// } else {
+//   console.log("⚙️ Cron job not started (development/local environment)");
+// }
 // fetchExtraData();
 
 const codRemittanceData = async (req, res) => {
@@ -3452,6 +3554,161 @@ const saveCustomCodPlan = async (req, res) => {
   }
 };
 
+// ─── Correct a specific remittance ID based on actual order COD amounts ───
+// Call: await correctRemittanceData("84096")          → apply correction
+// Call: await correctRemittanceData("84096", true)    → dry run (preview only, no DB changes)
+const correctRemittanceData = async (remittanceId, dryRun = false) => {
+  const session = await mongoose.startSession();
+  try {
+    if (!remittanceId) throw new Error("remittanceId is required");
+
+    // 1. Find the codRemittance document containing this remittance entry
+    const codRemDoc = await codRemittance.findOne({
+      "remittanceData.remittanceId": String(remittanceId),
+    });
+    if (!codRemDoc) throw new Error(`No codRemittance found for remittanceId ${remittanceId}`);
+
+    // 2. Find the specific remittance entry inside remittanceData array
+    const remEntry = codRemDoc.remittanceData.find(
+      (r) => String(r.remittanceId) === String(remittanceId)
+    );
+    if (!remEntry) throw new Error("Remittance entry not found in remittanceData");
+
+    if (remEntry.status === "Paid") {
+      throw new Error("Cannot correct a Paid remittance. Bank transfer may have already been made.");
+    }
+
+    // 3. Fetch actual unique order documents from the Order collection
+    const orderIds = remEntry.orderDetails?.orders || [];
+    if (orderIds.length === 0) throw new Error("No order IDs found in this remittance entry");
+
+    const actualOrders = await Order.find({ _id: { $in: orderIds } }).lean().select("paymentDetails");
+    const actualTotalCod = Number(
+      actualOrders.reduce((sum, o) => sum + Number(o.paymentDetails?.amount || 0), 0).toFixed(2)
+    );
+
+    // 4. Fetch the user's COD plan to get planCharges
+    const codPlan = await CodPlan.findOne({ user: codRemDoc.userId });
+    const planCharges = codPlan?.planCharges || 0;
+
+    // 5. Recalculate using the same processAndRemit logic but with corrected totalCod
+    const oldExtraAmount = Number(remEntry.amountCreditedToWallet || 0); // rechargeAmount consumed
+    const oldCreditedAmount = Number(remEntry.adjustedAmount || 0);       // wallet negative adjustment — unchanged
+
+    let recalcRemainingRecharge = oldExtraAmount > 0
+      ? actualTotalCod - oldExtraAmount
+      : actualTotalCod;
+
+    // Wallet adjustment stays the same (negative balance was real)
+    // but cap it at the new remainingRecharge in case it's now smaller
+    const newCreditedAmount = Math.min(oldCreditedAmount, recalcRemainingRecharge);
+    recalcRemainingRecharge -= newCreditedAmount;
+
+    const newCharges = Number(((recalcRemainingRecharge * planCharges) / 100).toFixed(2));
+    const newCodAvailable = Number((recalcRemainingRecharge - newCharges).toFixed(2));
+    const newTotalDeduction = Number((newCharges + newCreditedAmount + oldExtraAmount).toFixed(2));
+    const newTotalCodConsumed = Number((recalcRemainingRecharge + newCreditedAmount).toFixed(2));
+
+    // 6. Calculate deltas vs old values for top-level field adjustments
+    const oldCodAvailable = Number(remEntry.codAvailable || 0);
+    const oldCharges = Number(remEntry.earlyCodCharges || 0);
+    const oldTotalCodConsumed = Number(((oldCodAvailable + oldCharges) + oldCreditedAmount).toFixed(2));
+
+    const deltaTotalCodConsumed = Number((oldTotalCodConsumed - newTotalCodConsumed).toFixed(2));
+    const deltaPayoutToClient   = Number((oldCodAvailable - newCodAvailable).toFixed(2));
+    const deltaTotalDeduction   = Number(
+      (Number((oldCharges + oldCreditedAmount + oldExtraAmount).toFixed(2)) - newTotalDeduction).toFixed(2)
+    );
+
+    // 7. Build the preview/result
+    const result = {
+      remittanceId,
+      userId: codRemDoc.userId,
+      ordersFound: actualOrders.length,
+      orderIdsStored: orderIds.length,
+      missingOrders: orderIds.length - actualOrders.length,
+      old: {
+        totalCod: Number((oldCodAvailable + oldCharges + oldCreditedAmount + oldExtraAmount).toFixed(2)),
+        codAvailable: oldCodAvailable,
+        earlyCodCharges: oldCharges,
+        adjustedAmount: oldCreditedAmount,
+      },
+      corrected: {
+        totalCod: actualTotalCod,
+        codAvailable: newCodAvailable,
+        earlyCodCharges: newCharges,
+        adjustedAmount: newCreditedAmount,
+      },
+      topLevelAdjustments: {
+        CODToBeRemitted: `+${deltaTotalCodConsumed} (add back over-deducted amount)`,
+        RemittanceInitiated: `-${deltaPayoutToClient}`,
+        TotalDeductionfromCOD: `-${deltaTotalDeduction}`,
+      },
+    };
+
+    console.log("📊 correctRemittanceData preview:", JSON.stringify(result, null, 2));
+
+    // If dryRun=true, just return the preview without making any DB changes
+    if (dryRun) {
+      console.log("🔍 Dry run — no changes made.");
+      return { success: true, message: "Dry run — no changes made", result };
+    }
+
+    // 8. Apply all corrections atomically in a single transaction
+    session.startTransaction();
+
+    // 8a. Update the remittanceData subdocument + top-level counters in codRemittance
+    await codRemittance.updateOne(
+      { "remittanceData.remittanceId": String(remittanceId) },
+      {
+        $set: {
+          "remittanceData.$.codAvailable": newCodAvailable,
+          "remittanceData.$.earlyCodCharges": newCharges,
+          "remittanceData.$.adjustedAmount": newCreditedAmount,
+          "remittanceData.$.orderDetails.codcal": actualTotalCod,
+          "remittanceData.$.status": newCodAvailable === 0 ? "Paid" : "Pending",
+        },
+        $inc: {
+          CODToBeRemitted: deltaTotalCodConsumed,
+          RemittanceInitiated: -deltaPayoutToClient,
+          TotalDeductionfromCOD: -deltaTotalDeduction,
+        },
+      },
+      { session }
+    );
+
+    // 8b. Update the adminCodRemittance entry
+    await adminCodRemittance.updateOne(
+      { remitanceId: Number(remittanceId) },
+      {
+        $set: {
+          totalCod: newCodAvailable,
+          earlyCodCharges: newCharges,
+          adjustedAmount: newCreditedAmount,
+          status: newCodAvailable === 0 ? "Paid" : "Pending",
+        },
+      },
+      { session }
+    );
+
+    await session.commitTransaction();
+    console.log(`✅ Remittance ${remittanceId} corrected successfully`);
+    return { success: true, message: `Remittance ${remittanceId} corrected successfully`, result };
+
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("❌ Error in correctRemittanceData:", error.message);
+    throw error;
+  } finally {
+    session.endSession();
+  }
+};
+
+// ─── To run correction, uncomment one of these lines and save: ───
+// correctRemittanceData("84096", true).then(console.log).catch(console.error);  // Dry run
+// correctRemittanceData("84096").then(console.log).catch(console.error);         // Apply
+
+
 module.exports = {
   codPlanUpdate,
   codToBeRemitteds,
@@ -3477,4 +3734,5 @@ module.exports = {
   getBankExportBatches,
   validateExportedStatus,
   saveCustomCodPlan,
+  correctRemittanceData,
 };

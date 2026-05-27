@@ -28,6 +28,7 @@ const {
   getBankExportBatches,
   validateExportedStatus,
   saveCustomCodPlan,
+  correctRemittanceData,
 } = require("./cod.controller");
 const { isAuthorized } = require("../middleware/auth.middleware");
 router.get("/getBankExportBatches", getBankExportBatches);
@@ -53,5 +54,9 @@ router.get("/getCODTransferData/:id",getCODTransferData)
 router.post("/transferCOD/:id",transferCOD)
 router.get("/exportBankTemplate", exportBankTemplate)
 router.post("/uploadBankResponse", uploadBankResponse)
+
+// Admin-only: Correct a specific remittance entry based on actual order COD amounts
+// ?dryRun=true will show the preview without making any changes
+router.patch("/correctRemittanceData/:remittanceId", correctRemittanceData);
 
 module.exports = router;
