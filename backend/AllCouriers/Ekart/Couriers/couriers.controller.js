@@ -761,7 +761,7 @@ const trackEkartShipment = async (id) => {
         // Authorization: `Bearer ${process.env.EKART_ELITE_TOKEN}`, // if needed
       },
     });
-    console.log("trakcing", response.data.track);
+    // console.log("trakcing", response.data.track.details);
     return response.data;
   } catch (error) {
     console.error("Ekart tracking error:", error.message);
@@ -772,7 +772,7 @@ const trackEkartShipment = async (id) => {
   }
 };
 
-// trackEkartShipment("QPSC0000000192")
+// trackEkartShipment("QPSC0000000328")
 
 module.exports = {
   checkEkartServiceability,

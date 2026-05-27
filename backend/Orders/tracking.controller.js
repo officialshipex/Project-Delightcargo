@@ -1681,6 +1681,7 @@ const trackOrders = async () => {
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery", "Ekart"] },
+      // awb_number:"52710410010006",
       $or: [
         { lastTrackedAt: { $exists: false } },
         { lastTrackedAt: null },
@@ -1723,6 +1724,7 @@ const trackOrders = async () => {
     console.error("❌ Error in tracking orders:", error);
   }
 };
+// trackOrders()
 
 // Optimized Background Task: Scheduled tracking loop using node-cron
 // This is more scalable and cost-effective for AWS than setTimeout polling.

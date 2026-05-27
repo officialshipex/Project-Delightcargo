@@ -50,9 +50,19 @@ const EkartWebhook = async (req, res) => {
       });
     }
 
-    if (["new", "Cancelled"].includes(order.status)) {
+    const descLower = (desc || "").toLowerCase().trim();
+    const isReadyToShipDesc = descLower.includes("dispached by quickpost") || descLower.includes("consignment manifested");
+
+    if (order.status === "Cancelled") {
       console.log(
         `Skipping Ekart Webhook for AWB ${wbn} because order status is "${order.status}"`,
+      );
+      return res.status(200).send("Ignored (Order Cancelled)");
+    }
+
+    if (order.status === "new" && !isReadyToShipDesc) {
+      console.log(
+        `Skipping Ekart Webhook for AWB ${wbn} because order status is "new" and description is not a manifest status`,
       );
       return res.status(200).send("Ignored (Order Not Yet Shipped)");
     }
@@ -108,7 +118,11 @@ const EkartWebhook = async (req, res) => {
        ==============   FORWARD FLOW HANDLING   ===============
        ======================================================== */
 
-    if (currentStatus === "Picked Up") {
+    if (isReadyToShipDesc) {
+      order.status = "Ready To Ship";
+      order.ndrStatus = "Ready To Ship";
+      order.reattempt = false;
+    } else if (currentStatus === "Picked Up") {
       order.status = "In-transit";
       order.ndrStatus = "In-transit";
       if (!order.invoiceDate) {
