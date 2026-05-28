@@ -451,7 +451,7 @@ const getOrders = async (req, res) => {
     const statusCondition = andConditions.find((c) => c.status);
     const sortOption =
       statusCondition?.status?.$in?.includes("new") ||
-      statusCondition?.status === "new"
+        statusCondition?.status === "new"
         ? { createdAt: -1 }
         : { updatedAt: -1 };
     let query = Order.find(filter).sort(sortOption);

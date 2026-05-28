@@ -2,6 +2,22 @@ const axios = require("axios");
 const DELHIVERY_API_URL = process.env.DELHIVERY_URL;
 const Order = require("../models/newOrder.model");
 const moment = require("moment");
+
+const pushNdrActionToHistory = (order, entry) => {
+  if (!Array.isArray(order.ndrHistory)) {
+    order.ndrHistory = [];
+  }
+  if (order.ndrHistory.length > 0) {
+    const latest = order.ndrHistory[order.ndrHistory.length - 1];
+    if (latest.actions && Array.isArray(latest.actions) && latest.actions.length < 2) {
+      latest.actions.push(entry);
+    } else {
+      order.ndrHistory.push({ actions: [entry] });
+    }
+  } else {
+    order.ndrHistory.push({ actions: [entry] });
+  }
+};
 const FormData = require("form-data");
 const {
   getToken,
@@ -51,8 +67,9 @@ const callShiprocketNdrApi = async (orderDetails) => {
       const order = await Order.findById(orderDetails._id);
       if (order) {
         order.ndrStatus = "Action_Requested";
+        order.status = "Action_Requested";
         order.reattempt = false;
-        
+
         const entry = {
           action: "NDR_ACTION",
           actionBy: "ShipexIndia",
@@ -61,8 +78,7 @@ const callShiprocketNdrApi = async (orderDetails) => {
           date: new Date(),
         };
 
-        if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
-        order.ndrHistory.push({ actions: [entry] });
+        pushNdrActionToHistory(order, entry);
         await order.save();
       }
     }
@@ -85,9 +101,9 @@ const callNimbustNdrApi = async (orderDetails) => {
       const order = await Order.findById(orderDetails._id);
       if (order) {
         order.ndrStatus = "Action_Requested";
-        order.status="Action_Requested";
+        order.status = "Action_Requested";
         order.reattempt = false;
-        
+
         const entry = {
           action: "NDR_ACTION",
           actionBy: "ShipexIndia",
@@ -96,8 +112,7 @@ const callNimbustNdrApi = async (orderDetails) => {
           date: new Date(),
         };
 
-        if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
-        order.ndrHistory.push({ actions: [entry] });
+        pushNdrActionToHistory(order, entry);
         await order.save();
       }
     }
@@ -219,23 +234,19 @@ const callEcomExpressNdrApi = async (
     console.log("resoso", response.data);
 
     if (response.data[0].status) {
-      if (!Array.isArray(order.ndrHistory)) {
-        order.ndrHistory = [];
-      }
-      const attemptCount = order.ndrHistory?.length || 0;
-
-      // Step 7: Save history entry
-      const ndrHistoryEntry = {
-        date: new Date(),
+      const entry = {
         action,
-        remark: comments,
-        // Fallback to existing remark if tracking is empty
-        attempt: attemptCount + 1,
+        actionBy: "ShipexIndia",
+        remark: comments || "NDR Action Requested",
+        source: "ShipexIndia",
+        date: new Date(),
       };
+
+      pushNdrActionToHistory(order, entry);
 
       order.ndrStatus = "Action_Requested";
       order.status="Action_Requested";
-      order.ndrHistory.push(ndrHistoryEntry);
+      order.reattempt = false;
       await order.save();
     }
 
@@ -324,12 +335,6 @@ const submitNdrToAmazon = async (
     if (response.data) {
       const order = await Order.findOne({ awb_number });
 
-      if (!Array.isArray(order.ndrHistory)) {
-        order.ndrHistory = [];
-      }
-
-      const attemptCount = order.ndrHistory.length;
-
       // Prepare new action
       const ndrActionEntry = {
         action,
@@ -339,22 +344,10 @@ const submitNdrToAmazon = async (
         date: new Date(),
       };
 
-      // If there is at least one history entry, push into its actions
-      if (order.ndrHistory.length > 0) {
-        const latestHistory = order.ndrHistory[order.ndrHistory.length - 1];
-        if (!Array.isArray(latestHistory.actions)) {
-          latestHistory.actions = [];
-        }
-        latestHistory.actions.push(ndrActionEntry);
-      } else {
-        // Otherwise, create first entry with actions array
-        order.ndrHistory.push({
-          actions: [ndrActionEntry],
-        });
-      }
+      pushNdrActionToHistory(order, ndrActionEntry);
       order.reattempt = false;
       order.ndrStatus = "Action_Requested";
-      order.status="Action_Requested";
+      order.status = "Action_Requested";
       await order.save();
     }
 
@@ -422,15 +415,7 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
           : "Manual RTO Requested"
       );
 
-      if (!Array.isArray(freshOrder.ndrHistory)) {
-        freshOrder.ndrHistory = [];
-      }
-      if (freshOrder.ndrHistory.length > 0) {
-        const latest = freshOrder.ndrHistory[freshOrder.ndrHistory.length - 1];
-        if (latest.actions.length < 2) {
-          latest.actions.push(actionEntry);
-        }
-      }
+      pushNdrActionToHistory(freshOrder, actionEntry);
 
       freshOrder.manualRTOStatus = "Action_Requested";
       freshOrder.ndrStatus = "Action_Requested";
@@ -482,11 +467,22 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
         headers: { Authorization: `Token ${apiKey}` },
       }
     );
-    // console.log("ndr delhivery",ndrStatusResponse.data.failed_wbns)
+
     if (ndrStatusResponse.data.status === "Failure") {
+      const errorMsg = ndrStatusResponse.data.failed_wbns?.[0]?.message || ndrStatusResponse.data.remark || "Delhivery API returned failure status";
       return {
         success: false,
-        error: ndrStatusResponse.data.failed_wbns[0].message,
+        error: errorMsg,
+      };
+    }
+
+    const failedWbn = ndrStatusResponse.data.failed_wbns?.find(
+      (item) => String(item.wbn).trim() === String(awb_number).trim()
+    );
+    if (failedWbn) {
+      return {
+        success: false,
+        error: failedWbn.message || "Failed to update Delhivery NDR action",
       };
     }
 
@@ -504,19 +500,11 @@ async function handleDelhiveryNdrAction(awb_number, action, comments) {
         : remark
     );
 
-    if (!Array.isArray(freshOrder.ndrHistory)) {
-      freshOrder.ndrHistory = [];
-    }
-
-    if (freshOrder.ndrHistory.length > 0) {
-      const latest = freshOrder.ndrHistory[freshOrder.ndrHistory.length - 1];
-      if (latest.actions.length < 2) {
-        latest.actions.push(actionEntry);
-      }
-    }
+    pushNdrActionToHistory(freshOrder, actionEntry);
 
     freshOrder.ndrStatus = "Action_Requested";
-    freshOrder.status = "Undelivered";
+    freshOrder.status = "Action_Requested";
+    freshOrder.reattempt = false;
 
     await freshOrder.save();
 
@@ -644,14 +632,7 @@ const submitNdrToDtdc = async (
       };
 
       // --- Push to nested ndrHistory ---
-      if (!Array.isArray(orderInDb.ndrHistory)) {
-        orderInDb.ndrHistory = [];
-      }
-
-      const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
-      if (latest.actions.length < 2) {
-        latest.actions.push(entry);
-      }
+      pushNdrActionToHistory(orderInDb, entry);
 
       // --- Update order status ---
       orderInDb.ndrStatus = "Action_Requested";
@@ -820,22 +801,7 @@ const submitNdrToShreeMaruti = async ({
         date: new Date(),
       };
 
-      if (!Array.isArray(orderInDb.ndrHistory)) {
-        orderInDb.ndrHistory = [];
-      }
-
-      // Same DTDC logic
-      if (orderInDb.ndrHistory.length === 0) {
-        orderInDb.ndrHistory.push({ actions: [entry] });
-      } else {
-        const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
-
-        if (latest.actions.length < 2) {
-          latest.actions.push(entry);
-        } else {
-          orderInDb.ndrHistory.push({ actions: [entry] });
-        }
-      }
+      pushNdrActionToHistory(orderInDb, entry);
 
       orderInDb.ndrStatus = "Action_Requested";
       orderInDb.status = "Action_Requested";
@@ -941,15 +907,7 @@ const callSmartshipNdrApi = async (
       };
 
       // --- Push to nested ndrHistory ---
-      if (!Array.isArray(currentOrder.ndrHistory)) {
-        currentOrder.ndrHistory = [];
-      }
-
-      const latest =
-        currentOrder.ndrHistory[currentOrder.ndrHistory.length - 1];
-      if (latest.actions.length < 2) {
-        latest.actions.push(entry);
-      }
+      pushNdrActionToHistory(currentOrder, entry);
 
       // --- Update order status ---
       currentOrder.ndrStatus = "Action_Requested";
@@ -1087,18 +1045,7 @@ const submitNdrToZipypost = async (awb, payload) => {
     };
 
     // --- Ensure ndrHistory exists and push action ---
-    if (!Array.isArray(orderInDb.ndrHistory)) {
-      orderInDb.ndrHistory = [];
-    }
-
-    // If latest history exists, append action
-    const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
-    if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
-      latest.actions.push(entry);
-    } else {
-      // Otherwise, add new ndrHistory record
-      orderInDb.ndrHistory.push({ actions: [entry] });
-    }
+    pushNdrActionToHistory(orderInDb, entry);
 
     // --- Update status fields ---
     orderInDb.ndrStatus = "Action_Requested";
@@ -1230,16 +1177,7 @@ const submitNdrToEkart = async ({
         date: new Date(),
       };
 
-      if (!Array.isArray(orderInDb.ndrHistory)) {
-        orderInDb.ndrHistory = [];
-      }
-
-      const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
-      if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
-        latest.actions.push(entry);
-      } else {
-        orderInDb.ndrHistory.push({ actions: [entry] });
-      }
+      pushNdrActionToHistory(orderInDb, entry);
 
       // If change address or phone provided, update receiver address record
       if (new_address || customer_name || new_phone) {
@@ -1326,13 +1264,7 @@ const submitNdrToBoxdLogistics = async ({
         source: "ShipexIndia",
         date: new Date(),
       };
-      if (!Array.isArray(orderInDb.ndrHistory)) orderInDb.ndrHistory = [];
-      const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
-      if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
-        latest.actions.push(entry);
-      } else {
-        orderInDb.ndrHistory.push({ actions: [entry] });
-      }
+      pushNdrActionToHistory(orderInDb, entry);
       orderInDb.ndrStatus = "Action_Requested";
       orderInDb.reattempt = false;
       await orderInDb.save();
@@ -1389,13 +1321,7 @@ const submitNdrToBoxdLogistics = async ({
       date: new Date(),
     };
 
-    if (!Array.isArray(orderInDb.ndrHistory)) orderInDb.ndrHistory = [];
-    const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
-    if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
-      latest.actions.push(entry);
-    } else {
-      orderInDb.ndrHistory.push({ actions: [entry] });
-    }
+    pushNdrActionToHistory(orderInDb, entry);
 
     // If Change Address — also update the receiver address
     if (actionUpper === "CHANGE_ADDRESS") {
@@ -1466,7 +1392,7 @@ const submitNdrToProship = async ({
 
     if (proshipAction === "REATTEMPT") {
       const receiver = orderInDb.receiverAddress || {};
-      
+
       let fullAddress = "";
       if (new_address) {
         fullAddress = new_address;
@@ -1483,7 +1409,7 @@ const submitNdrToProship = async ({
       singleWbData.address = fullAddress.trim() || undefined;
       singleWbData.drop_pincode = String(new_pincode || receiver.pinCode || "").trim() || undefined;
       singleWbData.phone_number = String(new_phone || receiver.phoneNumber || "").trim() || undefined;
-      
+
       let prefDate = scheduled_delivery_date;
       if (!prefDate) {
         const tomorrow = new Date();
@@ -1532,16 +1458,7 @@ const submitNdrToProship = async ({
         date: new Date(),
       };
 
-      if (!Array.isArray(orderInDb.ndrHistory)) {
-        orderInDb.ndrHistory = [];
-      }
-
-      const latest = orderInDb.ndrHistory[orderInDb.ndrHistory.length - 1];
-      if (latest && Array.isArray(latest.actions) && latest.actions.length < 2) {
-        latest.actions.push(entry);
-      } else {
-        orderInDb.ndrHistory.push({ actions: [entry] });
-      }
+      pushNdrActionToHistory(orderInDb, entry);
 
       if (new_address || customer_name || new_phone || new_pincode) {
         if (new_address) orderInDb.receiverAddress.address = new_address;

@@ -47,91 +47,84 @@ const processFailedNdrActions = async () => {
   }
 };
 
-/**
- * Hourly NDR Retry Job (runs at 5 minutes past the hour, e.g., 4:05, 5:05, 6:05)
- */
-cron.schedule("5 * * * *", async () => {
-  if (process.env.NODE_ENV !== "production") {
-    console.log("Hourly NDR Retry Job skipped: Not in production environment.");
-    return;
-  }
-  console.log("Running Hourly NDR Retry Job...");
-  await processFailedNdrActions();
-}, {
-  scheduled: true,
-  timezone: "Asia/Kolkata"
-});
+if (process.env.NODE_ENV === "production") {
+  /**
+   * Hourly NDR Retry Job (runs at 5 minutes past the hour, e.g., 4:05, 5:05, 6:05)
+   */
+  cron.schedule("5 * * * *", async () => {
+    console.log("Running Hourly NDR Retry Job...");
+    await processFailedNdrActions();
+  }, {
+    scheduled: true,
+    timezone: "Asia/Kolkata"
+  });
 
-/**
- * Consolidated Daily NDR Job (4 AM IST)
- */
-cron.schedule("0 4 * * *", async () => {
-  if (process.env.NODE_ENV !== "production") {
-    console.log("NDR Cron Job skipped: Not in production environment.");
-    return;
-  }
+  /**
+   * Consolidated Daily NDR Job (4 AM IST)
+   */
+  cron.schedule("0 4 * * *", async () => {
+    console.log("Running Consolidated Daily 4 AM NDR Job...");
 
-  console.log("Running Consolidated Daily 4 AM NDR Job...");
+    // --- PART 1: Retry previously failed actions ---
+    await processFailedNdrActions();
 
-  // --- PART 1: Retry previously failed actions ---
-  await processFailedNdrActions();
+    // --- PART 2: New Daily Auto Re-attempts ---
+    try {
+      const eligibleOrders = await Order.find({
+        ndrStatus: "Undelivered",
+        reattempt: true,
+        status: "Undelivered",
+      });
 
-  // --- PART 2: New Daily Auto Re-attempts ---
-  try {
-    const eligibleOrders = await Order.find({
-      ndrStatus: "Undelivered",
-      reattempt: true,
-      status: "Undelivered",
-    });
+      console.log(`Found ${eligibleOrders.length} new orders for daily re-attempt.`);
 
-    console.log(`Found ${eligibleOrders.length} new orders for daily re-attempt.`);
-
-    for (const order of eligibleOrders) {
-      const actionDetails = {
-        action: "RE-ATTEMPT",
-        remarks: "Kindly Reattempt on priority basis.",
-        comments: "Kindly Reattempt on priority basis.",
-      };
-
-      console.log(`Triggering daily re-attempt for AWB: ${order.awb_number}`);
-      const result = await runNdrTask(order._id, actionDetails);
-
-      // Always set reattempt to false once processed
-      order.reattempt = false;
-      await order.save();
-
-      if (!result.success) {
-        order.ndrStatus = "Action_Requested";
-        order.status = "Action_Requested";
-        if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
-        const autoEntry = {
+      for (const order of eligibleOrders) {
+        const actionDetails = {
           action: "RE-ATTEMPT",
-          actionBy: "ShipexIndia",
-          remark: "Kindly Reattempt on priority basis.",
-          source: "ShipexIndia",
-          date: new Date(),
+          remarks: "Kindly Reattempt on priority basis.",
+          comments: "Kindly Reattempt on priority basis.",
         };
-        order.ndrHistory.push({ actions: [autoEntry] });
+
+        console.log(`Triggering daily re-attempt for AWB: ${order.awb_number}`);
+        const result = await runNdrTask(order._id, actionDetails);
+
+        // Always set reattempt to false once processed
+        order.reattempt = false;
         await order.save();
 
-        await FailedNdrAction.create({
-          orderId: order._id,
-          awb_number: order.awb_number,
-          action: "RE-ATTEMPT",
-          payload: actionDetails,
-          lastError: result.message || result.error,
-          lastAttemptAt: new Date(),
-          status: "failed"
-        });
+        if (!result.success) {
+          order.ndrStatus = "Action_Requested";
+          order.status = "Action_Requested";
+          if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
+          const autoEntry = {
+            action: "RE-ATTEMPT",
+            actionBy: "ShipexIndia",
+            remark: "Kindly Reattempt on priority basis.",
+            source: "ShipexIndia",
+            date: new Date(),
+          };
+          order.ndrHistory.push({ actions: [autoEntry] });
+          await order.save();
+
+          await FailedNdrAction.create({
+            orderId: order._id,
+            awb_number: order.awb_number,
+            action: "RE-ATTEMPT",
+            payload: actionDetails,
+            lastError: result.message || result.error,
+            lastAttemptAt: new Date(),
+            status: "failed"
+          });
+        }
       }
+    } catch (error) {
+      console.error("Error during new daily re-attempts:", error);
     }
-  } catch (error) {
-    console.error("Error during new daily re-attempts:", error);
-  }
-}, {
-  scheduled: true,
-  timezone: "Asia/Kolkata"
-});
+  }, {
+    scheduled: true,
+    timezone: "Asia/Kolkata"
+  });
+}
 
 
 
