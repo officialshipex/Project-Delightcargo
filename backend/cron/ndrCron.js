@@ -12,27 +12,9 @@ console.log("NDR Cron Jobs Initialized: 4 AM consolidated and Hourly Retry jobs.
 const processFailedNdrActions = async () => {
   try {
     console.log("Processing failed NDR actions from the queue...");
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: "Asia/Kolkata",
-      year: "numeric",
-      month: "numeric",
-      day: "numeric",
-    });
-    const parts = formatter.formatToParts(new Date());
-    const partMap = {};
-    parts.forEach((p) => { partMap[p.type] = p.value; });
-
-    const year = parseInt(partMap.year);
-    const month = parseInt(partMap.month) - 1;
-    const day = parseInt(partMap.day);
-
-    // 00:00:00 IST is 18:30:00 UTC of the previous day
-    const startOfToday = new Date(Date.UTC(year, month, day, 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
-
     const failedActions = await FailedNdrAction.find({
       status: { $in: ["pending", "failed"] },
       retryCount: { $lt: 3 }, // Limit to 3 attempts
-      createdAt: { $lt: startOfToday }, // Only previous day failed actions
     });
 
     for (const action of failedActions) {
