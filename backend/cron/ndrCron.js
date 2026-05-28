@@ -3,28 +3,36 @@ const Order = require("../models/newOrder.model");
 const FailedNdrAction = require("../models/FailedNdrAction.model");
 const { runNdrTask } = require("../utils/ndrTaskRunner");
 
+console.log("NDR Cron Jobs Initialized: 4 AM consolidated and Hourly Retry jobs.");
+
 /**
- * Consolidated NDR Job (6 AM Daily)
- * 1. Automatically triggers re-attempts for "Undelivered" shipments.
- * 2. Retries failed actions from the previous day.
+ * Retries failed NDR actions from the queue (previous day's failed actions only).
+ * Capped at 3 total attempts, and does NOT update ndrHistory.
  */
-console.log("NDR Cron Jobs Initialized: 6 AM Consolidated Job.");
-
-cron.schedule("0 6 * * *", async () => {
-
-  if (process.env.NODE_ENV !== "production") {
-    console.log("NDR Cron Job skipped: Not in production environment.");
-    return;
-  }
-
-  console.log("Running Consolidated Daily 6 AM NDR Job...");
-
-  // --- PART 1: Retry previously failed actions ---
+const processFailedNdrActions = async () => {
   try {
     console.log("Processing failed NDR actions from the queue...");
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+    });
+    const parts = formatter.formatToParts(new Date());
+    const partMap = {};
+    parts.forEach((p) => { partMap[p.type] = p.value; });
+
+    const year = parseInt(partMap.year);
+    const month = parseInt(partMap.month) - 1;
+    const day = parseInt(partMap.day);
+
+    // 00:00:00 IST is 18:30:00 UTC of the previous day
+    const startOfToday = new Date(Date.UTC(year, month, day, 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
+
     const failedActions = await FailedNdrAction.find({
       status: { $in: ["pending", "failed"] },
-      retryCount: { $lt: 5 },
+      retryCount: { $lt: 3 }, // Limit to 3 attempts
+      createdAt: { $lt: startOfToday }, // Only previous day failed actions
     });
 
     for (const action of failedActions) {
@@ -39,21 +47,12 @@ cron.schedule("0 6 * * *", async () => {
         action.lastError = result.message || result.error || "Unknown error";
         action.retryCount += 1;
 
-        if (action.retryCount >= 5) {
-          action.status = "failed_permanently";
+        if (action.retryCount >= 3) {
           const order = await Order.findById(action.orderId);
           if (order) {
             order.ndrStatus = "Undelivered";
+            order.status = "Undelivered";
             order.reattempt = true;
-            if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
-            const exhaustEntry = {
-              action: action.action,
-              actionBy: "ShipexIndia",
-              remark: `Background retry exhausted (5 attempts). Final Error: ${action.lastError}`,
-              source: "ShipexIndia",
-              date: new Date(),
-            };
-            order.ndrHistory.push({ actions: [exhaustEntry] });
             await order.save();
           }
         }
@@ -64,6 +63,36 @@ cron.schedule("0 6 * * *", async () => {
   } catch (error) {
     console.error("Error during failed NDR actions retry:", error);
   }
+};
+
+/**
+ * Hourly NDR Retry Job (runs at 5 minutes past the hour, e.g., 4:05, 5:05, 6:05)
+ */
+cron.schedule("5 * * * *", async () => {
+  if (process.env.NODE_ENV !== "production") {
+    console.log("Hourly NDR Retry Job skipped: Not in production environment.");
+    return;
+  }
+  console.log("Running Hourly NDR Retry Job...");
+  await processFailedNdrActions();
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
+/**
+ * Consolidated Daily NDR Job (4 AM IST)
+ */
+cron.schedule("0 4 * * *", async () => {
+  if (process.env.NODE_ENV !== "production") {
+    console.log("NDR Cron Job skipped: Not in production environment.");
+    return;
+  }
+
+  console.log("Running Consolidated Daily 4 AM NDR Job...");
+
+  // --- PART 1: Retry previously failed actions ---
+  await processFailedNdrActions();
 
   // --- PART 2: New Daily Auto Re-attempts ---
   try {
@@ -85,10 +114,9 @@ cron.schedule("0 6 * * *", async () => {
       console.log(`Triggering daily re-attempt for AWB: ${order.awb_number}`);
       const result = await runNdrTask(order._id, actionDetails);
 
-      // Always set reattempt to false once processed (successfully or queued)
+      // Always set reattempt to false once processed
       order.reattempt = false;
       await order.save();
-
 
       if (!result.success) {
         order.ndrStatus = "Action_Requested";

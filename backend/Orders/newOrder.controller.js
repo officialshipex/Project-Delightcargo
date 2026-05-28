@@ -1766,7 +1766,7 @@ const cancelOrdersAtBooked = async (req, res) => {
             amount: balanceTobeAdded,
             balanceAfterTransaction: updatedWallet.balance,
             date: new Date(),
-            awb_number: allOrders.awb_number || "",
+            awb_number: currentOrder.awb_number || "",
             description: `Freight Charges Received`,
           }],
           { session }
@@ -1992,274 +1992,188 @@ const bulkCancelOrder = async (req, res) => {
 
     // Fetch all orders
     const orders = await Order.find({ _id: { $in: selectedOrders } });
-    if (!orders.length)
-      return res
-        .status(404)
-        .json({ success: false, message: "No matching orders found." });
-
-    let successCount = 0;
-    let failedCount = 0;
-    const results = [];
-
-    // 1. Parallel External API Calls
-    const apiResults = await Promise.all(
-      orders.map(async (currentOrder) => {
-        if (
-          !["Booked", "Not Picked", "Ready To Ship"].includes(
-            currentOrder.status,
-          )
-        ) {
-          return {
-            orderId: currentOrder._id,
-            status: "skipped",
-            reason: `Order status is '${currentOrder.status}', not cancellable.`,
-          };
-        }
-
-        // ✅ Determine provider
-        const provider =
-          currentOrder.partner === "ZipyPost" &&
-            currentOrder.provider === "Bluedart"
-            ? "ZipyPost"
-            : currentOrder.partner === "BoxdLogistics"
-              ? "BoxdLogistics"
-              : currentOrder.partner === "Proship"
-                ? "Proship"
-                : currentOrder.provider;
-
-        // --- Cancel order by provider ---
-        let cancelResponse;
-        try {
-          switch (provider) {
-            case "Delhivery":
-              cancelResponse = await cancelOrderDelhivery(
-                currentOrder.awb_number,
-              );
-              break;
-            case "Amazon Shipping":
-              cancelResponse = await cancelShipment(currentOrder.shipment_id);
-              break;
-            case "ZipyPost":
-              cancelResponse = await cancelOrderZipypost(currentOrder.awb_number);
-              break;
-            case "Shree Maruti":
-              cancelResponse = await cancelOrderShreeMaruti(currentOrder.orderId);
-              break;
-            case "Dtdc":
-              cancelResponse = await cancelOrderDTDC(currentOrder.awb_number);
-              break;
-            case "Ekart":
-              cancelResponse = await cancelShipmentEkart(currentOrder.awb_number);
-              break;
-            case "BoxdLogistics":
-              cancelResponse = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
-              break;
-            case "Proship":
-              cancelResponse = await cancelProshipOrder(currentOrder.awb_number);
-              break;
-            case "Shiprocket":
-              cancelResponse = await cancelShiprocketOrder(currentOrder.awb_number);
-              break;
-            case "Shadowfax":
-              cancelResponse = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
-              break;
-            default:
-              return {
-                orderId: currentOrder._id,
-                status: "failed",
-                reason: `Unknown provider: ${currentOrder.provider}`,
-              };
-          }
-        } catch (err) {
-          cancelResponse = { success: false, error: err.message };
-        }
-
-        // --- Handle API failure ---
-        if (cancelResponse?.success === false) {
-          return {
-            orderId: currentOrder._id,
-            status: "failed",
-            reason:
-              cancelResponse?.message ||
-              cancelResponse?.error ||
-              "Provider API returned failure",
-          };
-        }
-
-        return {
-          orderId: currentOrder._id,
-          status: "success",
-          order: currentOrder,
-        };
-      })
-    );
-
-    // 2. Sequential & Cached Database Updates
-    const userCache = {};
-    const walletCache = {};
-
-    for (const result of apiResults) {
-      if (result.status === "skipped") {
-        failedCount++;
-        results.push(result);
-        continue;
-      }
-
-      if (result.status === "failed") {
-        failedCount++;
-        results.push(result);
-        continue;
-      }
-
-      const currentOrder = result.order;
-      try {
-        // ✅ Take userId from order itself
-        const userId = currentOrder.userId;
-
-        // --- Fetch user and wallet based on order’s userId (cached) ---
-        let userDoc = userCache[userId];
-        if (!userDoc) {
-          userDoc = await user.findById(userId);
-          if (userDoc) userCache[userId] = userDoc;
-        }
-
-        if (!userDoc) {
-          failedCount++;
-          results.push({
-            orderId: currentOrder._id,
-            status: "failed",
-            reason: "User not found for this order.",
-          });
-          continue;
-        }
-
-        const walletId = userDoc.Wallet;
-        if (!walletId) {
-          failedCount++;
-          results.push({
-            orderId: currentOrder._id,
-            status: "failed",
-            reason: "User wallet not found.",
-          });
-          continue;
-        }
-
-        let walletDoc = walletCache[walletId];
-        if (!walletDoc) {
-          walletDoc = await Wallet.findById(walletId).select("balance");
-          if (walletDoc) walletCache[walletId] = walletDoc;
-        }
-
-        if (!walletDoc) {
-          failedCount++;
-          results.push({
-            orderId: currentOrder._id,
-            status: "failed",
-            reason: "Wallet document not found.",
-          });
-          continue;
-        }
-
-        // Remove from pickup manifest if exists
-        try {
-          await removeFromPickupManifest(currentOrder);
-        } catch (err) {
-          console.error("[Pickup] Failed to remove order from manifest during bulk cancellation:", err.message);
-        }
-
-        // --- Refund wallet balance safely ---
-        const balanceToAdd =
-          currentOrder.totalFreightCharges === "N/A"
-            ? 0
-            : parseFloat(currentOrder.totalFreightCharges) || 0;
-
-        if (balanceToAdd > 0) {
-          // ✅ Guard: Check if this AWB was already refunded (credit exists)
-          const alreadyRefunded = await WalletTransaction.exists({
-            walletId: walletId,
-            awb_number: currentOrder.awb_number,
-            category: "credit",
-            description: "Freight Charges Received",
-          });
-
-          if (!alreadyRefunded) {
-            const updatedWallet = await Wallet.findOneAndUpdate(
-              { _id: walletId },
-              { $inc: { balance: balanceToAdd } },
-              { new: true },
-            );
-
-            // Update cached balance for subsequent updates
-            walletDoc.balance = updatedWallet.balance;
-
-            const transactionObj = {
-              channelOrderId: currentOrder.orderId || null,
-              category: "credit",
-              amount: balanceToAdd,
-              balanceAfterTransaction: updatedWallet.balance,
-              date: new Date(),
-              awb_number: currentOrder.awb_number || "",
-              description: "Freight Charges Received",
-            };
-
-            await WalletTransaction.create([{
-              walletId: walletId,
-              channelOrderId: transactionObj.channelOrderId,
-              category: transactionObj.category,
-              amount: transactionObj.amount,
-              balanceAfterTransaction: transactionObj.balanceAfterTransaction,
-              date: transactionObj.date,
-              awb_number: transactionObj.awb_number,
-              description: transactionObj.description,
-            }]);
-          } else {
-            console.log(`[BulkCancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
-          }
-        }
-
-        // --- Update order details ---
-        currentOrder.status = "Cancelled";
-
-        currentOrder.tracking.push({
-          status: "Cancelled",
-          StatusLocation: "",
-          StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-          Instructions: "Order cancelled successfully",
-        });
-
-        await currentOrder.save();
-
-        successCount++;
-        results.push({
-          orderId: currentOrder._id,
-          status: "success",
-          provider: currentOrder.provider,
-        });
-      } catch (err) {
-        failedCount++;
-        results.push({
-          orderId: currentOrder._id,
-          status: "failed",
-          reason: err.message,
-        });
-      }
+    if (!orders.length) {
+      return res.status(404).json({ success: false, message: "No matching orders found." });
     }
 
-    return res.status(200).json({
+    // Filter out orders that are not in cancellable statuses immediately
+    const eligibleOrders = orders.filter(o =>
+      ["Booked", "Not Picked", "Ready To Ship"].includes(o.status)
+    );
+
+    const skippedOrders = orders.filter(o =>
+      !["Booked", "Not Picked", "Ready To Ship"].includes(o.status)
+    );
+
+    // 1. Immediately return success response to user
+    res.status(200).json({
       success: true,
-      totalOrders: orders.length,
-      successCount,
-      failedCount,
-      message: `✅ ${successCount} order(s) cancelled successfully, ❌ ${failedCount} order(s) failed.`,
-      details: results,
+      message: `Bulk cancellation initiated in background for ${eligibleOrders.length} order(s).`,
+      summary: {
+        totalSelected: orders.length,
+        initiatedCount: eligibleOrders.length,
+        skippedCount: skippedOrders.length,
+      }
     });
+
+    // 2. Process cancellations in the background sequentially
+    (async () => {
+      const userCache = {};
+      const walletCache = {};
+
+      for (const currentOrder of eligibleOrders) {
+        try {
+          const provider = currentOrder.provider;
+          const partner = currentOrder.partner;
+
+          // Call provider cancel API
+          let cancelResponse;
+          try {
+            if (provider === "Xpressbees") {
+              cancelResponse = await cancelShipmentXpressBees(currentOrder.awb_number);
+            } else if (provider === "Shiprocket" || partner === "Shiprocket") {
+              cancelResponse = await cancelShiprocketOrder(currentOrder.awb_number);
+            } else if (provider === "Nimuspost") {
+              cancelResponse = await cancelShipmentXpressBees(currentOrder.awb_number);
+            } else if (provider === "Delhivery") {
+              cancelResponse = await cancelOrderDelhivery(currentOrder.awb_number);
+            } else if (provider === "Shree Maruti") {
+              cancelResponse = await cancelOrderShreeMaruti(currentOrder.orderId);
+            } else if (provider === "Dtdc") {
+              cancelResponse = await cancelOrderDTDC(currentOrder.awb_number);
+            } else if (provider === "EcomExpress") {
+              cancelResponse = await cancelShipmentforward(currentOrder.awb_number);
+            } else if (provider === "Amazon Shipping") {
+              cancelResponse = await cancelShipment(currentOrder.shipment_id);
+            } else if (partner === "Smartship") {
+              cancelResponse = await cancelSmartshipOrder(currentOrder.orderId);
+            } else if (partner === "Vamaship") {
+              cancelResponse = await cancelVamashipOrder(currentOrder.shipment_id);
+            } else if (partner === "ZipyPost") {
+              cancelResponse = await cancelOrderZipypost(currentOrder.awb_number);
+            } else if (provider === "Ekart") {
+              cancelResponse = await cancelShipmentEkart(currentOrder.awb_number);
+            } else if (partner === "BoxdLogistics") {
+              cancelResponse = await cancelOrderBoxdLogistics(currentOrder.awb_number, currentOrder.orderId);
+            } else if (partner === "Proship") {
+              cancelResponse = await cancelProshipOrder(currentOrder.awb_number);
+            } else if (provider === "Shadowfax" || partner === "Shadowfax") {
+              cancelResponse = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
+            } else {
+              cancelResponse = { success: false, error: `Unsupported courier provider: ${provider}` };
+            }
+          } catch (err) {
+            cancelResponse = { success: false, error: err.message };
+          }
+
+          // Handle already cancelled states gracefully
+          const errorMsg = (cancelResponse?.message || cancelResponse?.error || "").toLowerCase();
+          const isAlreadyCancelled =
+            errorMsg.includes("already cancelled") ||
+            errorMsg.includes("already_cancelled") ||
+            errorMsg.includes("cancellation not allowed") ||
+            errorMsg.includes("shipment not found");
+
+          const hasError = !!cancelResponse?.error || cancelResponse?.success === false || cancelResponse?.success === "false";
+          const isSuccess = !hasError || isAlreadyCancelled;
+
+          if (!isSuccess) {
+            console.warn(`[Background BulkCancel] Failed AWB ${currentOrder.awb_number}: ${errorMsg}`);
+            continue;
+          }
+
+          // Process DB updates and refund sequentially
+          const userId = currentOrder.userId;
+          let userDoc = userCache[userId];
+          if (!userDoc) {
+            userDoc = await user.findById(userId);
+            if (userDoc) userCache[userId] = userDoc;
+          }
+          if (!userDoc) continue;
+
+          const walletId = userDoc.Wallet;
+          if (!walletId) continue;
+
+          let walletDoc = walletCache[walletId];
+          if (!walletDoc) {
+            walletDoc = await Wallet.findById(walletId).select("balance");
+            if (walletDoc) walletCache[walletId] = walletDoc;
+          }
+          if (!walletDoc) continue;
+
+          // Remove from pickup manifest if exists
+          try {
+            await removeFromPickupManifest(currentOrder);
+          } catch (err) {
+            console.error("[Pickup] Failed to remove order from manifest during bulk cancellation:", err.message);
+          }
+
+          // Refund wallet balance safely
+          const balanceToAdd =
+            currentOrder.totalFreightCharges === "N/A"
+              ? 0
+              : parseFloat(currentOrder.totalFreightCharges) || 0;
+
+          if (balanceToAdd > 0) {
+            // Guard: Check if this AWB was already refunded
+            const alreadyRefunded = await WalletTransaction.exists({
+              walletId: walletId,
+              awb_number: currentOrder.awb_number,
+              category: "credit",
+              description: "Freight Charges Received",
+            });
+
+            if (!alreadyRefunded) {
+              const updatedWallet = await Wallet.findOneAndUpdate(
+                { _id: walletId },
+                { $inc: { balance: balanceToAdd } },
+                { new: true },
+              );
+
+              // Update cached balance
+              walletDoc.balance = updatedWallet.balance;
+
+              await WalletTransaction.create([{
+                walletId: walletId,
+                channelOrderId: currentOrder.orderId || null,
+                category: "credit",
+                amount: balanceToAdd,
+                balanceAfterTransaction: updatedWallet.balance,
+                date: new Date(),
+                awb_number: currentOrder.awb_number || "",
+                description: "Freight Charges Received",
+              }]);
+            }
+          }
+
+          // Update order status to Cancelled
+          currentOrder.status = "Cancelled";
+          currentOrder.tracking.push({
+            status: "Cancelled",
+            StatusLocation: "",
+            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+            Instructions: isAlreadyCancelled
+              ? "Order cancelled successfully (Courier already cancelled)"
+              : "Order cancelled successfully",
+          });
+          await currentOrder.save();
+
+          console.log(`[Background BulkCancel] Successfully cancelled AWB ${currentOrder.awb_number}`);
+
+        } catch (itemError) {
+          console.error(`[Background BulkCancel] Error processing AWB ${currentOrder.awb_number}:`, itemError);
+        }
+      }
+    })();
+
   } catch (error) {
     console.error("Bulk Cancel Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error during bulk cancellation.",
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: "Internal server error during bulk cancellation.",
+      });
+    }
   }
 };
 

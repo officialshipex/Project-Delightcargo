@@ -93,8 +93,16 @@ const ndrCreate = async (req, res) => {
       });
     }
 
+    const { isNdrAlreadyRaisedToday } = require("../../NDR/ndrProcess");
     const { runNdrTask } = require("../../utils/ndrTaskRunner");
     const FailedNdrAction = require("../../models/FailedNdrAction.model");
+
+    if (isNdrAlreadyRaisedToday(orderDetails)) {
+      return res.status(400).json({
+        success: false,
+        message: "NDR action has already been raised for this shipment today.",
+      });
+    }
 
     // Standardize payload for runNdrTask
     const taskPayload = {

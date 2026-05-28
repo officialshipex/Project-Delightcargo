@@ -2871,17 +2871,26 @@ const transferCOD = async (req, res) => {
           const adjustAmt = Math.min(Number(negativeOnlyAdjust.amount) || 0, codAmt);
           totalAdjusted += adjustAmt;
           totalPayable += codAmt - adjustAmt;
+
+          return {
+            ...item,
+            status: "Paid",
+            codAvailable: Number((codAmt - adjustAmt).toFixed(2)),
+            adjustedAmount: Number(((item.adjustedAmount || 0) + adjustAmt).toFixed(2)),
+            utr,
+            remittanceMethod: "Bank Transfer",
+            reason: `Paid to client (₹${(codAmt - adjustAmt).toFixed(2)}) & adjusted to wallet (₹${adjustAmt.toFixed(2)})`,
+          };
         } else {
           totalPayable += codAmt;
+          return {
+            ...item,
+            status: "Paid",
+            utr,
+            remittanceMethod: "Bank Transfer",
+            reason: "Paid to client",
+          };
         }
-
-        return {
-          ...item,
-          status: "Paid",
-          utr,
-          remittanceMethod: "Bank Transfer",
-          reason: "Paid to client",
-        };
       }
 
       // 2️⃣ Wallet Top-Up entries
@@ -2891,7 +2900,8 @@ const transferCOD = async (req, res) => {
         return {
           ...item,
           status: "Paid",
-          adjustedAmount: (item.adjustedAmount || 0) + remAmt,
+          codAvailable: 0,
+          adjustedAmount: Number(((item.adjustedAmount || 0) + remAmt).toFixed(2)),
           remittanceMethod: "Wallet Adjustment",
           reason: "Used to adjust negative wallet balance",
         };
@@ -2965,16 +2975,31 @@ const transferCOD = async (req, res) => {
     for (const remId of selectedRemittanceIds) {
       let status = "Pending";
       let reason = "";
+      let updateFields = {};
+
+      const entry = pendingEntries.find((e) => String(e.remittanceId) === remId);
+      const originalCodAvailable = entry ? Number(entry.codAvailable || 0) : 0;
+      const originalAdjustedAmount = entry ? Number(entry.adjustedAmount || 0) : 0;
 
       if (payableRemittanceIds.includes(remId)) {
         status = "Paid";
-        reason =
-          negativeOnlyAdjust && String(negativeOnlyAdjust.remittanceId) === remId
-            ? "Partially paid to client, partial wallet adjustment"
-            : "Paid to client";
+        if (negativeOnlyAdjust && String(negativeOnlyAdjust.remittanceId) === remId) {
+          const adjustAmt = Math.min(Number(negativeOnlyAdjust.amount) || 0, originalCodAvailable);
+          reason = `Paid to client (₹${(originalCodAvailable - adjustAmt).toFixed(2)}) & adjusted to wallet (₹${adjustAmt.toFixed(2)})`;
+          updateFields = {
+            totalCod: Number((originalCodAvailable - adjustAmt).toFixed(2)),
+            adjustedAmount: Number((originalAdjustedAmount + adjustAmt).toFixed(2)),
+          };
+        } else {
+          reason = "Paid to client";
+        }
       } else if (topUpRemittanceIds.includes(remId)) {
         status = "Paid";
-        reason = "";
+        reason = "Used to adjust negative wallet balance";
+        updateFields = {
+          totalCod: 0,
+          adjustedAmount: Number((originalAdjustedAmount + originalCodAvailable).toFixed(2)),
+        };
       } else if (frozenRemittanceIds.includes(remId)) {
         status = "Pending";
         reason = "Frozen because negative wallet balance";
@@ -2986,7 +3011,7 @@ const transferCOD = async (req, res) => {
       await adminCodRemittance.findOneAndUpdate(
         { remitanceId: remId },
         {
-          $set: { status, reason },
+          $set: { status, reason, ...updateFields },
         },
         { new: true, session }
       );

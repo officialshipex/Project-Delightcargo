@@ -16,12 +16,38 @@ const { runNdrTask } = require("../utils/ndrTaskRunner");
 const FailedNdrAction = require("../models/FailedNdrAction.model");
 const Order = require("../models/newOrder.model");
 
+const isNdrAlreadyRaisedToday = (order) => {
+  if (!order.ndrHistory || !Array.isArray(order.ndrHistory) || order.ndrHistory.length === 0) {
+    return false;
+  }
+  
+  const todayISTStr = new Date().toLocaleDateString("en-US", { timeZone: "Asia/Kolkata" });
+
+  return order.ndrHistory.some(historyItem => {
+    if (historyItem.actions && Array.isArray(historyItem.actions)) {
+      return historyItem.actions.some(action => {
+        if (!action.date) return false;
+        return new Date(action.date).toLocaleDateString("en-US", { timeZone: "Asia/Kolkata" }) === todayISTStr;
+      });
+    }
+    return false;
+  });
+};
+
 const ndrProcessController = async (req, res) => {
   const { awb_number } = req.body;
 
   const orderDetails = await Order.findOne({ awb_number: awb_number });
   if (!orderDetails) {
     return res.status(404).json({ error: "Order not found" });
+  }
+
+  // Check if same day already NDR raised
+  if (isNdrAlreadyRaisedToday(orderDetails)) {
+    return res.status(400).json({
+      success: false,
+      message: "NDR action has already been raised for this shipment today.",
+    });
   }
 
   try {
@@ -98,111 +124,119 @@ const ndrBulkProcessController = async (req, res) => {
         });
     }
 
-    let results = [];
-    let successCount = 0;
-    let failedCount = 0;
-    let successfulOrders = [];
-    let failedOrders = [];
+    const eligiblePayloads = [];
+    const skippedAlreadyRaised = [];
+    const skippedNotFound = [];
 
-    // Loop through each order payload
+    // Pre-validation and immediate status/history updates to reflect in UI immediately
     for (const p of payloads) {
       const { orderId } = p;
       const order = await Order.findById(orderId);
 
       if (!order) {
-        failedCount++;
-        failedOrders.push(orderId);
-        results.push({ orderId, success: false, message: "Order not found" });
+        skippedNotFound.push(orderId);
         continue;
       }
 
-      try {
-        // Trigger initial API call
-        const apiResponse = await runNdrTask(order._id, p);
-        const isSuccess = apiResponse?.success === true;
-
-        if (isSuccess) {
-          successCount++;
-          successfulOrders.push(orderId);
-          results.push({
-            orderId,
-            awb: order.awb_number,
-            success: true,
-            message: apiResponse?.message || "Processed successfully",
-          });
-        } else {
-          // If immediate API call fails, queue for background retry
-          console.warn(`Bulk NDR failed for ${order.awb_number}, queuing: ${apiResponse?.message || apiResponse?.error}`);
-          
-          // Move to Action_Requested even if it failed and queued
-          order.ndrStatus = "Action_Requested";
-          order.status="Action_Requested";
-          if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
-          
-          const queuedEntry = {
-            action: p.action,
-            actionBy: "ShipexIndia",
-            remark: p.remarks || p.comments || "Action Requested (Queued)",
-            source: "ShipexIndia",
-            date: new Date(),
-          };
-          order.ndrHistory.push({ actions: [queuedEntry] });
-          await order.save();
-
-          await FailedNdrAction.create({
-            orderId: order._id,
-            awb_number: order.awb_number,
-            action: p.action,
-            payload: p,
-            lastError: apiResponse?.message || apiResponse?.error || "Initial attempt failed",
-            lastAttemptAt: new Date(),
-            status: "failed",
-          });
-
-          // We count it as "processed" (queued) for the user to avoid "error" panic
-          successCount++;
-          successfulOrders.push(orderId);
-          results.push({
-            orderId,
-            awb: order.awb_number,
-            success: true,
-            message: "Queued for background processing",
-          });
-        }
-      } catch (err) {
-        console.error("Bulk NDR item error:", err);
-        failedCount++;
-        failedOrders.push(orderId);
-        results.push({
-          orderId,
-          awb: order.awb_number,
-          success: false,
-          message: err.message || "Failed",
-        });
+      if (isNdrAlreadyRaisedToday(order)) {
+        skippedAlreadyRaised.push({ orderId, awb: order.awb_number });
+        continue;
       }
+
+      // Transition immediately to "Action_Requested" status
+      order.ndrStatus = "Action_Requested";
+      order.status = "Action_Requested";
+      if (!Array.isArray(order.ndrHistory)) order.ndrHistory = [];
+
+      const queuedEntry = {
+        action: p.action,
+        actionBy: "ShipexIndia",
+        remark: p.remarks || p.comments || "Action Requested (Queued)",
+        source: "ShipexIndia",
+        date: new Date(),
+      };
+      order.ndrHistory.push({ actions: [queuedEntry] });
+      await order.save();
+
+      eligiblePayloads.push({ orderId: order._id, payload: p });
     }
 
-    const summaryMessage = `Bulk NDR Process Completed:\n✔ Actions processed/queued: ${successCount}\n✖ Failed to identify: ${failedCount}`;
-
-    return res.json({
+    // Return immediate response to the UI
+    res.json({
       success: true,
-      message: summaryMessage,
+      message: `Bulk NDR process initiated in background. ${eligiblePayloads.length} shipments marked as processing.`,
       summary: {
-        totalOrders: payloads.length,
-        successCount,
-        failedCount,
-        successfulOrders,
-        failedOrders,
-      },
-      results,
+        totalReceived: payloads.length,
+        processingCount: eligiblePayloads.length,
+        alreadyRaisedCount: skippedAlreadyRaised.length,
+        notFoundCount: skippedNotFound.length,
+        alreadyRaised: skippedAlreadyRaised,
+      }
     });
+
+    // Run the actual API calls in the background asynchronously
+    (async () => {
+      for (const item of eligiblePayloads) {
+        const { orderId, payload } = item;
+        try {
+          const order = await Order.findById(orderId);
+          if (!order) continue;
+
+          console.log(`[Background NDR] Processing AWB: ${order.awb_number}`);
+          const apiResponse = await runNdrTask(order._id, payload);
+          const isSuccess = apiResponse?.success === true;
+
+          // Reload fresh order document from DB to prevent overwriting other updates
+          const freshOrder = await Order.findById(order._id);
+          if (!freshOrder) continue;
+
+          if (isSuccess) {
+            console.log(`[Background NDR] Successfully raised for AWB: ${order.awb_number}`);
+            // Update the last queued entry's remark to show success
+            if (freshOrder.ndrHistory && freshOrder.ndrHistory.length > 0) {
+              const lastHistory = freshOrder.ndrHistory[freshOrder.ndrHistory.length - 1];
+              if (lastHistory.actions && lastHistory.actions.length > 0) {
+                lastHistory.actions[0].remark = payload.remarks || payload.comments || "Action Requested (Processed successfully via API)";
+              }
+            }
+            await freshOrder.save();
+          } else {
+            console.warn(`[Background NDR] Failed for AWB: ${order.awb_number}, creating FailedNdrAction`);
+            // Update the last queued entry's remark to show the failure / background queued status
+            if (freshOrder.ndrHistory && freshOrder.ndrHistory.length > 0) {
+              const lastHistory = freshOrder.ndrHistory[freshOrder.ndrHistory.length - 1];
+              if (lastHistory.actions && lastHistory.actions.length > 0) {
+                lastHistory.actions[0].remark = `Action Requested (Queued in background. Last Error: ${apiResponse?.message || apiResponse?.error || "Initial attempt failed"})`;
+              }
+            }
+            await freshOrder.save();
+
+            // Create background retry entry
+            await FailedNdrAction.create({
+              orderId: freshOrder._id,
+              awb_number: freshOrder.awb_number,
+              action: payload.action,
+              payload: payload,
+              lastError: apiResponse?.message || apiResponse?.error || "Initial attempt failed",
+              lastAttemptAt: new Date(),
+              status: "failed",
+            });
+          }
+        } catch (backgroundError) {
+          console.error(`[Background NDR] Unexpected error for order ID ${orderId}:`, backgroundError);
+        }
+      }
+    })();
+
   } catch (error) {
     console.error("Bulk NDR Controller Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error in bulk NDR",
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: "Internal server error in bulk NDR",
+      });
+    }
   }
 };
 
-module.exports = { ndrProcessController, ndrBulkProcessController };
+module.exports = { ndrProcessController, ndrBulkProcessController, isNdrAlreadyRaisedToday };
