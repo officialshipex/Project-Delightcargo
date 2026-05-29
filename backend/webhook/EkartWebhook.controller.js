@@ -114,6 +114,69 @@ const EkartWebhook = async (req, res) => {
 
     const currentStatus = normalizedData.Status;
 
+    if (descLower.includes("mark_not_received")) {
+      if (order.status !== "Cancelled") {
+        order.status = "Cancelled";
+        order.ndrStatus = "Cancelled";
+        order.reattempt = false;
+
+        const User = require("../models/User.model");
+        const Wallet = require("../models/wallet");
+        const WalletTransaction = require("../models/WalletTransaction.model");
+
+        const userDoc = await User.findById(order.userId);
+        if (userDoc && userDoc.Wallet) {
+          const balanceTobeAdded = order.totalFreightCharges === "N/A" || !order.totalFreightCharges
+            ? 0
+            : parseFloat(order.totalFreightCharges);
+
+          if (balanceTobeAdded > 0) {
+            const existingCount = await WalletTransaction.countDocuments({
+              walletId: userDoc.Wallet,
+              awb_number: order.awb_number || "",
+              category: "credit",
+              description: "Freight Charges Received",
+            });
+
+            if (existingCount === 0) {
+              await Wallet.updateOne(
+                { _id: userDoc.Wallet },
+                { $inc: { balance: balanceTobeAdded } }
+              );
+
+              const updatedWallet = await Wallet.findById(userDoc.Wallet).select("balance");
+
+              await WalletTransaction.create({
+                walletId: userDoc.Wallet,
+                channelOrderId: order.orderId || null,
+                category: "credit",
+                amount: balanceTobeAdded,
+                balanceAfterTransaction: updatedWallet.balance,
+                date: new Date(),
+                awb_number: order.awb_number || "",
+                description: "Freight Charges Received",
+              });
+              console.log(`[EkartWebhook] Refunded ${balanceTobeAdded} to wallet for cancelled AWB ${order.awb_number}`);
+            }
+          }
+        }
+      }
+
+      order.tracking.push({
+        Instructions: normalizedData.Instructions,
+        Status: "Cancelled",
+        StatusDateTime: normalizedData.StatusDateTime,
+        StatusLocation: location || "Unknown",
+      });
+
+      await order.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Ekart shipment marked as Cancelled due to mark_not_received",
+      });
+    }
+
     /* ========================================================
        ==============   FORWARD FLOW HANDLING   ===============
        ======================================================== */

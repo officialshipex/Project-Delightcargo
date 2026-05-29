@@ -662,6 +662,7 @@ const cancelShipmentEkart = async (tracking_id) => {
       // If API response says cancellation failed
 
       return {
+        success:false,
         error: "Error in shipment cancellation",
         details: response.data,
         code: 400,
@@ -675,7 +676,7 @@ const cancelShipmentEkart = async (tracking_id) => {
     return {
       success: false,
       message: "Internal server error while cancelling shipment",
-      error: error.response?.data || error.message,
+      error: error.response?.data.description || error.message,
     };
   }
 };
@@ -807,3 +808,5 @@ module.exports = {
   addEkartAddress,
   trackEkartShipment,
 };
+
+

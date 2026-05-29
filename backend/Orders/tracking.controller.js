@@ -1556,130 +1556,141 @@ const trackSingleOrder = async (order) => {
     if (partner === "Ekart" || provider === "Ekart") {
       const currentStatus = normalizedData.Status;
       const descLower = (normalizedData.Instructions || "").toLowerCase().trim();
-      const isReadyToShipDesc = descLower.includes("dispached by quickpost") || descLower.includes("consignment manifested");
 
-      if (isReadyToShipDesc) {
-        order.status = "Ready To Ship";
-        order.ndrStatus = "Ready To Ship";
+      if (descLower.includes("mark_not_received")) {
+        order.status = "Cancelled";
+        order.ndrStatus = "Cancelled";
         order.reattempt = false;
-      } else if (currentStatus === "Picked Up") {
-        order.status = "In-transit";
-        order.ndrStatus = "In-transit";
-        if (!order.invoiceDate) {
-          order.invoiceDate = normalizedData.StatusDateTime;
-        }
-        order.reattempt = false;
-      }
+        balanceTobeAdded = order.totalFreightCharges === "N/A" || !order.totalFreightCharges
+          ? 0
+          : parseFloat(order.totalFreightCharges);
+        shouldUpdateWallet = true;
+      } else {
+        const isReadyToShipDesc = descLower.includes("dispached by quickpost") || descLower.includes("consignment manifested");
 
-      if (currentStatus === "In Transit" || currentStatus === "Reached Hub") {
-        order.status = "In-transit";
-        order.ndrStatus = "In-transit";
-        order.reattempt = false;
-      }
-
-      if (currentStatus === "Out for Delivery") {
-        order.status = "Out for Delivery";
-        order.ndrStatus = "Out for Delivery";
-        order.reattempt = false;
-      }
-
-      if (currentStatus === "Delivered" || descLower.includes("delivered to")) {
-        order.status = "Delivered";
-
-        if (order.ndrHistory.length > 0) {
-          order.ndrStatus = "Delivered";
+        if (isReadyToShipDesc) {
+          order.status = "Ready To Ship";
+          order.ndrStatus = "Ready To Ship";
           order.reattempt = false;
-        } else {
-          order.ndrStatus = "";
+        } else if (currentStatus === "Picked Up") {
+          order.status = "In-transit";
+          order.ndrStatus = "In-transit";
+          if (!order.invoiceDate) {
+            order.invoiceDate = normalizedData.StatusDateTime;
+          }
           order.reattempt = false;
         }
-      }
 
-      if (currentStatus === "RTO" || currentStatus === "RTO Requested") {
-        order.status = "RTO";
-        order.ndrStatus = "RTO";
-        order.reattempt = false;
-      }
-
-      if (currentStatus === "RTO In Transit") {
-        order.status = "RTO In-transit";
-        order.ndrStatus = "RTO In-transit";
-        order.reattempt = false;
-      }
-
-      if (currentStatus === "RTO Delivered") {
-        order.status = "RTO Delivered";
-        order.ndrStatus = "RTO Delivered";
-        order.reattempt = false;
-      }
-
-      const EKART_NDR_STATUSES = [
-        "Unknown Exception",
-        "Customer Unavailable",
-        "Rejected by Customer",
-        "Delivery Rescheduled",
-        "Pickup Rescheduled",
-        "Customer Unreachable",
-        "Address Issue",
-        "Payment Issue",
-        "Out Of Delivery Area",
-        "Order Already Cancelled",
-        "Self Collect",
-        "Shipment Seized By Customer",
-        "Dispute",
-        "Maximum Attempt Reached",
-        "Not Attempted",
-        "OTP Not Received/OTP Mismatch",
-        "OTP Verified Cancellation",
-        "On Hold",
-        "RTO Delivery Failed"
-      ];
-      const normalizedNdrStatuses = EKART_NDR_STATUSES.map(s => s.toLowerCase().trim());
-      const isEligibleForNdr = currentStatus && normalizedNdrStatuses.includes(currentStatus.toLowerCase().trim());
-
-      if (isEligibleForNdr && currentStatus !== "RTO In Transit") {
-        order.status = "Undelivered";
-        order.ndrStatus = "Undelivered";
-        order.reattempt=false;
-
-        const ndrDate = normalizedData.StatusDateTime || new Date();
-        const ndrReasonText = normalizedData.Instructions || normalizedData.StrRemarks || currentStatus || "";
-        const currentDate = ndrDate instanceof Date ? ndrDate.getTime() : new Date(ndrDate).getTime();
-
-        let lastNdrDate = null;
-        if (order.ndrHistory.length > 0) {
-          const lastHistory = order.ndrHistory[order.ndrHistory.length - 1];
-          const lastAction = lastHistory.actions[lastHistory.actions.length - 1];
-          lastNdrDate = new Date(lastAction.date).getTime();
+        if (currentStatus === "In Transit" || currentStatus === "Reached Hub") {
+          order.status = "In-transit";
+          order.ndrStatus = "In-transit";
+          order.reattempt = false;
         }
 
-        const attemptCount = order.ndrHistory.length + 1;
+        if (currentStatus === "Out for Delivery") {
+          order.status = "Out for Delivery";
+          order.ndrStatus = "Out for Delivery";
+          order.reattempt = false;
+        }
 
-        order.ndrReason = {
-          date: ndrDate,
-          reason: ndrReasonText,
-        };
+        if (currentStatus === "Delivered" || descLower.includes("delivered to")) {
+          order.status = "Delivered";
 
-        if (
-          !(
-            order.ndrStatus === "Action_Requested" &&
-            lastNdrDate &&
-            currentDate <= lastNdrDate
-          )
-        ) {
-          if (!lastNdrDate || currentDate > lastNdrDate) {
-            order.reattempt = true;
-            order.ndrHistory.push({
-              actions: [
-                {
-                  action: `NDR ${attemptCount} Raised`,
-                  actionBy: order.provider || "Ekart",
-                  remark: ndrReasonText,
-                  source: order.provider || "Ekart",
-                  date: ndrDate,
-                },
-              ],
-            });
+          if (order.ndrHistory.length > 0) {
+            order.ndrStatus = "Delivered";
+            order.reattempt = false;
+          } else {
+            order.ndrStatus = "";
+            order.reattempt = false;
+          }
+        }
+
+        if (currentStatus === "RTO" || currentStatus === "RTO Requested") {
+          order.status = "RTO";
+          order.ndrStatus = "RTO";
+          order.reattempt = false;
+        }
+
+        if (currentStatus === "RTO In Transit") {
+          order.status = "RTO In-transit";
+          order.ndrStatus = "RTO In-transit";
+          order.reattempt = false;
+        }
+
+        if (currentStatus === "RTO Delivered") {
+          order.status = "RTO Delivered";
+          order.ndrStatus = "RTO Delivered";
+          order.reattempt = false;
+        }
+
+        const EKART_NDR_STATUSES = [
+          "Unknown Exception",
+          "Customer Unavailable",
+          "Rejected by Customer",
+          "Delivery Rescheduled",
+          "Pickup Rescheduled",
+          "Customer Unreachable",
+          "Address Issue",
+          "Payment Issue",
+          "Out Of Delivery Area",
+          "Order Already Cancelled",
+          "Self Collect",
+          "Shipment Seized By Customer",
+          "Dispute",
+          "Maximum Attempt Reached",
+          "Not Attempted",
+          "OTP Not Received/OTP Mismatch",
+          "OTP Verified Cancellation",
+          "On Hold",
+          "RTO Delivery Failed"
+        ];
+        const normalizedNdrStatuses = EKART_NDR_STATUSES.map(s => s.toLowerCase().trim());
+        const isEligibleForNdr = currentStatus && normalizedNdrStatuses.includes(currentStatus.toLowerCase().trim());
+
+        if (isEligibleForNdr && currentStatus !== "RTO In Transit") {
+          order.status = "Undelivered";
+          order.ndrStatus = "Undelivered";
+          order.reattempt=false;
+
+          const ndrDate = normalizedData.StatusDateTime || new Date();
+          const ndrReasonText = normalizedData.Instructions || normalizedData.StrRemarks || currentStatus || "";
+          const currentDate = ndrDate instanceof Date ? ndrDate.getTime() : new Date(ndrDate).getTime();
+
+          let lastNdrDate = null;
+          if (order.ndrHistory.length > 0) {
+            const lastHistory = order.ndrHistory[order.ndrHistory.length - 1];
+            const lastAction = lastHistory.actions[lastHistory.actions.length - 1];
+            lastNdrDate = new Date(lastAction.date).getTime();
+          }
+
+          const attemptCount = order.ndrHistory.length + 1;
+
+          order.ndrReason = {
+            date: ndrDate,
+            reason: ndrReasonText,
+          };
+
+          if (
+            !(
+              order.ndrStatus === "Action_Requested" &&
+              lastNdrDate &&
+              currentDate <= lastNdrDate
+            )
+          ) {
+            if (!lastNdrDate || currentDate > lastNdrDate) {
+              order.reattempt = true;
+              order.ndrHistory.push({
+                actions: [
+                  {
+                    action: `NDR ${attemptCount} Raised`,
+                    actionBy: order.provider || "Ekart",
+                    remark: ndrReasonText,
+                    source: order.provider || "Ekart",
+                    date: ndrDate,
+                  },
+                ],
+              });
+            }
           }
         }
       }
