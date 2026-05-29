@@ -752,27 +752,52 @@ const trackEkartShipment = async (id) => {
     throw new Error("Tracking ID is required");
   }
 
-  const url = `https://app.elite.ekartlogistics.in/api/v1/track/${id}`;
-
   try {
+    // 1. Find Order to get the correct account
+    const order = await Order.findOne({ awb_number: id });
+    const courierAccountName = order ? order.courierServiceName : null;
+
+    // 2. Fetch valid access token for that account
+    const accessToken = await getAccessToken(courierAccountName);
+    if (!accessToken) {
+      throw new Error("Failed to get Ekart access token");
+    }
+
+    const url = `https://app.elite.ekartlogistics.in/api/v1/track/${id}`;
+
     const response = await axios.get(url, {
       headers: {
         "Content-Type": "application/json",
-        // Authorization: `Bearer ${process.env.EKART_ELITE_TOKEN}`, // if needed
+        Authorization: `Bearer ${accessToken}`,
       },
     });
-    // console.log("trakcing", response.data.track.details);
-    return response.data;
-  } catch (error) {
-    console.error("Ekart tracking error:", error.message);
 
-    throw new Error(
-      error.response?.data?.message || "Failed to fetch Ekart tracking details",
-    );
+    let trackingData = [];
+    if (response.data) {
+      if (response.data.track && Array.isArray(response.data.track.details)) {
+        trackingData = response.data.track.details;
+      } else if (Array.isArray(response.data.data)) {
+        trackingData = response.data.data;
+      } else if (response.data.track) {
+        trackingData = [response.data.track];
+      } else {
+        trackingData = [response.data];
+      }
+    }
+
+    return {
+      success: true,
+      data: trackingData,
+    };
+  } catch (error) {
+    console.error("Ekart tracking error:", error.response?.data || error.message);
+    return {
+      success: false,
+      message: error.response?.data?.message || "Failed to fetch Ekart tracking details",
+      error: error.response?.data || error.message,
+    };
   }
 };
-
-// trackEkartShipment("QPSC0000000328")
 
 module.exports = {
   checkEkartServiceability,
@@ -780,4 +805,5 @@ module.exports = {
   cancelShipmentEkart,
   calculateGSTForItems,
   addEkartAddress,
+  trackEkartShipment,
 };

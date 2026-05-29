@@ -46,6 +46,9 @@ const {
 const {
   trackShadowfaxOrder,
 } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
+const {
+  trackEkartShipment,
+} = require("../AllCouriers/Ekart/Couriers/couriers.controller");
 const Bottleneck = require("bottleneck");
 const {
   sendWhatsAppMessage,
@@ -91,6 +94,7 @@ const trackSingleOrder = async (order) => {
       Proship: trackProshipOrder,
       Shiprocket: trackShiprocketOrder,
       Shadowfax: trackShadowfaxOrder,
+      Ekart: trackEkartShipment,
     };
 
     // if (!trackingFunctions[provider]) {
@@ -126,7 +130,7 @@ const trackSingleOrder = async (order) => {
     // Normalize only the latest one
     const normalizedData = mapTrackingResponse(
       [latestTrackingEvent],
-      (partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket") ? partner : provider,
+      (partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket" || partner === "Ekart") ? partner : provider,
     );
     // console.log("normalized", normalizedData);
 
@@ -1548,11 +1552,144 @@ const trackSingleOrder = async (order) => {
       }
     }
 
+    // ── Ekart Status Handling ──────────────────────────────────────────────────
+    if (partner === "Ekart" || provider === "Ekart") {
+      const currentStatus = normalizedData.Status;
+      const descLower = (normalizedData.Instructions || "").toLowerCase().trim();
+      const isReadyToShipDesc = descLower.includes("dispached by quickpost") || descLower.includes("consignment manifested");
+
+      if (isReadyToShipDesc) {
+        order.status = "Ready To Ship";
+        order.ndrStatus = "Ready To Ship";
+        order.reattempt = false;
+      } else if (currentStatus === "Picked Up") {
+        order.status = "In-transit";
+        order.ndrStatus = "In-transit";
+        if (!order.invoiceDate) {
+          order.invoiceDate = normalizedData.StatusDateTime;
+        }
+        order.reattempt = false;
+      }
+
+      if (currentStatus === "In Transit" || currentStatus === "Reached Hub") {
+        order.status = "In-transit";
+        order.ndrStatus = "In-transit";
+        order.reattempt = false;
+      }
+
+      if (currentStatus === "Out for Delivery") {
+        order.status = "Out for Delivery";
+        order.ndrStatus = "Out for Delivery";
+        order.reattempt = false;
+      }
+
+      if (currentStatus === "Delivered" || descLower.includes("delivered to")) {
+        order.status = "Delivered";
+
+        if (order.ndrHistory.length > 0) {
+          order.ndrStatus = "Delivered";
+          order.reattempt = false;
+        } else {
+          order.ndrStatus = "";
+          order.reattempt = false;
+        }
+      }
+
+      if (currentStatus === "RTO" || currentStatus === "RTO Requested") {
+        order.status = "RTO";
+        order.ndrStatus = "RTO";
+        order.reattempt = false;
+      }
+
+      if (currentStatus === "RTO In Transit") {
+        order.status = "RTO In-transit";
+        order.ndrStatus = "RTO In-transit";
+        order.reattempt = false;
+      }
+
+      if (currentStatus === "RTO Delivered") {
+        order.status = "RTO Delivered";
+        order.ndrStatus = "RTO Delivered";
+        order.reattempt = false;
+      }
+
+      const EKART_NDR_STATUSES = [
+        "Unknown Exception",
+        "Customer Unavailable",
+        "Rejected by Customer",
+        "Delivery Rescheduled",
+        "Pickup Rescheduled",
+        "Customer Unreachable",
+        "Address Issue",
+        "Payment Issue",
+        "Out Of Delivery Area",
+        "Order Already Cancelled",
+        "Self Collect",
+        "Shipment Seized By Customer",
+        "Dispute",
+        "Maximum Attempt Reached",
+        "Not Attempted",
+        "OTP Not Received/OTP Mismatch",
+        "OTP Verified Cancellation",
+        "On Hold",
+        "RTO Delivery Failed"
+      ];
+      const normalizedNdrStatuses = EKART_NDR_STATUSES.map(s => s.toLowerCase().trim());
+      const isEligibleForNdr = currentStatus && normalizedNdrStatuses.includes(currentStatus.toLowerCase().trim());
+
+      if (isEligibleForNdr && currentStatus !== "RTO In Transit") {
+        order.status = "Undelivered";
+        order.ndrStatus = "Undelivered";
+        order.reattempt=false;
+
+        const ndrDate = normalizedData.StatusDateTime || new Date();
+        const ndrReasonText = normalizedData.Instructions || normalizedData.StrRemarks || currentStatus || "";
+        const currentDate = ndrDate instanceof Date ? ndrDate.getTime() : new Date(ndrDate).getTime();
+
+        let lastNdrDate = null;
+        if (order.ndrHistory.length > 0) {
+          const lastHistory = order.ndrHistory[order.ndrHistory.length - 1];
+          const lastAction = lastHistory.actions[lastHistory.actions.length - 1];
+          lastNdrDate = new Date(lastAction.date).getTime();
+        }
+
+        const attemptCount = order.ndrHistory.length + 1;
+
+        order.ndrReason = {
+          date: ndrDate,
+          reason: ndrReasonText,
+        };
+
+        if (
+          !(
+            order.ndrStatus === "Action_Requested" &&
+            lastNdrDate &&
+            currentDate <= lastNdrDate
+          )
+        ) {
+          if (!lastNdrDate || currentDate > lastNdrDate) {
+            order.reattempt = true;
+            order.ndrHistory.push({
+              actions: [
+                {
+                  action: `NDR ${attemptCount} Raised`,
+                  actionBy: order.provider || "Ekart",
+                  remark: ndrReasonText,
+                  source: order.provider || "Ekart",
+                  date: ndrDate,
+                },
+              ],
+            });
+          }
+        }
+      }
+    }
+
     if (Array.isArray(result.data) && result.data.length > 0) {
       // If API returned a full list of tracking events
       const newTrackingArray = result.data.map((item) => {
         const mapped =
-          partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket"
+          partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket" || partner === "Ekart"
             ? mapTrackingResponse([item], partner)
             : mapTrackingResponse([item], provider, result?.remark);
 
@@ -1680,7 +1817,7 @@ const trackOrders = async () => {
     // Find orders that are due for tracking (polling as a fallback to webhooks)
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery", "Ekart"] },
+      provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery","Ekart"] },
       // awb_number:"52710410010006",
       $or: [
         { lastTrackedAt: { $exists: false } },
@@ -1742,6 +1879,25 @@ if (process.env.NODE_ENV === "production") {
 
 const mapTrackingResponse = (data, provider, remark) => {
   // console.log("Mapping data for provider:", data);
+  if (provider === "Ekart") {
+    const event = data[0];
+    const formatEkartDateTime = (ctime) => {
+      if (!ctime) return null;
+      if (!isNaN(ctime)) {
+        const timestamp = Number(ctime);
+        const ms = timestamp < 9999999999 ? timestamp * 1000 : timestamp;
+        return new Date(ms + 5.5 * 60 * 60 * 1000);
+      }
+      return new Date(ctime);
+    };
+
+    return {
+      Status: event?.status || event?.Status || "N/A",
+      StatusLocation: event?.location || event?.StatusLocation || "Unknown",
+      StatusDateTime: formatEkartDateTime(event?.ctime || event?.StatusDateTime),
+      Instructions: event?.desc || event?.Instructions || "N/A",
+    };
+  }
   if (provider === "Smartship") {
     // console.log("Smartship data", data);
     const scans = data?.scans;

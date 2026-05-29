@@ -146,12 +146,12 @@ const EkartWebhook = async (req, res) => {
     /* ========================================================
          DELIVERED LOGIC
     ======================================================== */
-    if (currentStatus === "Delivered") {
+    if (currentStatus === "Delivered" || descLower.includes("delivered to")) {
       order.status = "Delivered";
 
       if (order.ndrHistory.length > 0) {
         order.ndrStatus = "Delivered";
-        order.reattempt = true;
+        order.reattempt = false;
       } else {
         order.ndrStatus = "";
         order.reattempt = false;
@@ -211,9 +211,10 @@ const EkartWebhook = async (req, res) => {
       latestNdrStatus &&
       normalizedNdrStatuses.includes(latestNdrStatus.toLowerCase().trim());
 
-    if (isEligibleForNdr) {
+    if (isEligibleForNdr && currentStatus !== "RTO In Transit") {
       order.status = "Undelivered";
       order.ndrStatus = "Undelivered";
+      order.reattempt=false;
 
       const ndrDate = ndrCtime ? ekartEpochToISTDate(ndrCtime) : normalizedData.StatusDateTime;
       const ndrReasonText = ndrDesc || latestNdrStatus || normalizedData.StrRemarks || "";
