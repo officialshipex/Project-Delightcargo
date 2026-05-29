@@ -1124,17 +1124,46 @@ const updatedStatusOrders = async (req, res) => {
       });
     }
 
-    // Update status to "new"
-    order.status = "new";
-    await order.save();
+    // Generate a new unique order ID
+    const newOrderId = await generateUniqueOrderIds(1);
+    const compositeOrderId = `${order.userId}-${newOrderId}`;
+
+    // Create a new shipment document (cloning relevant details)
+    const newOrderDoc = new Order({
+      userId: order.userId,
+      orderId: newOrderId,
+      pickupAddress: order.pickupAddress,
+      receiverAddress: order.receiverAddress,
+      productDetails: order.productDetails,
+      packageDetails: order.packageDetails,
+      paymentDetails: order.paymentDetails,
+      otherDetails: order.otherDetails,
+      compositeOrderId,
+      status: "new",
+      channel: order.channel || "custom",
+      orderType: order.orderType || "B2C",
+      B2BPackageDetails: order.B2BPackageDetails,
+      rovType: order.rovType,
+      commodityId: order.commodityId,
+      tracking: [
+        {
+          status: "new",
+          StatusLocation: order.pickupAddress?.city || "N/A",
+          StatusDateTime: new Date(),
+          Instructions: "Order created successfully",
+        },
+      ],
+    });
+
+    await newOrderDoc.save();
 
     res.status(200).json({
       success: true,
-      message: "Order clone successfully.",
-      order,
+      message: "Order cloned successfully.",
+      order: newOrderDoc,
     });
   } catch (error) {
-    console.error("Error updating order status:", error);
+    console.error("Error cloning order:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
@@ -1153,26 +1182,68 @@ const bulkCloneOrders = async (req, res) => {
       return res.status(400).json({ error: "No valid order IDs provided" });
     }
 
-    // Update only orders that are currently "Cancelled"
-    const result = await Order.updateMany(
-      { _id: { $in: validIds }, status: "Cancelled" },
-      { $set: { status: "new" } },
-    );
+    // Find only orders that are currently "Cancelled"
+    const originalOrders = await Order.find({
+      _id: { $in: validIds },
+      status: "Cancelled",
+    });
 
-    // If no orders were updated
-    if (result.matchedCount === 0) {
+    if (originalOrders.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No cancelled orders found to update.",
+        message: "No cancelled orders found to clone.",
       });
     }
 
+    // Generate new unique order IDs
+    const count = originalOrders.length;
+    const generatedIds = await generateUniqueOrderIds(count);
+    const newIdsArray = count === 1 ? [generatedIds] : generatedIds;
+
+    const clonedOrders = [];
+    for (let i = 0; i < originalOrders.length; i++) {
+      const order = originalOrders[i];
+      const newOrderId = newIdsArray[i];
+      const compositeOrderId = `${order.userId}-${newOrderId}`;
+
+      const newOrderDoc = new Order({
+        userId: order.userId,
+        orderId: newOrderId,
+        pickupAddress: order.pickupAddress,
+        receiverAddress: order.receiverAddress,
+        productDetails: order.productDetails,
+        packageDetails: order.packageDetails,
+        paymentDetails: order.paymentDetails,
+        otherDetails: order.otherDetails,
+        compositeOrderId,
+        status: "new",
+        channel: order.channel || "custom",
+        orderType: order.orderType || "B2C",
+        B2BPackageDetails: order.B2BPackageDetails,
+        rovType: order.rovType,
+        commodityId: order.commodityId,
+        tracking: [
+          {
+            status: "new",
+            StatusLocation: order.pickupAddress?.city || "N/A",
+            StatusDateTime: new Date(),
+            Instructions: "Order created successfully",
+          },
+        ],
+      });
+
+      clonedOrders.push(newOrderDoc);
+    }
+
+    // Save cloned orders in parallel to trigger save hooks
+    await Promise.all(clonedOrders.map((doc) => doc.save()));
+
     res.status(200).json({
       success: true,
-      message: `${result.modifiedCount} order(s) clone successfully.`,
+      message: `${clonedOrders.length} order(s) cloned successfully.`,
     });
   } catch (error) {
-    console.error("Error updating orders:", error);
+    console.error("Error bulk cloning orders:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
