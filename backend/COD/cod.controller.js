@@ -109,7 +109,7 @@ const codToBeRemitteds = async () => {
   const session = await mongoose.startSession();
 
   try {
-    const daysBack = 10;
+    const daysBack = 20;
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysBack);
 
