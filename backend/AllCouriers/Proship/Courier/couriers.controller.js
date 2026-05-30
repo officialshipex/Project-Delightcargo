@@ -142,7 +142,7 @@ const createProshipOrder = async (req, res) => {
         from_phone_number: currentOrder.pickupAddress.phoneNumber,
         from_address: currentOrder.pickupAddress.address,
         from_country: "IN",
-        from_email: currentOrder.pickupAddress.email || user.email || "info@shipex.in",
+        from_email: currentOrder.pickupAddress.email || user.email || "info@delightcargo.in",
         from_pincode: String(currentOrder.pickupAddress.pinCode),
         from_city: currentOrder.pickupAddress.city,
         from_addressline: currentOrder.pickupAddress.address,

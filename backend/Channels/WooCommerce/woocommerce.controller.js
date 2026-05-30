@@ -107,7 +107,7 @@ const createWooCommerceWebhook = async (
       (webhook) =>
         webhook.topic.includes("order") &&
         webhook.delivery_url ===
-        "https://api.shipexindia.com/v1/channel/webhook/woocommerce"
+        "https://api.delightcargo.com/v1/channel/webhook/woocommerce"
     );
 
     if (existingWebhook) {
@@ -122,7 +122,7 @@ const createWooCommerceWebhook = async (
         name: "Order Created Webhook",
         topic: "order.created",
         delivery_url:
-          "https://api.shipexindia.com/v1/channel/webhook/woocommerce",
+          "https://api.delightcargo.com/v1/channel/webhook/woocommerce",
         status: "active",
       },
       {
@@ -364,10 +364,10 @@ const getWooCommerceProductDetails = async (
   }
 };
 
-// Map Shipex internal status → WooCommerce order status
+// Map DelightCargo internal status → WooCommerce order status
 // WooCommerce standard: pending, processing, on-hold, completed, cancelled
 // Stores with shipment plugins may also accept: shipped, in-transit, out-for-delivery, etc.
-const shipexToWooStatus = (shipexStatus) => {
+const delightcargoToWooStatus = (delightcargoStatus) => {
   const map = {
     "Booked":           "ready-to-ship",
     "Ready To Ship":    "ready-to-ship",
@@ -382,7 +382,7 @@ const shipexToWooStatus = (shipexStatus) => {
     "Undelivered":      "on-hold",
     "Lost":             "on-hold",
   };
-  return map[shipexStatus] || null; // null = don't update WC status for unknown statuses
+  return map[delightcargoStatus] || null; // null = don't update WC status for unknown statuses
 };
 
 const markWooOrderAsShipped = async (
@@ -390,7 +390,7 @@ const markWooOrderAsShipped = async (
   orderId,
   trackingNumber,
   courierName,
-  shipexStatus   // Shipex order status (e.g. "In-transit", "Delivered", "Booked")
+  delightcargoStatus   // DelightCargo order status (e.g. "In-transit", "Delivered", "Booked")
 ) => {
   try {
     const baseUrl = storeUrl.replace(/\/$/, "");
@@ -419,10 +419,10 @@ const markWooOrderAsShipped = async (
       console.log(`ℹ️ Resolved internal ID ${orderId} to WooCommerce ID ${wcOrderId}`);
     }
 
-    // 4. Map Shipex status → WooCommerce status
-    const wcStatus = shipexToWooStatus(shipexStatus);
+    // 4. Map DelightCargo status → WooCommerce status
+    const wcStatus = delightcargoToWooStatus(delightcargoStatus);
     if (!wcStatus) {
-      console.log(`ℹ️ No WooCommerce status mapping for Shipex status: "${shipexStatus}". Skipping WC update.`);
+      console.log(`ℹ️ No WooCommerce status mapping for DelightCargo status: "${delightcargoStatus}". Skipping WC update.`);
       return;
     }
 
@@ -441,8 +441,8 @@ const markWooOrderAsShipped = async (
       return;
     }
 
-    const trackingUrl = `https://app.shipexindia.com/dashboard/order/tracking/${trackingNumber}`;
-    const newNote = `Shipex Update: ${shipexStatus} | AWB: ${trackingNumber} | Courier: ${courierName || "N/A"}`;
+    const trackingUrl = `https://app.delightcargo.com/dashboard/order/tracking/${trackingNumber}`;
+    const newNote = `DelightCargo Update: ${delightcargoStatus} | AWB: ${trackingNumber} | Courier: ${courierName || "N/A"}`;
 
     // 6. Update WooCommerce order status (only if status changed or note is different)
     if (currentWCOrder.status !== wcStatus || currentWCOrder.customer_note !== newNote) {
@@ -460,7 +460,7 @@ const markWooOrderAsShipped = async (
             },
           }
         );
-        console.log(`✅ WooCommerce order ${wcOrderId} updated: ${shipexStatus} → ${wcStatus}`);
+        console.log(`✅ WooCommerce order ${wcOrderId} updated: ${delightcargoStatus} → ${wcStatus}`);
       } catch (err) {
         console.error(`❌ Error updating status for WC order ${wcOrderId}:`, err.response?.data?.message || err.message);
       }
@@ -470,7 +470,7 @@ const markWooOrderAsShipped = async (
 
     // 7. Add tracking info to WooCommerce (only when Booked / first shipment scan)
     const addTrackingStatuses = ["Booked", "Ready To Ship", "Pickup Completed"];
-    if (trackingNumber && addTrackingStatuses.includes(shipexStatus)) {
+    if (trackingNumber && addTrackingStatuses.includes(delightcargoStatus)) {
       try {
         // Check if tracking number is already added to avoid duplicates
         const trackingListResponse = await axios.get(
