@@ -139,11 +139,35 @@ const codToBeRemitteds = async () => {
 
     console.log(`🚚 Found ${deliveredCodOrders.length} COD orders.`);
 
+    // Pre-fetch all remittances and afterPlans for the unique users to avoid N+1 queries
+    const uniqueUserIds = [...new Set(deliveredCodOrders.filter((o) => o.userId).map((o) => o.userId.toString()))];
+    const [allRemittances, allAfterPlans] = await Promise.all([
+      codRemittance.find({ userId: { $in: uniqueUserIds } }).lean(),
+      afterPlan.find({ userId: { $in: uniqueUserIds } }).lean(),
+    ]);
+
+    const remittanceMap = new Map(
+      allRemittances.filter((r) => r.userId).map((r) => [r.userId.toString(), r])
+    );
+    const afterPlanMap = new Map();
+    for (const p of allAfterPlans) {
+      if (p.userId) {
+        const uid = p.userId.toString();
+        if (!afterPlanMap.has(uid)) afterPlanMap.set(uid, []);
+        afterPlanMap.get(uid).push(p);
+      }
+    }
+
     for (const order of deliveredCodOrders) {
       const deliveryDate = order.lastTracking?.StatusDateTime;
 
       if (!deliveryDate) {
         console.log(`⚠ Skipped: No delivery date for order ${order._id}`);
+        continue;
+      }
+
+      if (!order.userId) {
+        console.log(`⚠ Skipped: No userId for order ${order._id}`);
         continue;
       }
 
@@ -178,13 +202,34 @@ const codToBeRemitteds = async () => {
           { upsert: true, new: true, session }
         );
 
-        // 2️⃣ Prevent duplicate orders
-        const isDuplicate = sameDateEntry.orderDetails.some(
-          (d) => String(d.customOrderId) === customOrderId
-        );
+        // 2️⃣ Prevent duplicate orders (Global check across all SameDateDelivered documents for the user)
+        const globalDuplicate = await SameDateDelivered.findOne({
+          userId: order.userId,
+          orderIds: order._id
+        }).session(session);
 
-        if (isDuplicate) {
-          console.log(`⛔ Duplicate order ignored: ${order.orderId}`);
+        if (globalDuplicate) {
+          if (globalDuplicate.status === "Completed") {
+            const userRemittance = remittanceMap.get(order.userId.toString());
+            const userAfterPlans = afterPlanMap.get(order.userId.toString()) || [];
+
+            const alreadyRemittedOrderIds = new Set(
+              userRemittance?.remittanceData?.flatMap((r) => r.orderDetails?.orders?.map((id) => id.toString()) || []) || []
+            );
+            const alreadyInAfterPlanOrderIds = new Set(
+              userAfterPlans.flatMap((p) => p.orderDetails?.orders?.map((id) => id.toString()) || [])
+            );
+
+            if (!alreadyRemittedOrderIds.has(order._id.toString()) && !alreadyInAfterPlanOrderIds.has(order._id.toString())) {
+              console.log(`♻️ Stranded order detected: ${order.orderId}. Resetting SameDateDelivered to Pending.`);
+              await SameDateDelivered.updateOne(
+                { _id: globalDuplicate._id },
+                { $set: { status: "Pending" } },
+                { session }
+              );
+            }
+          }
+          console.log(`⛔ Duplicate order ignored (already exists globally): ${order.orderId}`);
           return; // nothing to update
         }
 
@@ -201,6 +246,7 @@ const codToBeRemitteds = async () => {
               orderIds: order._id,
             },
             $inc: { totalCod: codAmount },
+            $set: { status: "Pending" }, // Reset status to Pending to ensure late deliveries are processed
           },
           { session }
         );
@@ -241,6 +287,13 @@ if (process.env.NODE_ENV === "production") {
 }
 // codToBeRemitteds();
 
+const getStartOfDayIST = (date = new Date()) => {
+  const utcTime = date.getTime() + (date.getTimezoneOffset() * 60000);
+  const istTime = new Date(utcTime + (5.5 * 3600 * 1000));
+  istTime.setUTCHours(0, 0, 0, 0);
+  return istTime;
+};
+
 const remittanceScheduleData = async () => {
   try {
     const [existingSameDateDelivered, afterCodPlans] = await Promise.all([
@@ -252,8 +305,8 @@ const remittanceScheduleData = async () => {
       `Found ${existingSameDateDelivered.length} pending SameDateDelivered entries and ${afterCodPlans.length} afterPlan entries.`
     );
 
-    const todayIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-    const day = todayIST.getDay(); // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
+    const startOfTodayIST = getStartOfDayIST(new Date());
+    const day = startOfTodayIST.getUTCDay(); // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
     const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const todayDayName = DAY_NAMES[day];
     const isTodayMWF = [1, 3, 5].includes(day); // Mon, Wed, Fri
@@ -286,14 +339,12 @@ const remittanceScheduleData = async () => {
 
       for (const remittance of userSameDateEntries) {
         const deliveryDate = remittance.deliveryDate;
-        const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-        const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
-        const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
-        const dayDiff = Math.floor((startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24));
+        const startOfOrderIST = getStartOfDayIST(deliveryDate);
+        const dayDiff = Math.round((startOfTodayIST.getTime() - startOfOrderIST.getTime()) / (1000 * 60 * 60 * 24));
 
         const shouldRemitToday = codPlan.isCustom
-          ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
-          : (isTodayMWF && dayDiff > planDays);
+          ? (codPlan.remittanceDay === todayDayName && dayDiff >= planDays)
+          : (isTodayMWF && dayDiff >= planDays);
 
         if (shouldRemitToday) {
           eligibleSameDate.push(remittance);
@@ -311,16 +362,14 @@ const remittanceScheduleData = async () => {
       for (const plan of userAfterPlanEntries) {
         const deliveryDate =
           plan.deliveryDate ||
-          (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : todayIST);
+          (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : new Date());
 
-        const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-        const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
-        const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
-        const dayDiff = Math.floor((startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24));
+        const startOfOrderIST = getStartOfDayIST(deliveryDate);
+        const dayDiff = Math.round((startOfTodayIST.getTime() - startOfOrderIST.getTime()) / (1000 * 60 * 60 * 24));
 
         const shouldMoveToAdmin = codPlan.isCustom
-          ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
-          : (isTodayMWF && dayDiff > planDays);
+          ? (codPlan.remittanceDay === todayDayName && dayDiff >= planDays)
+          : (isTodayMWF && dayDiff >= planDays);
 
         if (shouldMoveToAdmin) {
           eligibleAfterPlan.push(plan);
@@ -331,23 +380,47 @@ const remittanceScheduleData = async () => {
       await runTransaction(async (session) => {
         // 1. Save new deferred entries to afterPlan and mark SameDateDelivered as Completed
         if (deferredSameDate.length > 0) {
-          const remittanceEntries = deferredSameDate.map((remittance) => ({
-            date: todayIST,
-            userId: remittance.userId,
-            userName: user ? user.fullname : "",
-            totalCod: remittance.totalCod,
-            orderDetails: {
-              date: todayIST,
-              codcal: remittance.totalCod,
-              orders: [...remittance.orderIds],
-            },
-            deliveryDate: remittance.deliveryDate,
-            status: "Pending",
-            planName: codPlan.planName,
-            planDays: planDays,
-          }));
+          const userRemittance = await codRemittance.findOne({ userId }).session(session);
+          const alreadyRemittedOrderIds = new Set(
+            userRemittance?.remittanceData?.flatMap((r) => r.orderDetails?.orders?.filter(Boolean).map((id) => id.toString()) || []) || []
+          );
+          const existingAfterPlanOrderIds = new Set(
+            userAfterPlanEntries.flatMap((p) => p.orderDetails?.orders?.filter(Boolean).map((id) => id.toString()) || [])
+          );
 
-          await afterPlan.create(remittanceEntries, { session });
+          const remittanceEntries = [];
+          for (const remittance of deferredSameDate) {
+            const filteredOrderIds = remittance.orderIds.filter(
+              (id) => id && !existingAfterPlanOrderIds.has(id.toString()) && !alreadyRemittedOrderIds.has(id.toString())
+            );
+
+            if (filteredOrderIds.length > 0) {
+              const actualOrders = await Order.find({ _id: { $in: filteredOrderIds } }).session(session).lean().select("paymentDetails");
+              const filteredTotalCod = Number(
+                actualOrders.reduce((sum, o) => sum + Number(o.paymentDetails?.amount || 0), 0).toFixed(2)
+              );
+
+              remittanceEntries.push({
+                date: todayIST,
+                userId: remittance.userId,
+                userName: user ? user.fullname : "",
+                totalCod: filteredTotalCod,
+                orderDetails: {
+                  date: todayIST,
+                  codcal: filteredTotalCod,
+                  orders: filteredOrderIds,
+                },
+                deliveryDate: remittance.deliveryDate,
+                status: "Pending",
+                planName: codPlan.planName,
+                planDays: planDays,
+              });
+            }
+          }
+
+          if (remittanceEntries.length > 0) {
+            await afterPlan.create(remittanceEntries, { session });
+          }
           await SameDateDelivered.updateMany(
             { _id: { $in: deferredSameDate.map((e) => e._id) } },
             { $set: { status: "Completed" } },
@@ -363,22 +436,35 @@ const remittanceScheduleData = async () => {
           ];
 
           // Deduplicate order IDs in memory
-          const uniqueOrderIds = [...new Set(rawOrderIds.map((id) => id.toString()))];
+          const uniqueOrderIds = [...new Set(rawOrderIds.filter(Boolean).map((id) => id.toString()))];
 
           // Fetch user's existing remittance entries to avoid duplicate processing
-          const userRemittance = await codRemittance.findOne({ userId });
+          const userRemittance = await codRemittance.findOne({ userId }).session(session);
           const alreadyRemittedOrderIds = new Set(
-            userRemittance?.remittanceData?.flatMap((r) => r.orderDetails?.orders?.map((id) => id.toString()) || []) || []
+            userRemittance?.remittanceData?.flatMap((r) => r.orderDetails?.orders?.filter(Boolean).map((id) => id.toString()) || []) || []
           );
 
-          // Filter out already processed/remitted order IDs
-          const nonRemittedOrderIds = uniqueOrderIds.filter((id) => !alreadyRemittedOrderIds.has(id));
+          const existingAfterPlanOrderIds = new Set(
+            userAfterPlanEntries.flatMap((p) => p.orderDetails?.orders?.filter(Boolean).map((id) => id.toString()) || [])
+          );
+          const eligibleAfterPlanOrderIds = new Set(
+            eligibleAfterPlan.flatMap((p) => p.orderDetails?.orders?.filter(Boolean).map((id) => id.toString()) || [])
+          );
+          // Non-eligible afterPlan order IDs: those that are in existingAfterPlanOrderIds but NOT in eligibleAfterPlanOrderIds
+          const nonEligibleAfterPlanOrderIds = new Set(
+            [...existingAfterPlanOrderIds].filter((id) => !eligibleAfterPlanOrderIds.has(id))
+          );
+
+          // Filter out already processed/remitted order IDs and non-eligible afterPlan order IDs
+          const nonRemittedOrderIds = uniqueOrderIds.filter(
+            (id) => !alreadyRemittedOrderIds.has(id) && !nonEligibleAfterPlanOrderIds.has(id)
+          );
 
           let finalOrderIds = [];
           let aggregatedTotalCod = 0;
 
           if (nonRemittedOrderIds.length > 0) {
-            const actualOrders = await Order.find({ _id: { $in: nonRemittedOrderIds } }).lean().select("paymentDetails");
+            const actualOrders = await Order.find({ _id: { $in: nonRemittedOrderIds } }).session(session).lean().select("paymentDetails");
             finalOrderIds = actualOrders.map((o) => o._id);
             aggregatedTotalCod = Number(
               actualOrders.reduce((sum, o) => sum + Number(o.paymentDetails?.amount || 0), 0).toFixed(2)
@@ -508,12 +594,10 @@ const processAndRemit = async (plan, session) => {
   const deliveryDate =
     plan.deliveryDate ||
     (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : new Date());
-  const todayIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
-  const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
-  const dayDiff = Math.floor(
-    (startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24)
+  const startOfTodayIST = getStartOfDayIST(new Date());
+  const startOfOrderIST = getStartOfDayIST(deliveryDate);
+  const dayDiff = Math.round(
+    (startOfTodayIST.getTime() - startOfOrderIST.getTime()) / (1000 * 60 * 60 * 24)
   );
 
   // CodRemittance logic as per your initial approach
@@ -650,6 +734,29 @@ const processAndRemit = async (plan, session) => {
 
   // Save to adminCodRemittance
   await new adminCodRemittance(adminEntry).save({ session });
+
+  // Sync corresponding orders status to Paid in CodRemittanceOrdersModel if the remittance is Paid immediately
+  if (adminEntry.status === "Paid" && plan.orderDetails?.orders) {
+    const orderIds = plan.orderDetails.orders.filter(Boolean);
+    if (orderIds.length > 0) {
+      const orders = await Order.find({ _id: { $in: orderIds } }).session(session).lean().select("orderId awb_number");
+      const customOrderIds = orders.map(o => String(o.orderId)).filter(Boolean);
+      const awbs = orders.map(o => String(o.awb_number)).filter(Boolean);
+
+      if (customOrderIds.length > 0 || awbs.length > 0) {
+        await CodRemittanceOrdersModel.updateMany(
+          {
+            $or: [
+              { orderID: { $in: customOrderIds } },
+              { AWB_Number: { $in: awbs } }
+            ]
+          },
+          { $set: { status: "Paid" } },
+          { session }
+        );
+      }
+    }
+  }
 };
 
 const fetchExtraData = async () => {
@@ -685,14 +792,13 @@ const fetchExtraData = async () => {
           plan.deliveryDate ||
           (plan.orderDetails?.date ? new Date(plan.orderDetails.date) : todayIST);
 
-        const orderDateIST = new Date(deliveryDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-        const startOfTodayIST = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
-        const startOfOrderIST = new Date(orderDateIST.getFullYear(), orderDateIST.getMonth(), orderDateIST.getDate());
-        const dayDiff = Math.floor((startOfTodayIST - startOfOrderIST) / (1000 * 60 * 60 * 24));
+        const startOfTodayIST = getStartOfDayIST(new Date());
+        const startOfOrderIST = getStartOfDayIST(deliveryDate);
+        const dayDiff = Math.round((startOfTodayIST.getTime() - startOfOrderIST.getTime()) / (1000 * 60 * 60 * 24));
 
         const shouldMoveToAdmin = codPlan.isCustom
-          ? (codPlan.remittanceDay === todayDayName && dayDiff > planDays)
-          : (isTodayMWF && dayDiff > planDays);
+          ? (codPlan.remittanceDay === todayDayName && dayDiff >= planDays)
+          : (isTodayMWF && dayDiff >= planDays);
 
         if (shouldMoveToAdmin) {
           eligiblePlans.push(plan);
@@ -1572,6 +1678,7 @@ const courierCodRemittance = async (req, res) => {
       matchStage.courierServiceName = { $in: couriers.map(c => new RegExp(`^${c}$`, "i")) };
     }
 
+
     // Fetch and paginate in MongoDB
     const aggregationPipeline = [
       { $match: matchStage },
@@ -1586,6 +1693,22 @@ const courierCodRemittance = async (req, res) => {
     if (limit) {
       aggregationPipeline.push({ $skip: skip }, { $limit: limit });
     }
+
+    aggregationPipeline.push(
+      {
+        $lookup: {
+          from: "users",
+          localField: "userId",
+          foreignField: "_id",
+          as: "userInfo",
+        },
+      },
+      {
+        $addFields: {
+          userId: { $ifNull: [{ $arrayElemAt: ["$userInfo.userId", 0] }, "$userId"] },
+        },
+      }
+    );
 
     const orders = await CourierCodRemittance.aggregate(aggregationPipeline);
 
@@ -2088,88 +2211,154 @@ const CodRemittanceOrder = async (req, res) => {
 
     const targetUserId = userId || selectedUserId || userSearch;
 
-    let allocatedUserIds = null;
-    let allowedOrderIds = null;
+    const andConditions = [];
 
     // Employee role filtering
     if (req.employee?.employeeId) {
       const allocations = await AllocateRole.find({
         employeeId: req.employee.employeeId,
       });
-      allocatedUserIds = allocations.map((a) => a.sellerMongoId.toString());
+      const allocatedUserIds = allocations.map((a) => a.sellerMongoId.toString());
 
       if (!allocatedUserIds.length) {
         return res.status(200).json({
           success: true,
           message: "No allocated users",
           total: 0,
-          data: { orders: [] },
+          page,
+          limit: limit || "All",
+          totalPages: 1,
+          data: {
+            totalCODAmount: 0,
+            paidCODAmount: 0,
+            pendingCODAmount: 0,
+            orders: [],
+          },
         });
       }
-
-      const orders = await Order.find(
-        {
-          userId: {
-            $in: allocatedUserIds.map((id) => new mongoose.Types.ObjectId(id)),
-          },
-        },
-        { orderId: 1 }
-      ).lean();
-
-      allowedOrderIds = orders.map((o) => o.orderId?.toString());
+      andConditions.push({
+        userId: { $in: allocatedUserIds.map((id) => new mongoose.Types.ObjectId(id)) }
+      });
     }
 
-    // Build MongoDB match object
-    let matchStage = {};
-    if (allowedOrderIds) {
-      matchStage.orderID = { $in: allowedOrderIds };
-    }
     if (statusFilter) {
-      matchStage.status = statusFilter;
+      andConditions.push({ status: statusFilter });
     }
 
     if (targetUserId) {
       try {
         const userDoc = await User.findById(targetUserId);
         if (userDoc) {
-          matchStage.$or = [
-            { userId: new mongoose.Types.ObjectId(targetUserId) },
-            { Email: { $regex: new RegExp(`^${userDoc.email}$`, "i") } }
-          ];
+          andConditions.push({
+            $or: [
+              { userId: new mongoose.Types.ObjectId(targetUserId) },
+              { Email: { $regex: new RegExp(`^${userDoc.email}$`, "i") } }
+            ]
+          });
         } else if (mongoose.Types.ObjectId.isValid(targetUserId)) {
-          matchStage.userId = new mongoose.Types.ObjectId(targetUserId);
+          andConditions.push({ userId: new mongoose.Types.ObjectId(targetUserId) });
         }
       } catch (err) {
         if (mongoose.Types.ObjectId.isValid(targetUserId)) {
-          matchStage.userId = new mongoose.Types.ObjectId(targetUserId);
+          andConditions.push({ userId: new mongoose.Types.ObjectId(targetUserId) });
         }
       }
     }
+
     if (startDate && endDate) {
-      matchStage.createdAt = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
+      andConditions.push({
+        Date: {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate),
+        }
+      });
     }
 
     if (orderID) {
       const filterValues = orderID.split(",").map((val) => val.trim());
-      matchStage.orderID = { $in: filterValues };
+      andConditions.push({ orderID: { $in: filterValues } });
     }
 
     if (awbNumber) {
       const filterValues = awbNumber.split(",").map((val) => val.trim());
-      matchStage.AWB_Number = { $in: filterValues };
+      andConditions.push({ AWB_Number: { $in: filterValues } });
     }
 
     if (courierProvider) {
       const couriers = courierProvider.split(",").map(c => c.trim());
-      matchStage.courierProvider = { $in: couriers.map(c => new RegExp(`^${c}$`, "i")) };
+      andConditions.push({ courierProvider: { $in: couriers.map(c => new RegExp(`^${c}$`, "i")) } });
     }
 
-    // MongoDB aggregation
-    const allOrders = await CodRemittanceOrdersModel.aggregate([
+    if (searchFilter) {
+      const searchRegex = new RegExp(searchFilter.trim(), "i");
+      andConditions.push({
+        $or: [
+          { userName: { $regex: searchRegex } },
+          { PhoneNumber: { $regex: searchRegex } },
+          { Email: { $regex: searchRegex } }
+        ]
+      });
+    }
+
+    let matchStage = {};
+    if (andConditions.length > 0) {
+      matchStage = { $and: andConditions };
+    }
+
+    // Calculate totals directly in MongoDB (runs extremely fast with indexes)
+    const totalsAgg = await CodRemittanceOrdersModel.aggregate([
       { $match: matchStage },
+      {
+        $group: {
+          _id: null,
+          totalCODAmount: {
+            $sum: { $toDouble: { $ifNull: ["$CODAmount", 0] } },
+          },
+          paidCODAmount: {
+            $sum: {
+              $cond: [
+                { $eq: ["$status", "Paid"] },
+                { $toDouble: { $ifNull: ["$CODAmount", 0] } },
+                0,
+              ],
+            },
+          },
+          pendingCODAmount: {
+            $sum: {
+              $cond: [
+                { $eq: ["$status", "Pending"] },
+                { $toDouble: { $ifNull: ["$CODAmount", 0] } },
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    const totals = totalsAgg[0] || {
+      totalCODAmount: 0,
+      paidCODAmount: 0,
+      pendingCODAmount: 0,
+    };
+
+    // Count total matching records directly in DB
+    const totalCount = await CodRemittanceOrdersModel.countDocuments(matchStage);
+    const totalPages = limit ? Math.ceil(totalCount / limit) : 1;
+
+    // Build the aggregation pipeline for paginated records.
+    // Notice that pagination happens BEFORE the $lookup join.
+    // This resolves the N+1 join performance problem completely.
+    const aggregationPipeline = [
+      { $match: matchStage },
+      { $sort: { _id: -1 } },
+    ];
+
+    if (limit) {
+      aggregationPipeline.push({ $skip: skip }, { $limit: limit });
+    }
+
+    aggregationPipeline.push(
       {
         $lookup: {
           from: "users",
@@ -2183,41 +2372,11 @@ const CodRemittanceOrder = async (req, res) => {
           codAmountNum: { $toDouble: { $ifNull: ["$CODAmount", 0] } },
           userId: { $ifNull: [{ $arrayElemAt: ["$userInfo.userId", 0] }, "$userId"] },
         },
-      },
-      { $sort: { _id: -1 } },
-    ]);
-
-    // Filter by searchFilter in memory (name/phone/email search is trickier in MongoDB without $regex)
-    let filteredOrders = allOrders;
-    if (searchFilter) {
-      const lowerCaseFilter = searchFilter.toLowerCase();
-      filteredOrders = allOrders.filter(
-        (order) =>
-          (order.userName || "").toLowerCase().includes(lowerCaseFilter) ||
-          (order.PhoneNumber || "").toLowerCase().includes(lowerCaseFilter) ||
-          (order.Email || "").toLowerCase().includes(lowerCaseFilter)
-      );
-    }
-
-    // Pagination
-    const totalCount = filteredOrders.length;
-    const totalPages = limit ? Math.ceil(totalCount / limit) : 1;
-    const paginatedData = limit
-      ? filteredOrders.slice(skip, skip + limit)
-      : filteredOrders;
-
-    // Totals
-    const totalCODAmount = filteredOrders.reduce(
-      (sum, o) => sum + (o.codAmountNum || 0),
-      0
+      }
     );
-    const paidCODAmount = filteredOrders
-      .filter((o) => o.status === "Paid")
-      .reduce((sum, o) => sum + (o.codAmountNum || 0), 0);
-    const pendingCODAmount = filteredOrders
-      .filter((o) => o.status === "Pending")
-      .reduce((sum, o) => sum + (o.codAmountNum || 0), 0);
-    // console.log("pagin", paginatedData);
+
+    const orders = await CodRemittanceOrdersModel.aggregate(aggregationPipeline);
+
     return res.status(200).json({
       success: true,
       message: "COD remittance orders retrieved successfully",
@@ -2226,10 +2385,10 @@ const CodRemittanceOrder = async (req, res) => {
       limit: limit || "All",
       totalPages,
       data: {
-        totalCODAmount,
-        paidCODAmount,
-        pendingCODAmount,
-        orders: paginatedData,
+        totalCODAmount: totals.totalCODAmount,
+        paidCODAmount: totals.paidCODAmount,
+        pendingCODAmount: totals.pendingCODAmount,
+        orders,
       },
     });
   } catch (error) {
@@ -2966,6 +3125,8 @@ const transferCOD = async (req, res) => {
       (remRecord.RemittanceInitiated || 0) - totalPayable - totalAdjusted;
     remRecord.TotalCODRemitted =
       (Number(remRecord.TotalCODRemitted) || 0) + totalPayable;
+    remRecord.TotalDeductionfromCOD =
+      (Number(remRecord.TotalDeductionfromCOD) || 0) + totalAdjusted;
 
     await remRecord.save({ session });
 
@@ -3015,6 +3176,29 @@ const transferCOD = async (req, res) => {
         },
         { new: true, session }
       );
+
+      // Sync corresponding orders status to Paid in CodRemittanceOrdersModel
+      if (status === "Paid" && entry?.orderDetails?.orders) {
+        const orderIds = entry.orderDetails.orders.filter(Boolean);
+        if (orderIds.length > 0) {
+          const orders = await Order.find({ _id: { $in: orderIds } }).session(session).lean().select("orderId awb_number");
+          const customOrderIds = orders.map(o => String(o.orderId)).filter(Boolean);
+          const awbs = orders.map(o => String(o.awb_number)).filter(Boolean);
+
+          if (customOrderIds.length > 0 || awbs.length > 0) {
+            await CodRemittanceOrdersModel.updateMany(
+              {
+                $or: [
+                  { orderID: { $in: customOrderIds } },
+                  { AWB_Number: { $in: awbs } }
+                ]
+              },
+              { $set: { status: "Paid" } },
+              { session }
+            );
+          }
+        }
+      }
     }
 
     await session.commitTransaction();
@@ -3466,6 +3650,29 @@ const uploadBankResponse = async (req, res) => {
         { new: true, session }
       );
 
+      // Sync corresponding orders status to Paid in CodRemittanceOrdersModel
+      if (matchedEntry?.orderDetails?.orders) {
+        const orderIds = matchedEntry.orderDetails.orders.filter(Boolean);
+        if (orderIds.length > 0) {
+          const orders = await Order.find({ _id: { $in: orderIds } }).session(session).lean().select("orderId awb_number");
+          const customOrderIds = orders.map(o => String(o.orderId)).filter(Boolean);
+          const awbs = orders.map(o => String(o.awb_number)).filter(Boolean);
+
+          if (customOrderIds.length > 0 || awbs.length > 0) {
+            await CodRemittanceOrdersModel.updateMany(
+              {
+                $or: [
+                  { orderID: { $in: customOrderIds } },
+                  { AWB_Number: { $in: awbs } }
+                ]
+              },
+              { $set: { status: "Paid" } },
+              { session }
+            );
+          }
+        }
+      }
+
       results.push({ beneficiaryAccount, amount: paymentAmount, remittanceId, status: "success", utr: utrNumber });
     }
 
@@ -3640,8 +3847,8 @@ const correctRemittanceData = async (remittanceId, dryRun = false) => {
     const oldTotalCodConsumed = Number(((oldCodAvailable + oldCharges) + oldCreditedAmount).toFixed(2));
 
     const deltaTotalCodConsumed = Number((oldTotalCodConsumed - newTotalCodConsumed).toFixed(2));
-    const deltaPayoutToClient   = Number((oldCodAvailable - newCodAvailable).toFixed(2));
-    const deltaTotalDeduction   = Number(
+    const deltaPayoutToClient = Number((oldCodAvailable - newCodAvailable).toFixed(2));
+    const deltaTotalDeduction = Number(
       (Number((oldCharges + oldCreditedAmount + oldExtraAmount).toFixed(2)) - newTotalDeduction).toFixed(2)
     );
 
@@ -3760,4 +3967,5 @@ module.exports = {
   validateExportedStatus,
   saveCustomCodPlan,
   correctRemittanceData,
+  remittanceScheduleData,
 };
