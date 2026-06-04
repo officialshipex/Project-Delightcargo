@@ -12,6 +12,7 @@ const {
   submitNdrToEkart,
   submitNdrToBoxdLogistics,
   submitNdrToProship,
+  submitNdrToShipexIndia,
 } = require("../services/ndrService");
 
 /**
@@ -158,6 +159,14 @@ const runNdrTask = async (orderId, actionDetails) => {
         new_phone: phone,
         new_pincode: pincode,
         scheduled_delivery_date: finalDate,
+      });
+    } else if (finalPartner === "ShipexIndia" || finalProvider === "ShipexIndia") {
+      apiResponse = await submitNdrToShipexIndia({
+        awb_number: finalAwb,
+        action,
+        comments: finalRemarks,
+        scheduled_delivery_date: finalDate,
+        phone,
       });
     } else {
       apiResponse = { success: false, message: "Unsupported provider" };

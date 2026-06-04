@@ -31,6 +31,7 @@ const { checkEkartServiceability } = require("../AllCouriers/Ekart/Couriers/cour
 const { checkServiceabilityBoxdLogistics } = require("../AllCouriers/BoxdLogistics/Courier/couriers.controller.js");
 const { checkProshipServiceability } = require("../AllCouriers/Proship/Courier/couriers.controller.js");
 const { checkServiceabilityShipRocket } = require("../AllCouriers/ShipRocket/Courier/couriers.controller.js");
+const { checkShipexIndiaServiceability } = require("../AllCouriers/ShipxIndia/Courier/couriers.controller.js");
 
 const calculateRate = async (req, res) => {
   try {
@@ -92,9 +93,26 @@ const calculateRate = async (req, res) => {
       if (!activeCouriersLower.includes(provider.toLowerCase())) continue;
       if (rc.status !== "Active") continue;
 
-      if (!["Delhivery", "Shree Maruti", "Dtdc", "Smartship", "Amazon Shipping", "EcomExpress", "Zipypost", "Ekart", "BoxdLogistics", "Proship", "Shiprocket"].includes(provider)) continue;
+      if (!["Delhivery", "Shree Maruti", "Dtdc", "Smartship", "Amazon Shipping", "EcomExpress", "Zipypost", "Ekart", "BoxdLogistics", "Proship", "Shiprocket", "ShipexIndia"].includes(provider)) continue;
 
-      if (provider === "BoxdLogistics") {
+      if (provider === "ShipexIndia") {
+        if (!serviceabilityCache[provider]) {
+          const payload = {
+            pickUpPincode,
+            deliveryPincode,
+            applicableWeight,
+            length: dimensions?.length || 10,
+            width: dimensions?.width || 10,
+            height: dimensions?.height || 10,
+            paymentType,
+            declaredValue,
+          };
+          serviceabilityCache[provider] = await checkShipexIndiaServiceability(payload);
+        }
+        const shipexResult = serviceabilityCache[provider];
+        if (!shipexResult || shipexResult.success === false) continue;
+        serviceable = { success: true };
+      } else if (provider === "BoxdLogistics") {
         if (!serviceabilityCache[provider]) {
           const payload = {
             pickupPincode: pickUpPincode,

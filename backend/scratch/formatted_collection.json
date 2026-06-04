@@ -1,0 +1,1859 @@
+{
+  "info": {
+    "_postman_id": "c22de9e0-6d61-4ddb-8cc7-58b041915923",
+    "name": "ShipexIndia API Guide",
+    "schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json",
+    "toc": [],
+    "description": "<html><head></head><body></body></html>",
+    "owner": "32361120",
+    "collectionId": "c22de9e0-6d61-4ddb-8cc7-58b041915923",
+    "publishedId": "2sB3HetiH6",
+    "public": true,
+    "customColor": {
+      "top-bar": "FFFFFF",
+      "right-sidebar": "303030",
+      "highlight": "FF6C37"
+    },
+    "publishDate": "2025-08-25T08:27:23.000Z"
+  },
+  "item": [
+    {
+      "name": "Create Order",
+      "id": "6bb78684-6543-4aec-8275-1eb2b87721d6",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NjEwOTM2MywiZXhwIjoxNzU2MTk1NzYzfQ.vfbrr_f0i7tifdTkAw2LHp3LaORQkOMsGfXI-GEiAK0",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"shipmentId\":8984810,\r\n  \"pickupAddress\": {\r\n    \"contactName\": \"John Doe\",\r\n    \"email\": \"john@example.com\",\r\n    \"phoneNumber\": \"9876543201\",\r\n    \"address\": \"123 Main St\",\r\n    \"pinCode\": \"560002\",\r\n    \"city\": \"Bangalore\",\r\n    \"state\": \"Karnataka\"\r\n  },\r\n  \"receiverAddress\": {\r\n    \"contactName\": \"Jane Smith\",\r\n    \"email\": \"jane@example.com\",\r\n    \"phoneNumber\": \"9123456781\",\r\n    \"address\": \"456 Market Ave\",\r\n    \"pinCode\": \"400002\",\r\n    \"city\": \"Mumbai\",\r\n    \"state\": \"Maharashtra\"\r\n  },\r\n  \"productDetails\": [\r\n    {\r\n      \"id\": \"1\",\r\n      \"quantity\": 2,\r\n      \"name\": \"T-Shirt\",\r\n      \"sku\": \"TSHIRT123\",\r\n      \"unitPrice\": \"499\"\r\n    }\r\n  ],\r\n  \"packageDetails\": {\r\n    \"deadWeight\": 0.5,//\"KG\"\r\n    \"applicableWeight\": 0.6,//\"KG\"\r\n    \"volumetricWeight\": {\r\n      \"length\": 10,//\"cm\"\r\n      \"width\": 15,//\"cm\"\r\n      \"height\": 5,//\"cm\"\r\n      \"calculatedWeight\": 0.6//\"KG\"\r\n    }\r\n  },\r\n  \"paymentDetails\": {\r\n    \"method\": \"COD\",//[\"COD\",\"Prepaid\"]\r\n    \"amount\": 998\r\n  }\r\n}\r\n",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/createOrder",
+        "description": "<p><strong>Endpoint:</strong><br /><code>POST https://api.shipexindia.com/v1/api/external/createOrder</code></p>\n<p><strong>Description:</strong></p>\n<p>This API is used to <strong>create a new shipment order</strong>. It requires sender (pickup) details, receiver details, product information, package dimensions, and payment details. A valid JWT token (from the Generate Token API) must be passed in the request header.</p>\n<p><strong>Headers:</strong></p>\n<ul>\n<li><p><code>Content-Type: application/json</code></p>\n</li>\n<li><p><code>Authorization: Bearer</code></p>\n</li>\n</ul>\n<p>Response (Success 200):</p>\n<p>{<br />\"success\": true,<br />\"message\": \"Order created successfully.\",<br />\"data\": {<br />\"orderId\": 566281,<br />\"clientOrderId\": 8984810,<br />\"status\": \"new\"<br />}<br />}</p>\n<p>400 Bad Request</p>\n<p>{<br />\"success\": false,<br />\"message\": \"Validation error\",<br />\"details\": \"Phone number must be exactly 10 digits\"<br />}</p>\n<p>401 Unauthorized</p>\n<p>{<br />\"success\": false,<br />\"message\": \"Invalid or expired token\"<br />}</p>\n",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "createOrder"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "b0d3e10f-0564-46ab-b78f-be468a11b898",
+          "name": "OrderCreation",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NjEwOTM2MywiZXhwIjoxNzU2MTk1NzYzfQ.vfbrr_f0i7tifdTkAw2LHp3LaORQkOMsGfXI-GEiAK0",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"shipmentId\":8984810,\r\n  \"pickupAddress\": {\r\n    \"contactName\": \"John Doe\",\r\n    \"email\": \"john@example.com\",\r\n    \"phoneNumber\": \"9876543201\",\r\n    \"address\": \"123 Main St\",\r\n    \"pinCode\": \"560002\",\r\n    \"city\": \"Bangalore\",\r\n    \"state\": \"Karnataka\"\r\n  },\r\n  \"receiverAddress\": {\r\n    \"contactName\": \"Jane Smith\",\r\n    \"email\": \"jane@example.com\",\r\n    \"phoneNumber\": \"9123456781\",\r\n    \"address\": \"456 Market Ave\",\r\n    \"pinCode\": \"400002\",\r\n    \"city\": \"Mumbai\",\r\n    \"state\": \"Maharashtra\"\r\n  },\r\n  \"productDetails\": [\r\n    {\r\n      \"id\": \"1\",\r\n      \"quantity\": 2,\r\n      \"name\": \"T-Shirt\",\r\n      \"sku\": \"TSHIRT123\",\r\n      \"unitPrice\": \"499\"\r\n    }\r\n  ],\r\n  \"packageDetails\": {\r\n    \"deadWeight\": 0.5,//\"KG\"\r\n    \"applicableWeight\": 0.6,//\"KG\"\r\n    \"volumetricWeight\": {\r\n      \"length\": 10,//\"cm\"\r\n      \"width\": 15,//\"cm\"\r\n      \"height\": 5,//\"cm\"\r\n      \"calculatedWeight\": 0.6//\"KG\"\r\n    }\r\n  },\r\n  \"paymentDetails\": {\r\n    \"method\": \"COD\",//[\"COD\",\"Prepaid\"]\r\n    \"amount\": 998\r\n  }\r\n}\r\n",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/createOrder"
+          },
+          "status": "Created",
+          "code": 201,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Mon, 25 Aug 2025 13:06:35 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "121"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"79-66RKSwcCU6KqGolwteHMFQB77BY\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"success\": true,\n    \"message\": \"Order created successfully.\",\n    \"data\": {\n        \"orderId\": 485888,\n        \"clientOrderId\": 8984810,\n        \"status\": \"new\"\n    }\n}"
+        }
+      ],
+      "_postman_id": "6bb78684-6543-4aec-8275-1eb2b87721d6"
+    },
+    {
+      "name": "Generate Token",
+      "id": "4a4823c4-0925-40c0-a47f-85a93c2ca141",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"email\": \"test@gmail.com\",\r\n  \"password\": \"Test@1234\"\r\n}\r\n",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/generateToken",
+        "description": "<p><strong>Endpoint:</strong><br /><code>POST https://api.shipexindia.com/v1/api/external/generateToken</code></p>\n<p><strong>Description:</strong></p>\n<p>This API authenticates a user using their email and password, and returns a <strong>JWT token</strong>. The token must be included in the <code>Authorization</code> header (<code>Bearer</code> ) for all further requests.</p>\n<p><strong>Headers:</strong></p>\n<ul>\n<li><code>Content-Type: application/json</code></li>\n</ul>\n<p>Request Body:</p>\n<p>{<br />\"email\": \"<a href=\"https://mailto:test@gmail.com\">test@gmail.com</a>\",<br />\"password\": \"test@1212\"<br />}</p>\n<p>Response (Success 200):</p>\n<p>{<br />\"success\": true,<br />\"message\": \"Token generated successfully\",<br />\"data\": {<br />\"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6...\"<br />}<br />}</p>\n<p>Error Responses:</p>\n<ul>\n<li>401 Unauthorized</li>\n</ul>\n<p>{<br />\"success\": false,<br />\"message\": \"Invalid email or password\"<br />}</p>\n<ul>\n<li>500 Internal Server Error</li>\n</ul>\n<p>{<br />\"success\": false,<br />\"message\": \"Something went wrong\"<br />}</p>\n",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "generateToken"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "32d4249e-997a-40df-a793-5f1872cdb9f3",
+          "name": "Generate Token",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"email\": \"test@gmail.com\",\r\n  \"password\": \"test@1010\"\r\n}\r\n",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/generateToken"
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Mon, 25 Aug 2025 08:09:23 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "412"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"19c-K42LzenfK9/n5lHa9f1EyacDdxw\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"success\": true,\n    \"message\": \"Token generated successfully\",\n    \"data\": {\n        \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NjEwOTM2MywiZXhwIjoxNzU2MTk1NzYzfQ.vfbrr_f0i7tifdTkAw2LHp3LaORQkOMsGfXI-GEiAK0\"\n    }\n}"
+        }
+      ],
+      "_postman_id": "4a4823c4-0925-40c0-a47f-85a93c2ca141"
+    },
+    {
+      "name": "Pincode Serviceability",
+      "id": "4f66d4e0-a8eb-43ff-b6bf-a1bc50b7d2d6",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MjkyODM4NywiZXhwIjoxNzYzMDE0Nzg3fQ.P1psbs4GDGicjV-9UHTBgWFdE9jIQdMlmD2zpskYDy0",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"pickUpPincode\": \"400001\",\r\n  \"deliveryPincode\": \"110011\",\r\n  \"applicableWeight\": 1.2,\r\n  \"length\": 40,\r\n  \"width\": 30,\r\n  \"height\": 20,\r\n  \"paymentType\": \"COD\",\r\n  \"declaredValue\": 1000\r\n}\r\n",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/pincodeServiceability",
+        "description": "<p><strong>Endpoint:</strong><br /><code>GET https://api.shipexindia.com/v1/api/external/pincodeServiceability</code></p>\n<p><strong>Description:</strong>  </p>\n<p>This API checks whether a shipment can be serviced between a given <strong>pickup pincode</strong> and <strong>delivery pincode</strong>, based on weight and payment type.</p>\n<p><strong>Headers:</strong></p>\n<ul>\n<li><p><code>Content-Type: application/json</code></p>\n</li>\n<li><p><code>Authorization: Bearer</code>  </p>\n<p>  Success Response (200 OK):  </p>\n<p>  {<br />  \"status\": \"success\",<br />  \"message\": \"Service available for these pincodes.\",<br />  \"serviceable\": true,<br />  \"pincodes\": {<br />  \"pickup\": \"756036\",<br />  \"delivery\": \"400001\"<br />  }<br />  }</p>\n</li>\n</ul>\n<p>Failure Response (400 Bad Request):  </p>\n<p>{<br />\"status\": \"failure\",<br />\"message\": \"Invalid request data\",<br />\"errors\": [<br />\"Pincode must be exactly 6 digits.\"<br />]<br />}</p>\n<p><strong>Error Responses:</strong></p>\n<ul>\n<li><p><strong>401 Unauthorized</strong> – Missing or invalid token</p>\n</li>\n<li><p><strong>500 Internal Server Error</strong> – Unexpected server issue</p>\n</li>\n</ul>\n<hr />\n<p><strong>Usage Notes:</strong></p>\n<ul>\n<li><p>Both <code>pickUpPincode</code> and <code>deliveryPincode</code> must be <strong>6 digits</strong>.</p>\n</li>\n<li><p><code>paymentType</code> accepts only <code>COD</code> or <code>Prepaid</code>.</p>\n</li>\n<li><p>Use this API before creating an order to validate <strong>serviceability</strong> between two locations.</p>\n</li>\n</ul>\n",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "pincodeServiceability"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "be98d3f8-d360-48e5-86f3-48696cd300ee",
+          "name": "Pincode Serviceability",
+          "originalRequest": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NjEwOTM2MywiZXhwIjoxNzU2MTk1NzYzfQ.vfbrr_f0i7tifdTkAw2LHp3LaORQkOMsGfXI-GEiAK0",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"pickUpPincode\": \"756036\",\r\n  \"deliveryPincode\": \"400001\",\r\n  \"applicableWeight\": 2.5,\r\n  \"paymentType\": \"COD\",\r\n  \"declaredValue\": 5\r\n}\r\n",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/pincodeServiceability"
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Mon, 25 Aug 2025 13:06:57 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "140"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"8c-ufG9IBgCpl80DKH4kb9Jeu0cKjs\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"status\": \"success\",\n    \"message\": \"Service available for these pincodes.\",\n    \"serviceable\": true,\n    \"pincodes\": {\n        \"pickup\": \"756036\",\n        \"delivery\": \"400001\"\n    }\n}"
+        }
+      ],
+      "_postman_id": "4f66d4e0-a8eb-43ff-b6bf-a1bc50b7d2d6"
+    },
+    {
+      "name": "Rate Calculation",
+      "id": "f4123246-668b-485c-9d86-c1420fd6066c",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MjQ5MTkwMywiZXhwIjoxNzYyNTc4MzAzfQ.Ry5C_6e_ACTLzT8aog1T-WsBltwt7Up8IRqPaRYp9nU",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"orderId\":\"820590\"\r\n}\r\n"
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/serviceableCourierServices/rate",
+        "description": "<p><strong>Endpoint:</strong><br /><code>GET https://api.shipexindia.com/v1/api/external/serviceableCourierServices/rate</code></p>\n<p><strong>Description:</strong>  </p>\n<p>This API returns a list of <strong>available courier partners with their calculated rates, GST, and final charges</strong> for a given <code>orderId</code>. It helps merchants compare courier services and select the most cost-effective option.</p>\n<p><strong>Headers:</strong></p>\n<ul>\n<li><p><code>Content-Type: application/json</code></p>\n</li>\n<li><p><code>Authorization: Bearer</code></p>\n</li>\n</ul>\n<p>Success Response (200 OK):  </p>\n<p>{<br />\"status\": \"success\",<br />\"message\": \"Rate calculation successful.\",<br />\"data\": [<br />{<br />\"courierServiceName\": \"Dtdc Surface\",<br />\"courierId\": \"03\",<br />\"codCharges\": 0,<br />\"forward\": {<br />\"charges\": 50,<br />\"gst\": 9,<br />\"finalCharges\": 59<br />},<br />\"serviceable\": true<br />},<br />{<br />\"courierServiceName\": \"Bluedart Express\",<br />\"courierId\": \"04\",<br />\"codCharges\": 0,<br />\"forward\": {<br />\"charges\": 59,<br />\"gst\": 10.62,<br />\"finalCharges\": 70<br />},<br />\"serviceable\": true<br />}<br />]<br />}</p>\n<p>Failure Response (400 Bad Request):  </p>\n<p>{<br />\"status\": \"failure\",<br />\"message\": \"Invalid orderId\"<br />}</p>\n",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "serviceableCourierServices",
+            "rate"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "83691908-dc2e-4dd8-9da3-f1313dae294b",
+          "name": "Serviceable Courier Services with Rate",
+          "originalRequest": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NjEwOTM2MywiZXhwIjoxNzU2MTk1NzYzfQ.vfbrr_f0i7tifdTkAw2LHp3LaORQkOMsGfXI-GEiAK0",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"orderId\":\"485888\"\r\n}\r\n"
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/serviceableCourierServices/rate"
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Mon, 25 Aug 2025 13:07:16 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"9a6-/IrVOcz4w8UMsizJ7VDl0qQb8bs\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            },
+            {
+              "key": "Content-Encoding",
+              "value": "br"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"status\": \"success\",\n    \"message\": \"Rate calculation successful.\",\n    \"data\": [\n        {\n            \"courierServiceName\": \"Dtdc Surface\",\n            \"courierId\": \"03\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 50,\n                \"gst\": 9,\n                \"finalCharges\": 59\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Dtdc Surface 3KG\",\n            \"courierId\": \"03\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 101,\n                \"gst\": 18.18,\n                \"finalCharges\": 119\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Dtdc Surface 5KG\",\n            \"courierId\": \"03\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 194,\n                \"gst\": 34.92,\n                \"finalCharges\": 229\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Dtdc Surface 10KG\",\n            \"courierId\": \"03\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 388,\n                \"gst\": 69.84,\n                \"finalCharges\": 458\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Dtdc Air\",\n            \"courierId\": \"03\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 65,\n                \"gst\": 11.7,\n                \"finalCharges\": 77\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Delhivery Surface\",\n            \"courierId\": \"02\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 56,\n                \"gst\": 10.08,\n                \"finalCharges\": 66\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Delhivery Surface 1KG\",\n            \"courierId\": \"02\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 96,\n                \"gst\": 17.28,\n                \"finalCharges\": 113\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Delhivery Surface 2KG\",\n            \"courierId\": \"02\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 149,\n                \"gst\": 26.82,\n                \"finalCharges\": 176\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Delhivery Surface 5KG\",\n            \"courierId\": \"02\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 248,\n                \"gst\": 44.64,\n                \"finalCharges\": 293\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Delhivery Surface 10KG\",\n            \"courierId\": \"02\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 388,\n                \"gst\": 69.84,\n                \"finalCharges\": 458\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Amazon Shipping\",\n            \"courierId\": \"05\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 47,\n                \"gst\": 8.46,\n                \"finalCharges\": 55\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Amazon Shipping 1KG\",\n            \"courierId\": \"05\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 64,\n                \"gst\": 11.52,\n                \"finalCharges\": 76\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Amazon Shipping 2KG \",\n            \"courierId\": \"05\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 98,\n                \"gst\": 17.64,\n                \"finalCharges\": 116\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Amazon Shipping 5KG\",\n            \"courierId\": \"05\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 200,\n                \"gst\": 36,\n                \"finalCharges\": 236\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Amazon Shipping 10KG\",\n            \"courierId\": \"05\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 270,\n                \"gst\": 48.6,\n                \"finalCharges\": 319\n            },\n            \"serviceable\": true\n        },\n        {\n            \"courierServiceName\": \"Bluedart Express\",\n            \"courierId\": \"04\",\n            \"codCharges\": 0,\n            \"forward\": {\n                \"charges\": 59,\n                \"gst\": 10.62,\n                \"finalCharges\": 70\n            },\n            \"serviceable\": true\n        }\n    ]\n}"
+        }
+      ],
+      "_postman_id": "f4123246-668b-485c-9d86-c1420fd6066c"
+    },
+    {
+      "name": "Create Shipment",
+      "id": "befdda27-7187-49d9-896b-fede39b0a506",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MjQ5MTkwMywiZXhwIjoxNzYyNTc4MzAzfQ.Ry5C_6e_ACTLzT8aog1T-WsBltwt7Up8IRqPaRYp9nU",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"orderId\":\"820590\",\r\n    \"courierServiceName\":\"Amazon Surface 1KG\",\r\n    \"courierId\":\"05\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/orderBooking",
+        "description": "<p><strong>Endpoint:</strong><br /><code>POST https://api.shipexindia.com/v1/api/external/orderBooking</code></p>\n<p><strong>Description:</strong>  </p>\n<p>This API is used to <strong>book an order with a courier partner</strong> after it has been created. It validates the order, checks available courier rates, ensures sufficient wallet balance, and then books the shipment with the selected courier.</p>\n<hr />\n<h3 id=\"🔑-headers\">🔑 Headers</h3>\n<ul>\n<li><p><code>Content-Type: application/json</code></p>\n</li>\n<li><p><code>Authorization: Bearer</code></p>\n</li>\n</ul>\n<p>Success Response (200 OK):  </p>\n<p>{<br />\"status\": \"success\",<br />\"message\": \"Order booked and shipment created successfully.\",<br />\"data\": {<br />\"orderId\": \"338586\",<br />\"courierServiceName\": \"Delhivery Surface\",<br />\"courierId\": \"02\",<br />\"awb_number\": \"DEL123456789\",<br />\"labelUrl\": \"<a href=\"https://shipx.s3.amazonaws.com/labels/DEL123456789.pdf\">https://shipx.s3.amazonaws.com/labels/DEL123456789.pdf\"</a><br />}<br />}</p>\n<h3 id=\"failure-responses\">Failure Responses</h3>\n<p><strong>Invalid Request Data (400):</strong></p>\n<p>{<br />\"status\": \"failure\",<br />\"message\": \"Invalid request data\",<br />\"errors\": [<br />\"Order ID is required\",<br />\"Courier Service Name is required\"<br />]<br />}</p>\n<p>Order Not Found (404):  </p>\n<p>{<br />\"status\": \"failure\",<br />\"message\": \"Order with ID 338586 not found.\"<br />}StartFragmentUnexpected Error (500):EndFragment  </p>\n<p>{<br />\"status\": \"failure\",<br />\"message\": \"Unexpected server error while booking order. Please try again.\"<br />}</p>\n<ul>\n<li><p>Must pass a valid <code>orderId</code> from <strong>Create Order API</strong>.</p>\n</li>\n<li><p>Courier details (<code>courierServiceName</code> and <code>courierId</code>) must match those returned by the <strong>Serviceable Courier Services with Rate API</strong>.</p>\n</li>\n<li><p>Wallet balance must be <strong>greater than or equal to final shipping charges</strong>.</p>\n</li>\n<li><p>Returns AWB number and shipping label URL on success.</p>\n</li>\n</ul>\n",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "orderBooking"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "c535f498-b6f0-4abd-8d4b-6536d31f2c26",
+          "name": "order booking",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NjEyNzEwMCwiZXhwIjoxNzU2MjEzNTAwfQ.fovnJmjWqo_toz-T7ft0AYgdhOwMmKiKB7Eg9oRM7yo",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"orderId\":\"338586\",\r\n    \"courierServiceName\":\"Dtdc Surface\",\r\n    \"courierId\":\"03\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/orderBooking"
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Mon, 25 Aug 2025 13:08:25 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "204"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"cc-OSCSeQRrMt8NKDCe55nXPhTF9SM\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"status\": \"success\",\n    \"message\": \"Order booked and shipment created successfully.\",\n    \"data\": {\n        \"orderId\": \"338586\",\n        \"courierServiceName\": \"Dtdc Surface\",\n        \"courierId\": \"03\",\n        \"awb_number\": \"7D113288136\",\n        \"labelUrl\": null\n    }\n}"
+        }
+      ],
+      "_postman_id": "befdda27-7187-49d9-896b-fede39b0a506"
+    },
+    {
+      "name": "Cancel Order",
+      "id": "d64b93ed-5072-48ea-b944-aa792e10631e",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MjQ5MTkwMywiZXhwIjoxNzYyNTc4MzAzfQ.Ry5C_6e_ACTLzT8aog1T-WsBltwt7Up8IRqPaRYp9nU",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/cancelledOrder/364951482125",
+        "description": "<p><strong>Endpoint:</strong><br /><code>POST https://api.shipexindia.com/v1/api/external/cancelledOrder/:awb_number</code></p>\n<p><strong>Description:</strong>  </p>\n<p>This API is used to <strong>cancel a booked order shipment</strong> using its <strong>AWB number</strong>. On successful cancellation, the order status is updated and freight charges (if any) are refunded back to the user’s wallet.</p>\n<hr />\n<h3 id=\"🔑-headers\">🔑 Headers</h3>\n<ul>\n<li><p><code>Content-Type: application/json</code></p>\n</li>\n<li><p><code>Authorization: Bearer</code></p>\n</li>\n</ul>\n<p><strong>Example:</strong><br /><code>https://api.shipexindia.com/v1/api/external/cancelledOrder/7D113288118</code></p>\n<hr />\n<h3 id=\"request-body\">Request Body</h3>\n<p>None<br />Success Response (200 OK):<br />{<br />\"success\": true,<br />\"message\": \"Order cancelled successfully\"<br />}</p>\n<p>Failure Responses<br />Missing AWB Number (400):<br />{<br />\"error\": \"AWB number is required in params\"<br />}</p>\n<p>Order Not Found (404):<br />{<br />\"error\": \"Order with AWB number 7D113288118 not found.\"<br />}</p>\n<p><strong>Internal Server Error (500):</strong></p>\n<p>{<br />\"error\": \"An internal error occurred while cancelling the order.\"<br />}</p>\n<h3 id=\"notes\">Notes</h3>\n<ul>\n<li><p>Only orders with status <strong>\"Ready To Ship\"</strong> can be cancelled.</p>\n</li>\n<li><p>Orders with status <code>\"Cancelled\"</code> or <code>\"new\"</code> <strong>cannot</strong> be cancelled again.</p>\n</li>\n<li><p>On successful cancellation:</p>\n<ul>\n<li><p>Order status is updated.</p>\n</li>\n<li><p>Wallet is credited back with freight charges (if applicable).</p>\n</li>\n<li><p>Tracking history is updated with a <code>\"Cancelled\"</code> status.</p>\n</li>\n</ul>\n</li>\n</ul>\n",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "cancelledOrder",
+            "364951482125"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "9c2cfbd2-a2d1-419a-b0fa-9374f978caa6",
+          "name": "Cancelled Booking",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NjEyNzEwMCwiZXhwIjoxNzU2MjEzNTAwfQ.fovnJmjWqo_toz-T7ft0AYgdhOwMmKiKB7Eg9oRM7yo",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/cancelledOrder/7D113288136"
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Mon, 25 Aug 2025 13:11:02 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "57"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"39-E16ddvkR/k3D6bIZq+QkAldDa5Y\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"success\": true,\n    \"message\": \"Order cancelled successfully\"\n}"
+        }
+      ],
+      "_postman_id": "d64b93ed-5072-48ea-b944-aa792e10631e"
+    },
+    {
+      "name": "Tracking",
+      "id": "ea6532d4-3aa1-449f-9df4-1f520bed4622",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"userId\": \"00000\",\r\n  \"awb\": \"SHIP40000000265\"\r\n}\r\n"
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/trackOrder",
+        "description": "<p><strong>Endpoint:</strong><br /><code>GET https://api.shipexindia.com/v1/api/external/trackOrder/:awb_number</code></p>\n<p><strong>Description:</strong>  </p>\n<p>This API allows users to <strong>track their shipment</strong> using an <strong>AWB number</strong>. It returns the current order details and the complete tracking history.</p>\n<hr />\n<h3 id=\"🔑-headers\">🔑 Headers</h3>\n<ul>\n<li><p><code>Content-Type: application/json</code></p>\n</li>\n<li><p><code>Authorization: Bearer</code>  </p>\n<p>  <strong>Example:</strong><br />  <code>https://api.shipexindia.com/v1/api/external/trackOrder/I75009044</code>  </p>\n<p>  Success Response (200 OK)  </p>\n<p>  {<br />  \"success\": true,<br />  \"data\": {<br />  \"awb_number\": \"I75009044\",<br />  \"orderId\": \"338586\",<br />  \"status\": \"In Transit\",<br />  \"courierServiceName\": \"Delhivery Surface\",<br />  \"tracking\": [<br />  {<br />  \"status\": \"Order Booked\",<br />  \"location\": \"Mumbai\",<br />  \"dateTime\": \"2025-08-23T10:15:00Z\",<br />  \"instructions\": \"Shipment created\"<br />  },<br />  {<br />  \"status\": \"Dispatched\",<br />  \"location\": \"Mumbai Hub\",<br />  \"dateTime\": \"2025-08-23T18:30:00Z\",<br />  \"instructions\": \"Left origin facility\"<br />  },<br />  {<br />  \"status\": \"In Transit\",<br />  \"location\": \"Delhi\",<br />  \"dateTime\": \"2025-08-24T12:10:00Z\",<br />  \"instructions\": \"Arrived at destination hub\"<br />  }<br />  ]<br />  }<br />  }</p>\n</li>\n</ul>\n<p>Failure Responses<br />Order Not Found or Unauthorized (404):  </p>\n<p>{<br />\"success\": false,<br />\"message\": \"Order not found or you don't have access to this order\"<br />}</p>\n<p>Internal Server Error (500):  </p>\n<p>{<br />\"success\": false,<br />\"message\": \"Internal server error\"<br />}</p>\n<p>Notes</p>\n<ul>\n<li><p>API ensures that <strong>only the owner of the order</strong> (based on <code>userId</code>) can track it.</p>\n</li>\n<li><p>Tracking data includes:</p>\n<ul>\n<li><p><code>status</code> → Current shipment state</p>\n</li>\n<li><p><code>location</code> → Facility/City where the scan happened</p>\n</li>\n<li><p><code>dateTime</code> → Event timestamp</p>\n</li>\n<li><p><code>instructions</code> → Courier remarks</p>\n</li>\n</ul>\n</li>\n<li><p>If no tracking events exist, <code>\"tracking\": []</code> will be returned.</p>\n</li>\n</ul>\n",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "trackOrder"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "1b07a477-cc94-4351-87b4-63ccf9554dd9",
+          "name": "Tracking",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "",
+                "value": "",
+                "type": "text",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"userId\": \"00000\",\r\n  \"awb\": \"SHIP40000000265\"\r\n}\r\n"
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/trackOrder"
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Fri, 14 Nov 2025 11:00:01 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "474"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"1da-0e29iuoHWpjvhibuC7BMrn9KUuU\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"success\": true,\n    \"data\": {\n        \"awb_number\": \"SHIP40000000265\",\n        \"orderId\": 355925,\n        \"status\": \"Ready To Ship\",\n        \"courierServiceName\": \"Shree Maruti Surface 0.5KG\",\n        \"tracking\": [\n            {\n                \"status\": \"ORDER_CONFIRMED\",\n                \"location\": \"Bangalore\",\n                \"dateTime\": \"2025-11-01T14:35:30.091Z\",\n                \"instructions\": \"Order Has been Confirmed\"\n            },\n            {\n                \"status\": \"READY_FOR_DISPATCH\",\n                \"location\": \"Bagurukhi, , 560076, Bangalore, KARNATAKA, India\",\n                \"dateTime\": \"2025-11-01T14:35:32.884Z\",\n                \"instructions\": \"Order is ready to be dispatched\"\n            }\n        ]\n    }\n}"
+        }
+      ],
+      "_postman_id": "ea6532d4-3aa1-449f-9df4-1f520bed4622"
+    },
+    {
+      "name": "NDR List",
+      "id": "3983b2e5-c46c-4113-b1bb-ee41498fcf79",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NjEyNzEwMCwiZXhwIjoxNzU2MjEzNTAwfQ.fovnJmjWqo_toz-T7ft0AYgdhOwMmKiKB7Eg9oRM7yo",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/exceptionList",
+        "description": "<p><strong>Endpoint:</strong><br /><code>GET https://api.shipexindia.com/v1/api/external/exceptionList</code></p>\n<p><strong>Description:</strong>  </p>\n<p>This API retrieves the list of <strong>undelivered (exception) orders</strong> for a given user.  </p>\n<p>It includes orders stuck in <strong>NDR (Non-Delivery Report)</strong> status with details like reason, remarks, and attempt history.</p>\n<hr />\n<h3 id=\"🔑-headers\">🔑 Headers</h3>\n<ul>\n<li><p><code>Content-Type: application/json</code></p>\n</li>\n<li><p><code>Authorization: Bearer</code></p>\n</li>\n</ul>\n<p>Success Response (200 OK)  </p>\n<p>{<br />\"success\": true,<br />\"count\": 2,<br />\"data\": [<br />{<br />\"awb_number\": \"I75009044\",<br />\"courier\": \"Delhivery\",<br />\"date\": \"2025-08-23T10:15:00Z\",<br />\"remark\": \"Customer not available\",<br />\"attemptCount\": 2<br />},<br />{<br />\"awb_number\": \"D75001123\",<br />\"courier\": \"DTDC\",<br />\"date\": \"2025-08-22T15:45:00Z\",<br />\"remark\": \"Incorrect address\",<br />\"attemptCount\": 1<br />}<br />]<br />}</p>\n<h3 id=\"failure-responses\">Failure Responses</h3>\n<p><strong>No Exceptions Found (404):</strong>  </p>\n<p>{<br />\"success\": false,<br />\"message\": \"No exception found for this user\"<br />}</p>\n<p>Internal Server Error (500):  </p>\n<p>{<br />\"success\": false,<br />\"message\": \"Internal server error\"<br />}</p>\n<h3 id=\"notes\">Notes</h3>\n<ul>\n<li><p>Only orders with <strong>status = \"Undelivered\"</strong> are considered exceptions.</p>\n</li>\n<li><p>Response fields:</p>\n<ul>\n<li><p><code>awb_number</code> → Shipment AWB number</p>\n</li>\n<li><p><code>courier</code> → Courier partner handling the order</p>\n</li>\n<li><p><code>date</code> → Date of last NDR remark</p>\n</li>\n<li><p><code>remark</code> → Reason for non-delivery (e.g., <em>Customer not available, Wrong address</em>)</p>\n</li>\n<li><p><code>attemptCount</code> → Number of reattempts in <code>ndrHistory</code></p>\n</li>\n</ul>\n</li>\n</ul>\n",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "exceptionList"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "58fd9144-c548-43f0-a8fa-762386230ba0",
+          "name": "NDR/Exception List",
+          "originalRequest": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NjEyNzEwMCwiZXhwIjoxNzU2MjEzNTAwfQ.fovnJmjWqo_toz-T7ft0AYgdhOwMmKiKB7Eg9oRM7yo",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/exceptionList"
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Mon, 25 Aug 2025 13:18:42 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "180"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"b4-JqjTKi5uov7T5BU8wCXB2rPQ6N8\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"success\": true,\n    \"count\": 2,\n    \"data\": [\n        {\n            \"awb_number\": \"7D113288136\",\n            \"date\": null,\n            \"remark\": null,\n            \"attemptCount\": 0\n        },\n        {\n            \"awb_number\": \"362532727115\",\n            \"date\": null,\n            \"remark\": null,\n            \"attemptCount\": 0\n        }\n    ]\n}"
+        }
+      ],
+      "_postman_id": "3983b2e5-c46c-4113-b1bb-ee41498fcf79"
+    },
+    {
+      "name": "Create NDR",
+      "id": "65246d0a-f021-491f-b867-d11fbde2e359",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc1NTg0NDM0MCwiZXhwIjoxNzU1OTMwNzQwfQ.HWQvTV4Q9TK_q8yBKOYedy5WwuiTso6GQCqSchIuY0o",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"courierId\": \"05\",\r\n  \"awb_number\": \"AMZ1234567890\",\r\n  \"action\": \"RE-ATTEMPT\",//[\"RE-ATTEMPT\",\"RTO\"]\r\n  \"comments\": \"Customer asked to reattempt on next business day\",\r\n  \"scheduled_delivery_date\": \"2025-08-25\",\r\n  \"next_attempt_date\": \"2025-08-25\",\r\n  \"phone\": \"9876543210\"\r\n}\r\n\r\n"
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/ndr/create",
+        "description": "<p><strong>Endpoint:</strong><br /><code>POST https://api.shipexindia.com/v1/api/external/ndr/create</code></p>\n<p><strong>Description:</strong>  </p>\n<p>This API allows the client to create an <strong>NDR (Non-Delivery Report) / Exception request</strong> for an undelivered shipment.  </p>\n<p>The request can trigger either a <strong>Reattempt delivery</strong> or an <strong>RTO (Return to Origin)</strong> action, depending on the courier.</p>\n<hr />\n<h3 id=\"🔑-headers\">🔑 Headers</h3>\n<ul>\n<li><p><code>Content-Type: application/json</code></p>\n</li>\n<li><p><code>Authorization: Bearer</code></p>\n</li>\n</ul>\n<p>Success Response (200 OK)  </p>\n<p>{<br />\"success\": true,<br />\"message\": \"NDR request processed successfully\",<br />\"data\": {<br />\"awb_number\": \"I75009044\",<br />\"action\": \"RE-ATTEMPT\",<br />\"courierId\": \"02\",<br />\"status\": \"Accepted\"<br />}<br />}</p>\n<h3 id=\"failure-responses\">Failure Responses</h3>\n<p><strong>Missing Required Fields (400):</strong>  </p>\n<p>{<br />\"success\": false,<br />\"message\": \"courierId and awb_number are required\"<br />}</p>\n<p>Invalid Action (400):  </p>\n<p>{<br />\"success\": false,<br />\"message\": \"Invalid action. Allowed values are 'RE-ATTEMPT' or 'RTO'.\"<br />}</p>\n<p>Order Not Found (404):  </p>\n<p>{<br />\"success\": false,<br />\"message\": \"No pending delivery found for the provided AWB number. Reattempt or RTO cannot be initiated.\"<br />}</p>\n<p>Internal Server Error (500):<br />{<br />\"success\": false,<br />\"message\": \"Internal server error while processing NDR\"<br />}</p>\n<p>Notes</p>\n<ul>\n<li><p><strong>Allowed actions:</strong> <code>RE-ATTEMPT</code> (retry delivery) or <code>RTO</code> (return to origin).</p>\n</li>\n<li><p>Ensure order status is <code>\"Undelivered\"</code> before initiating NDR.</p>\n</li>\n</ul>\n",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "ndr",
+            "create"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [],
+      "_postman_id": "65246d0a-f021-491f-b867-d11fbde2e359"
+    },
+    {
+      "name": "WareHouse Creation",
+      "id": "7361c97a-4fda-40c5-ab65-d3cc5d7a9a4d",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MzExNTQzNiwiZXhwIjoxNzYzMjAxODM2fQ.WlYokaMMCEsucT8tzuhqSySYov8pEv1Wq0VtXsK3Kq8",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"contactName\": \"INVENTAA LED LIGHTS PRIVATE LIMITED\",\r\n  \"email\": \"inventaaecomstore@gmail.com\",\r\n  \"phoneNumber\": \"8939066644\",\r\n  \"address\": \"No.7A, Leo Complex Road, Pallikaranai\",\r\n  \"pinCode\": \"600100\",\r\n  \"city\": \"Kanchipuram\",\r\n  \"state\": \"TAMIL NADU\"\r\n}\r\n",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/createPickupAddress",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "createPickupAddress"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "c044012f-5b4f-4e6c-a9b7-289dd73fdb31",
+          "name": "WareHouse Creation",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MzExNTQzNiwiZXhwIjoxNzYzMjAxODM2fQ.WlYokaMMCEsucT8tzuhqSySYov8pEv1Wq0VtXsK3Kq8",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"contactName\": \"INVENTAA LED LIGHTS PRIVATE LIMITED\",\r\n  \"email\": \"inventaaecomstore@gmail.com\",\r\n  \"phoneNumber\": \"8939066644\",\r\n  \"address\": \"No.7A, Leo Complex Road, Pallikaranai\",\r\n  \"pinCode\": \"600100\",\r\n  \"city\": \"Kanchipuram\",\r\n  \"state\": \"TAMIL NADU\"\r\n}\r\n",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/createPickupAddress"
+          },
+          "status": "Conflict",
+          "code": 409,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "143"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"8f-8h4GSrDs2Lbw98m2Us2/4IhAu+4\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            },
+            {
+              "key": "Date",
+              "value": "Fri, 14 Nov 2025 10:19:06 GMT"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Keep-Alive",
+              "value": "timeout=5"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"success\": false,\n    \"code\": 409,\n    \"message\": \"Duplicate address detected. This pickup address already exists.\",\n    \"timestamp\": \"2025-11-14T10:19:06.649Z\"\n}"
+        }
+      ],
+      "_postman_id": "7361c97a-4fda-40c5-ab65-d3cc5d7a9a4d"
+    },
+    {
+      "name": "Generate Label",
+      "id": "121b4fe8-1047-4eda-861e-b24b553d4362",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MzExNTQzNiwiZXhwIjoxNzYzMjAxODM2fQ.WlYokaMMCEsucT8tzuhqSySYov8pEv1Wq0VtXsK3Kq8",
+            "type": "text"
+          }
+        ],
+        "url": "https://api.shipexindia.com/v1/api/external/generateLabel/SHIP40000000265",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "generateLabel",
+            "SHIP40000000265"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "0eac36c9-fff4-47fb-94a0-a3f8ba280a08",
+          "name": "Generate Label",
+          "originalRequest": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MzExNTQzNiwiZXhwIjoxNzYzMjAxODM2fQ.WlYokaMMCEsucT8tzuhqSySYov8pEv1Wq0VtXsK3Kq8",
+                "type": "text"
+              }
+            ],
+            "url": "https://api.shipexindia.com/v1/api/external/generateLabel/SHIP40000000265"
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Fri, 14 Nov 2025 10:17:43 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "140"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"8c-3VrUH4yhtwUgzd7WE28idsKOgK4\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"success\": true,\n    \"message\": \"Label already exists\",\n    \"label\": \"https://shipex-india.s3.ap-south-1.amazonaws.com/labels/1762768351604_355925.pdf\"\n}"
+        }
+      ],
+      "_postman_id": "121b4fe8-1047-4eda-861e-b24b553d4362"
+    },
+    {
+      "name": "Generate Manifest",
+      "id": "b45f0ebf-49ab-4042-ac8a-98c8fca6ab82",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MzExNTQzNiwiZXhwIjoxNzYzMjAxODM2fQ.WlYokaMMCEsucT8tzuhqSySYov8pEv1Wq0VtXsK3Kq8",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"awbs\": [\r\n    \"7X105009808\",\r\n    \"166031660382\"\r\n  ]\r\n}\r\n",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "https://api.shipexindia.com/v1/api/external/generateManifest",
+        "urlObject": {
+          "protocol": "https",
+          "path": [
+            "v1",
+            "api",
+            "external",
+            "generateManifest"
+          ],
+          "host": [
+            "api",
+            "shipexindia",
+            "com"
+          ],
+          "query": [],
+          "variable": []
+        }
+      },
+      "response": [
+        {
+          "id": "5ffc43ea-7da1-47ac-bf74-e738e12b6382",
+          "name": "Generate Manifest",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjg3N2NkODE0YjEzMGIzZjI1YTY0NzExIiwiZW1haWwiOiJiaGFuamFiaWpheWtldGFuQGdtYWlsLmNvbSIsImZ1bGxuYW1lIjoiQmlqYXkga2V0YW4gQmhhbmphIiwia3ljIjp0cnVlLCJpc0FkbWluIjp0cnVlLCJpc0VtcGxveWVlIjpmYWxzZX0sImlhdCI6MTc2MzExNTQzNiwiZXhwIjoxNzYzMjAxODM2fQ.WlYokaMMCEsucT8tzuhqSySYov8pEv1Wq0VtXsK3Kq8",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"awbs\": [\r\n    \"7X105009808\",\r\n    \"166031660382\"\r\n  ]\r\n}\r\n",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "https://api.shipexindia.com/v1/api/external/generateManifest"
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Server",
+              "value": "nginx/1.26.3"
+            },
+            {
+              "key": "Date",
+              "value": "Fri, 14 Nov 2025 10:18:19 GMT"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Content-Length",
+              "value": "648"
+            },
+            {
+              "key": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+            },
+            {
+              "key": "Cross-Origin-Opener-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Cross-Origin-Resource-Policy",
+              "value": "same-origin"
+            },
+            {
+              "key": "Origin-Agent-Cluster",
+              "value": "?1"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "no-referrer"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-DNS-Prefetch-Control",
+              "value": "off"
+            },
+            {
+              "key": "X-Download-Options",
+              "value": "noopen"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "SAMEORIGIN"
+            },
+            {
+              "key": "X-Permitted-Cross-Domain-Policies",
+              "value": "none"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "0"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "ETag",
+              "value": "W/\"288-rG+Sfv6Ba54oJEzDponB9xW6kfc\""
+            },
+            {
+              "key": "Vary",
+              "value": "Accept-Encoding"
+            }
+          ],
+          "cookie": [],
+          "responseTime": null,
+          "body": "{\n    \"success\": true,\n    \"message\": \"Manifest generation complete\",\n    \"results\": [\n        {\n            \"awb\": \"166031660382\",\n            \"manifest\": \"https://shipex-india.s3.ap-south-1.amazonaws.com/manifests/166031660382_1762947782941.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=AKIA6ELKN7GRYM2DXCXW%2F20251112%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Date=20251112T114303Z&X-Amz-Expires=604800&X-Amz-Signature=9772e65cc614d9024114e29aed940dfe620ee52c31b7ef613c0d5c10ae8387e7&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject\",\n            \"message\": \"Manifest already exists\"\n        },\n        {\n            \"awb\": \"7X105009808\",\n            \"message\": \"Order not found or unauthorized\"\n        }\n    ]\n}"
+        }
+      ],
+      "_postman_id": "b45f0ebf-49ab-4042-ac8a-98c8fca6ab82"
+    }
+  ]
+}

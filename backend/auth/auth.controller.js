@@ -102,6 +102,8 @@ const register = async (req, res) => {
       password: hashedPassword,
       userId,
       referralCode: uniqueReferralCode, // new field
+      isEmailVerified: true,
+      isPhoneVerified: true,
     });
 
     // ✅ Referral Handling

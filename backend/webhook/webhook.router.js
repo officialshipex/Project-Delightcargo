@@ -9,6 +9,7 @@ const { AmazonShippingNDRWebhook } = require("./NDR/AmazonShippingWebhook.contro
 const { ProshipWebhook } = require("./ProshipWebhook.controller")
 const { ShipRocketWebhook } = require("./ShipRocketWebhook.controller")
 const { ShadowfaxWebhook } = require("./ShadowfaxWebhook.controller")
+const { ShipexIndiaWebhook } = require("./ShipexIndiaWebhook.controller");
 
 const { delhiveryManifestCallback } = require("../B2B/controller/Couriers/AllCouriers/Delhivery/Courier/couriers.controller")
 
@@ -24,6 +25,7 @@ webhookRouter.post("/tracking-info-updates", ShipRocketWebhook);
 webhookRouter.post("/amazon-shipping-ndr", AmazonShippingNDRWebhook);
 webhookRouter.post("/proship", ProshipWebhook);
 webhookRouter.post("/shadowfax", ShadowfaxWebhook);
+webhookRouter.post("/shipexindia", ShipexIndiaWebhook);
 
 webhookRouter.post("/delhivery/manifest", delhiveryManifestCallback)
 

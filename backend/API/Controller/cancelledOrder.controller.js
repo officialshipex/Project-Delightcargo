@@ -6,6 +6,9 @@ const {
   cancelOrderDelhivery,
 } = require("../../AllCouriers/Delhivery/Courier/couriers.controller");
 const {
+  cancelShipexIndiaOrder,
+} = require("../../AllCouriers/ShipxIndia/Courier/couriers.controller");
+const {
   cancelOrderDTDC,
 } = require("../../AllCouriers/DTDC/Courier/couriers.controller");
 const {
@@ -88,7 +91,9 @@ const cancelOrdersAtBooked = async (req, res) => {
     }
 
     let provider;
-    if (
+    if (currentOrder.partner === "ShipexIndia" || currentOrder.provider === "ShipexIndia") {
+      provider = "ShipexIndia";
+    } else if (
       currentOrder.partner === "ZipyPost" &&
       currentOrder.provider === "Bluedart"
     ) {
@@ -105,6 +110,9 @@ const cancelOrdersAtBooked = async (req, res) => {
 
     let result;
     switch (provider) {
+      case "ShipexIndia":
+        result = await cancelShipexIndiaOrder(currentOrder.awb_number);
+        break;
       case "Delhivery":
         result = await cancelOrderDelhivery(currentOrder.awb_number);
         break;

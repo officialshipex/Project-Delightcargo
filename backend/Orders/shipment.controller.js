@@ -47,6 +47,9 @@ const {
 const {
   checkPincodeServiceability: checkShadowfaxServiceability,
 } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
+const {
+  checkShipexIndiaServiceability,
+} = require("../AllCouriers/ShipxIndia/Courier/couriers.controller");
 const checkServiceabilityAll = async (service, id, pincode) => {
   try {
     const currentOrder = await Order.findById(id);
@@ -337,6 +340,22 @@ const checkServiceabilityAll = async (service, id, pincode) => {
       if (local.success) return local;
 
       return await checkShadowfaxServiceability(deliveryPincode, service.provider);
+    }
+    if (service.provider.toLowerCase() === "shipexindia") {
+      const local = await checkLocalServiceability();
+      if (local.success) return local;
+
+      const payload = {
+        pickUpPincode: pickupPincode,
+        deliveryPincode: deliveryPincode,
+        applicableWeight: currentOrder.packageDetails?.applicableWeight || 0.5,
+        length: currentOrder.packageDetails.volumetricWeight?.length || 10,
+        width: currentOrder.packageDetails.volumetricWeight?.width || 10,
+        height: currentOrder.packageDetails.volumetricWeight?.height || 10,
+        paymentType: paymentMethod,
+        declaredValue: currentOrder.paymentDetails?.amount || 0,
+      };
+      return await checkShipexIndiaServiceability(payload);
     }
 
     // Default

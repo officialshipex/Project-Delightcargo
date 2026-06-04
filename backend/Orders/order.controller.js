@@ -50,6 +50,8 @@ const {
   createShipmentFunctionShreeMaruti,
 } = require("../AllCouriers/ShreeMaruti/Couriers/bulkShipment.controller");
 const { createOrderShadowfax } = require("../AllCouriers/Shadowfax/Courier/bulkShipment.controller");
+const { createShipmentFunctionShipexIndia } = require("../AllCouriers/ShipxIndia/Courier/bulkShipment.controller");
+const { cancelShipexIndiaOrder } = require("../AllCouriers/ShipxIndia/Courier/couriers.controller");
 
 const { AutoShip } = require("../Orders/AutoShipB2c.controller");
 
@@ -435,7 +437,18 @@ const cancelOrdersAtBooked = async (req, res) => {
           };
         }
 
-        if (currentOrder.service_details.courierProviderName === "NimbusPost") {
+        if (
+          currentOrder.service_details?.courierProviderName === "ShipexIndia" ||
+          currentOrder.partner === "ShipexIndia"
+        ) {
+          const result = await cancelShipexIndiaOrder(currentOrder.awb_number);
+          if (!result.success) {
+            return {
+              error: result.error || "Failed to cancel order with ShipexIndia",
+              orderId: currentOrder._id,
+            };
+          }
+        } else if (currentOrder.service_details.courierProviderName === "NimbusPost") {
           const result = await cancelShipment(currentOrder.awb_number);
           if (result.error) {
             return {
@@ -997,6 +1010,15 @@ const createShipment = async (serviceDetails, order, wh, walletId, charges) => {
         break;
       case "Shadowfax":
         result = await createOrderShadowfax(
+          serviceDetails,
+          order._id,
+          wh,
+          walletId,
+          charges
+        );
+        break;
+      case "ShipexIndia":
+        result = await createShipmentFunctionShipexIndia(
           serviceDetails,
           order._id,
           wh,

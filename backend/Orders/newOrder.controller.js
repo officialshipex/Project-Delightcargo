@@ -69,6 +69,7 @@ const {
   cancelOrder: cancelShiprocketOrder,
 } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 const { cancelShadowfaxOrder } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
+const { cancelShipexIndiaOrder } = require("../AllCouriers/ShipxIndia/Courier/couriers.controller");
 const WeightDiscrepancy = require("../WeightDispreancy/weightDispreancy.model");
 // Create a shipment
 const newOrder = async (req, res) => {
@@ -1691,7 +1692,12 @@ const cancelOrdersAtBooked = async (req, res) => {
       return res.status(400).send({ error: "Order is not ready to Cancelled" });
     }
 
-    if (currentOrder.provider === "Xpressbees") {
+    if (currentOrder.partner === "ShipexIndia" || currentOrder.provider === "ShipexIndia") {
+      const result = await cancelShipexIndiaOrder(currentOrder.awb_number);
+      if (!result.success) {
+        return res.status(400).send({ error: result.error || "Failed to cancel order with ShipexIndia" });
+      }
+    } else if (currentOrder.provider === "Xpressbees") {
       const result = await cancelShipmentXpressBees(currentOrder.awb_number);
       if (result.error) {
         return res.status(400).send({ error: "Failed to cancel order" });
@@ -2100,7 +2106,9 @@ const bulkCancelOrder = async (req, res) => {
           // Call provider cancel API
           let cancelResponse;
           try {
-            if (provider === "Xpressbees") {
+            if (partner === "ShipexIndia" || provider === "ShipexIndia") {
+              cancelResponse = await cancelShipexIndiaOrder(currentOrder.awb_number);
+            } else if (provider === "Xpressbees") {
               cancelResponse = await cancelShipmentXpressBees(currentOrder.awb_number);
             } else if (provider === "Shiprocket" || partner === "Shiprocket") {
               cancelResponse = await cancelShiprocketOrder(currentOrder.awb_number);

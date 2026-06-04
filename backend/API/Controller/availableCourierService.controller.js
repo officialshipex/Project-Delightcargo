@@ -34,6 +34,9 @@ const {
 const {
   checkProshipServiceability,
 } = require("../../AllCouriers/Proship/Courier/couriers.controller.js");
+const {
+  checkShipexIndiaServiceability,
+} = require("../../AllCouriers/ShipxIndia/Courier/couriers.controller.js");
 
 // Define courier IDs for each provider
 const courierIds = {
@@ -47,6 +50,7 @@ const courierIds = {
   Ekart: "08",
   BoxdLogistics: "09",
   Proship: "10",
+  ShipexIndia: "13",
 };
 
 // Input Validation Schema
@@ -169,6 +173,17 @@ const availableCourierService = async (req, res) => {
             result = await checkServiceabilityBoxdLogistics({ pickupPincode: pickUpPincode, shippingPincode: deliveryPincode, paymentMode: paymentType === "COD" ? "cod" : "prepaid", codAmount: paymentType === "COD" ? declaredValue : 0, weight: applicableWeight * 1000, length: 10, breadth: 10, height: 10 });
           } else if (provider === "Proship") {
             result = await checkProshipServiceability({ pickUpPincode, deliveryPincode });
+          } else if (provider === "ShipexIndia") {
+            result = await checkShipexIndiaServiceability({
+              pickUpPincode,
+              deliveryPincode,
+              applicableWeight,
+              paymentType,
+              declaredValue,
+              length: order.packageDetails?.volumetricWeight?.length || 10,
+              width: order.packageDetails?.volumetricWeight?.width || 10,
+              height: order.packageDetails?.volumetricWeight?.height || 10,
+            });
           }
         } catch (err) {
           console.error(`Serviceability check failed for ${provider}:`, err);

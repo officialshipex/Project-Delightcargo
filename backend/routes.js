@@ -58,6 +58,7 @@ const ZipyPostRouter = require("./AllCouriersRoutes/zipypost.router")
 const BoxdLogisticsRouter = require("./AllCouriersRoutes/boxdlogistics.router")
 const ProshipRouter = require("./AllCouriersRoutes/proship.router")
 const ShadowfaxRouter = require("./AllCouriersRoutes/shadowfax.router")
+const ShipexIndiaRouter = require("./AllCouriersRoutes/shipexindia.router")
 const CourierRouter = require("./routes/courier.router")
 const referralRoute = require("./Referral/referal.router")
 const Notification = require("./notification/notification.router")
@@ -152,6 +153,7 @@ router.use("/ZipyPost", ZipyPostRouter)
 router.use("/BoxdLogistics", BoxdLogisticsRouter)
 router.use("/Proship", ProshipRouter)
 router.use("/Shadowfax", ShadowfaxRouter)
+router.use("/ShipexIndia", ShipexIndiaRouter)
 
 router.use("/label", LabelRouter);
 router.use("/user", userRouter);
