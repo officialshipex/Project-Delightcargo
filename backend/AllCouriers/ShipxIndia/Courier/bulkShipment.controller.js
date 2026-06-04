@@ -185,8 +185,8 @@ const createShipmentFunctionShipexIndia = async (
     currentOrder.tracking.push({
       status: "Booked",
       StatusLocation: currentOrder.pickupAddress.city,
-      StatusDateTime: new Date(),
-      Instructions: `Order booked successfully with ShipexIndia (${shipexCourierName})`,
+      StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+      Instructions: "Order booked successfully",
     });
 
     // Update Wallet balance

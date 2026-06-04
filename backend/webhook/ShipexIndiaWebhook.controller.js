@@ -13,16 +13,16 @@ const ShipexIndiaWebhook = async (req, res) => {
     const latest = data.latestTracking || {};
 
     const awb = data.awb_number || data.awb || body.awb_number || body.awb || latest.awb_number || latest.awb;
-    const statusText = latest.status || data.status || body.status || body.event || "Unknown";
+    const statusText = data.status || body.status || latest.status || body.event || "Unknown";
     const location = latest.StatusLocation || latest.location || data.location || body.location || "Unknown";
     const instructions = latest.Instructions || latest.instructions || latest.remark || latest.activity || data.instructions || data.remarks || data.remark || body.instructions || body.remarks || body.remark || statusText;
 
-    let timestamp = new Date();
+    let timestamp = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
     const rawTime = latest.StatusDateTime || latest.dateTime || latest.datetime || latest.timestamp || latest.date || data.dateTime || data.datetime || data.timestamp || body.dateTime || body.datetime || body.timestamp;
     if (rawTime) {
       const parsedTime = new Date(rawTime);
       if (!isNaN(parsedTime.getTime())) {
-        timestamp = parsedTime;
+        timestamp = new Date(parsedTime.getTime() + 5.5 * 60 * 60 * 1000);
       }
     }
 
@@ -99,7 +99,9 @@ const ShipexIndiaWebhook = async (req, res) => {
       mappedStatus = "RTO Delivered";
     } else if (s.includes("RTO")) {
       mappedStatus = "RTO";
-    } else if (s.includes("CONFIRMED") || s.includes("MANIFEST") || s.includes("BOOKED") || s === "READY_FOR_DISPATCH") {
+    } else if (s.includes("MANIFEST") || s.includes("READY TO SHIP") || s.includes("READY_FOR_DISPATCH") || s.includes("READY TO DISPATCH")) {
+      mappedStatus = "Ready To Ship";
+    } else if (s.includes("CONFIRMED") || s.includes("BOOKED")) {
       mappedStatus = "Booked";
     } else if (s.includes("DISPATCH") || s.includes("SHIPPED") || s.includes("TRANSIT")) {
       mappedStatus = "In-transit";

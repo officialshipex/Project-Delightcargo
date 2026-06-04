@@ -115,7 +115,8 @@ const newOrder = async (req, res) => {
     const computedTotal = productDetails.reduce((sum, p) => {
       const qty = Number(p.quantity) || 1;
       const price = Number(p.unitPrice) || 0;
-      return sum + qty * price;
+      const discount = Number(p.discount) || 0;
+      return sum + qty * (price - discount);
     }, 0);
 
     const declaredAmount = Number(paymentDetails.amount) || 0;
@@ -164,7 +165,7 @@ const newOrder = async (req, res) => {
     });
   } catch (error) {
     console.log("1111111111", error);
-    res.status(400).json({ error: "All fields are required" });
+    res.status(400).json({ error: error.message || "All fields are required" });
   }
 };
 // new pick up address

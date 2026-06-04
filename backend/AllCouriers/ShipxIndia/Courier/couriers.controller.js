@@ -249,7 +249,7 @@ const createShipexIndiaShipment = async (req, res) => {
       status: "Booked",
       StatusLocation: currentOrder.pickupAddress.city,
       StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-      Instructions: `Order booked successfully with ShipexIndia (${shipexCourierName})`,
+      Instructions: "Order booked successfully",
     });
 
     // 11. Update Wallet inside transaction
@@ -288,7 +288,7 @@ const createShipexIndiaShipment = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Shipment Created Successfully via ShipexIndia",
+      message: "Shipment Created Successfully",
       awb_number: awb_number,
       orderId: currentOrder.orderId,
     });
