@@ -18,11 +18,11 @@ const ShipexIndiaWebhook = async (req, res) => {
     const instructions = latest.Instructions || latest.instructions || latest.remark || latest.activity || data.instructions || data.remarks || data.remark || body.instructions || body.remarks || body.remark || statusText;
 
     let timestamp = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-    const rawTime = latest.StatusDateTime || latest.dateTime || latest.datetime || latest.timestamp || latest.date || data.dateTime || data.datetime || data.timestamp || body.dateTime || body.datetime || body.timestamp;
+    const rawTime = latest.StatusDateTime;
     if (rawTime) {
       const parsedTime = new Date(rawTime);
       if (!isNaN(parsedTime.getTime())) {
-        timestamp = new Date(parsedTime.getTime() + 5.5 * 60 * 60 * 1000);
+        timestamp = parsedTime;
       }
     }
 
