@@ -1803,63 +1803,98 @@ const cancelOrdersAtBooked = async (req, res) => {
       console.error("[Pickup] Failed to remove order from manifest during cancellation:", err.message);
     }
 
-    // currentOrder.status = "Not-Shipped";
-    // currentOrder.cancelledAtStage = "Booked";
-    currentOrder.status = "Cancelled";
-    currentOrder.tracking.push({
-      status: "Cancelled",
-      StatusLocation: "",
-      StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-      Instructions: "Order cancelled successfully",
-    });
-
-    let balanceTobeAdded =
-      currentOrder.totalFreightCharges == "N/A"
-        ? 0
-        : parseFloat(currentOrder.totalFreightCharges);
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
+    // Atomically set status to Cancelled and walletRefunded to true (if not already refunded)
+    let currentOrderUpdated;
     try {
-      // ✅ Guard: Check if this AWB was already refunded (credit exists)
-      const alreadyRefunded = await WalletTransaction.exists({
-        walletId: currentWallet._id,
-        awb_number: currentOrder.awb_number,
-        category: "credit",
-        description: "Freight Charges Received",
-      });
+      currentOrderUpdated = await Order.findOneAndUpdate(
+        {
+          _id: currentOrder._id,
+          walletRefunded: { $ne: true }
+        },
+        {
+          $set: {
+            status: "Cancelled",
+            walletRefunded: true
+          },
+          $push: {
+            tracking: {
+              status: "Cancelled",
+              StatusLocation: "",
+              Instructions: "Order cancelled successfully",
+              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+            }
+          }
+        },
+        { new: true }
+      );
+    } catch (dbErr) {
+      console.error("Error updating order status atomically in cancelOrdersAtBooked:", dbErr);
+      return res.status(500).json({ success: false, message: "Database error during cancellation" });
+    }
 
-      if (balanceTobeAdded > 0 && !alreadyRefunded) {
-        const updatedWallet = await Wallet.findOneAndUpdate(
-          { _id: currentWallet._id },
-          { $inc: { balance: balanceTobeAdded } },
-          { new: true, session },
-        );
+    if (currentOrderUpdated) {
+      const session = await mongoose.startSession();
+      session.startTransaction();
 
-        await WalletTransaction.create(
-          [{
-            walletId: updatedWallet._id,
-            channelOrderId: currentOrder.orderId || null,
-            category: "credit",
-            amount: balanceTobeAdded,
-            balanceAfterTransaction: updatedWallet.balance,
-            date: new Date(),
-            awb_number: currentOrder.awb_number || "",
-            description: `Freight Charges Received`,
-          }],
-          { session }
-        );
-      } else if (balanceTobeAdded > 0 && alreadyRefunded) {
-        console.log(`[Cancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
+      try {
+        let balanceTobeAdded =
+          currentOrderUpdated.totalFreightCharges == "N/A"
+            ? 0
+            : parseFloat(currentOrderUpdated.totalFreightCharges);
+
+        const alreadyRefunded = await WalletTransaction.exists({
+          walletId: currentWallet._id,
+          awb_number: currentOrderUpdated.awb_number,
+          category: "credit",
+          description: "Freight Charges Received",
+        }).session(session);
+
+        if (balanceTobeAdded > 0 && !alreadyRefunded) {
+          const updatedWallet = await Wallet.findOneAndUpdate(
+            { _id: currentWallet._id },
+            { $inc: { balance: balanceTobeAdded } },
+            { new: true, session },
+          );
+
+          await WalletTransaction.create(
+            [{
+              walletId: updatedWallet._id,
+              channelOrderId: currentOrderUpdated.orderId || null,
+              category: "credit",
+              amount: balanceTobeAdded,
+              balanceAfterTransaction: updatedWallet.balance,
+              date: new Date(),
+              awb_number: currentOrderUpdated.awb_number || "",
+              description: `Freight Charges Received`,
+            }],
+            { session }
+          );
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+      } catch (err) {
+        await session.abortTransaction();
+        session.endSession();
+        throw err;
       }
-
-      await currentOrder.save({ session });
-      await session.commitTransaction();
-      session.endSession();
-    } catch (err) {
-      await session.abortTransaction();
-      session.endSession();
-      throw err;
+    } else {
+      // If currentOrderUpdated is null, it means it was already refunded/cancelled elsewhere.
+      // We ensure the status is set to Cancelled if it isn't already, without running the refund logic again.
+      await Order.findOneAndUpdate(
+        { _id: currentOrder._id, status: { $ne: "Cancelled" } },
+        {
+          $set: { status: "Cancelled" },
+          $push: {
+            tracking: {
+              status: "Cancelled",
+              StatusLocation: "",
+              Instructions: "Order cancelled successfully",
+              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+            }
+          }
+        }
+      );
     }
 
     // console.log("hii")
@@ -2188,55 +2223,101 @@ const bulkCancelOrder = async (req, res) => {
             console.error("[Pickup] Failed to remove order from manifest during bulk cancellation:", err.message);
           }
 
-          // Refund wallet balance safely
-          const balanceToAdd =
-            currentOrder.totalFreightCharges === "N/A"
-              ? 0
-              : parseFloat(currentOrder.totalFreightCharges) || 0;
+          // Try to atomically mark the order as walletRefunded: true
+          const orderUpdated = await Order.findOneAndUpdate(
+            {
+              _id: currentOrder._id,
+              walletRefunded: { $ne: true }
+            },
+            {
+              $set: {
+                status: "Cancelled",
+                walletRefunded: true
+              },
+              $push: {
+                tracking: {
+                  status: "Cancelled",
+                  StatusLocation: "",
+                  Instructions: isAlreadyCancelled
+                    ? "Order cancelled successfully (Courier already cancelled)"
+                    : "Order cancelled successfully",
+                  StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                }
+              }
+            },
+            { new: true }
+          );
 
-          if (balanceToAdd > 0) {
-            // Guard: Check if this AWB was already refunded
-            const alreadyRefunded = await WalletTransaction.exists({
-              walletId: walletId,
-              awb_number: currentOrder.awb_number,
-              category: "credit",
-              description: "Freight Charges Received",
-            });
+          if (orderUpdated) {
+            // Refund wallet balance safely inside a transaction session
+            const balanceToAdd =
+              orderUpdated.totalFreightCharges === "N/A"
+                ? 0
+                : parseFloat(orderUpdated.totalFreightCharges) || 0;
 
-            if (!alreadyRefunded) {
-              const updatedWallet = await Wallet.findOneAndUpdate(
-                { _id: walletId },
-                { $inc: { balance: balanceToAdd } },
-                { new: true },
-              );
+            if (balanceToAdd > 0) {
+              const session = await mongoose.startSession();
+              session.startTransaction();
 
-              // Update cached balance
-              walletDoc.balance = updatedWallet.balance;
+              try {
+                // Guard: Check if this AWB was already refunded
+                const alreadyRefunded = await WalletTransaction.exists({
+                  walletId: walletId,
+                  awb_number: orderUpdated.awb_number,
+                  category: "credit",
+                  description: "Freight Charges Received",
+                }).session(session);
 
-              await WalletTransaction.create([{
-                walletId: walletId,
-                channelOrderId: currentOrder.orderId || null,
-                category: "credit",
-                amount: balanceToAdd,
-                balanceAfterTransaction: updatedWallet.balance,
-                date: new Date(),
-                awb_number: currentOrder.awb_number || "",
-                description: "Freight Charges Received",
-              }]);
+                if (!alreadyRefunded) {
+                  const updatedWallet = await Wallet.findOneAndUpdate(
+                    { _id: walletId },
+                    { $inc: { balance: balanceToAdd } },
+                    { new: true, session },
+                  );
+
+                  // Update cached balance
+                  walletDoc.balance = updatedWallet.balance;
+
+                  await WalletTransaction.create([{
+                    walletId: walletId,
+                    channelOrderId: orderUpdated.orderId || null,
+                    category: "credit",
+                    amount: balanceToAdd,
+                    balanceAfterTransaction: updatedWallet.balance,
+                    date: new Date(),
+                    awb_number: orderUpdated.awb_number || "",
+                    description: "Freight Charges Received",
+                  }], { session });
+                }
+
+                await session.commitTransaction();
+                session.endSession();
+              } catch (txnError) {
+                await session.abortTransaction();
+                session.endSession();
+                console.error(`[Background BulkCancel] Wallet txn failed for AWB ${orderUpdated.awb_number}:`, txnError.message);
+              }
             }
+          } else {
+            // If orderUpdated is null, it means it was already refunded/cancelled elsewhere.
+            // We ensure the status is set to Cancelled if it isn't already, without running the refund logic again.
+            await Order.findOneAndUpdate(
+              { _id: currentOrder._id, status: { $ne: "Cancelled" } },
+              {
+                $set: { status: "Cancelled" },
+                $push: {
+                  tracking: {
+                    status: "Cancelled",
+                    StatusLocation: "",
+                    Instructions: isAlreadyCancelled
+                      ? "Order cancelled successfully (Courier already cancelled)"
+                      : "Order cancelled successfully",
+                    StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                  }
+                }
+              }
+            );
           }
-
-          // Update order status to Cancelled
-          currentOrder.status = "Cancelled";
-          currentOrder.tracking.push({
-            status: "Cancelled",
-            StatusLocation: "",
-            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-            Instructions: isAlreadyCancelled
-              ? "Order cancelled successfully (Courier already cancelled)"
-              : "Order cancelled successfully",
-          });
-          await currentOrder.save();
 
           console.log(`[Background BulkCancel] Successfully cancelled AWB ${currentOrder.awb_number}`);
 

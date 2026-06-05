@@ -511,31 +511,80 @@ const cancelOrdersAtBooked = async (req, res) => {
           };
         }
 
-        currentOrder.status = "Not-Shipped";
-        currentOrder.cancelledAtStage = "Booked";
-        currentOrder.tracking.push({
-          stage: "Cancelled",
-        });
-        let balanceTobeAdded = currentOrder.freightCharges;
-        let currentBalance = currentWallet.balance + balanceTobeAdded;
+        // Try to atomically mark the order as walletRefunded: true
+        const orderUpdated = await Order.findOneAndUpdate(
+          {
+            _id: currentOrder._id,
+            walletRefunded: { $ne: true }
+          },
+          {
+            $set: {
+              status: "Not-Shipped",
+              cancelledAtStage: "Booked",
+              walletRefunded: true
+            },
+            $push: {
+              tracking: {
+                stage: "Cancelled",
+              }
+            }
+          },
+          { new: true }
+        );
 
-        const cancelTxn = {
-          txnType: "Shipping",
-          action: "credit",
-          category: "credit",
-          amount: balanceTobeAdded,
-          balanceAfterTransaction: currentWallet.balance + balanceTobeAdded,
-          awb_number: `${currentOrder.awb_number}`,
-          description: "Cancellation Refund",
-        };
-        await currentWallet.updateOne({
-          $inc: { balance: balanceTobeAdded },
-        });
-        // 🔁 Dual-write: mirror to WalletTransaction for future migration
-        await WalletTransaction.create([{ walletId: currentWallet._id, ...cancelTxn }]);
-        currentOrder.freightCharges = 0;
-        await currentOrder.save();
-        await currentWallet.save();
+        if (orderUpdated) {
+          let balanceTobeAdded = orderUpdated.freightCharges;
+
+          if (balanceTobeAdded > 0) {
+            const alreadyRefunded = await WalletTransaction.exists({
+              walletId: currentWallet._id,
+              awb_number: orderUpdated.awb_number,
+              category: "credit",
+              description: "Cancellation Refund"
+            });
+
+            if (!alreadyRefunded) {
+              const currentBalance = (currentWallet.balance || 0) + balanceTobeAdded;
+              const cancelTxn = {
+                txnType: "Shipping",
+                action: "credit",
+                category: "credit",
+                amount: balanceTobeAdded,
+                balanceAfterTransaction: currentBalance,
+                awb_number: `${orderUpdated.awb_number}`,
+                description: "Cancellation Refund",
+              };
+
+              const updatedWallet = await Wallet.findOneAndUpdate(
+                { _id: currentWallet._id },
+                { $inc: { balance: balanceTobeAdded } },
+                { new: true }
+              );
+
+              // Update in-memory wallet balance just in case it's used elsewhere
+              currentWallet.balance = updatedWallet.balance;
+
+              await WalletTransaction.create([{ walletId: currentWallet._id, ...cancelTxn }]);
+            }
+          }
+          
+          orderUpdated.freightCharges = 0;
+          await orderUpdated.save();
+        } else {
+          // If orderUpdated is null, it was already cancelled/refunded elsewhere.
+          // Just make sure status is set to Not-Shipped if it isn't already, without running the refund logic again.
+          await Order.findOneAndUpdate(
+            { _id: currentOrder._id, status: { $ne: "Not-Shipped" } },
+            {
+              $set: { status: "Not-Shipped", cancelledAtStage: "Booked" },
+              $push: {
+                tracking: {
+                  stage: "Cancelled"
+                }
+              }
+            }
+          );
+        }
 
         return {
           message: "Order cancelled successfully",

@@ -165,13 +165,10 @@ const cancelOrdersAtBooked = async (req, res) => {
       console.error("[Pickup] Failed to remove order from manifest during API cancellation:", err.message);
     }
 
-    // Perform database updates inside a quick transaction
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
+    // Atomically set status to Cancelled and walletRefunded to true (if not already refunded)
+    let currentOrderUpdated;
     try {
-      // Atomically set status to Cancelled and walletRefunded to true (if not already refunded)
-      const currentOrderInSession = await Order.findOneAndUpdate(
+      currentOrderUpdated = await Order.findOneAndUpdate(
         {
           _id: currentOrder._id,
           walletRefunded: { $ne: true }
@@ -186,24 +183,33 @@ const cancelOrdersAtBooked = async (req, res) => {
               status: "Cancelled",
               StatusLocation: "",
               Instructions: "Cancelled order by user",
-              StatusDateTime: new Date(),
+              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
             }
           }
         },
-        { session, new: true }
+        { new: true }
       );
+    } catch (dbErr) {
+      console.error("Error updating order status atomically:", dbErr);
+      return res.status(500).json({ success: false, message: "Database error during cancellation" });
+    }
 
-      if (currentOrderInSession) {
+    if (currentOrderUpdated) {
+      // Perform database updates inside a quick transaction
+      const session = await mongoose.startSession();
+      session.startTransaction();
+
+      try {
         const balanceToBeAdded =
-          currentOrderInSession.totalFreightCharges === "N/A"
+          currentOrderUpdated.totalFreightCharges === "N/A"
             ? 0
-            : parseFloat(currentOrderInSession.totalFreightCharges);
+            : parseFloat(currentOrderUpdated.totalFreightCharges);
 
         if (balanceToBeAdded > 0) {
           const walletInSession = await Wallet.findById(currentWallet._id).select("balance").session(session);
           const alreadyRefunded = await WalletTransaction.exists({
             walletId: currentWallet._id,
-            awb_number: currentOrderInSession.awb_number,
+            awb_number: currentOrderUpdated.awb_number,
             category: "credit",
             description: "Freight Charges Received"
           }).session(session);
@@ -223,12 +229,12 @@ const cancelOrdersAtBooked = async (req, res) => {
                 [
                   {
                     walletId: currentWallet._id,
-                    channelOrderId: currentOrderInSession.orderId || null,
+                    channelOrderId: currentOrderUpdated.orderId || null,
                     category: "credit",
                     amount: balanceToBeAdded,
                     balanceAfterTransaction: newBalance,
                     date: new Date(),
-                    awb_number: currentOrderInSession.awb_number,
+                    awb_number: currentOrderUpdated.awb_number,
                     description: "Freight Charges Received",
                   }
                 ],
@@ -237,38 +243,37 @@ const cancelOrdersAtBooked = async (req, res) => {
             ]);
           }
         }
-      } else {
-        // If currentOrderInSession is null, it means it was already refunded/cancelled (e.g. by concurrent webhook).
-        // We ensure the status is set to Cancelled if it isn't already, without running the refund logic again.
-        await Order.findOneAndUpdate(
-          { _id: currentOrder._id, status: { $ne: "Cancelled" } },
-          {
-            $set: { status: "Cancelled" },
-            $push: {
-              tracking: {
-                status: "Cancelled",
-                StatusLocation: "",
-                Instructions: "Cancelled order by user",
-                StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-              }
-            }
-          },
-          { session }
-        );
+
+        await session.commitTransaction();
+        session.endSession();
+      } catch (err) {
+        await session.abortTransaction();
+        session.endSession();
+        throw err;
       }
-
-      await session.commitTransaction();
-      session.endSession();
-
-      return res.status(200).json({
-        success: true,
-        message: "Order cancelled successfully",
-      });
-    } catch (err) {
-      await session.abortTransaction();
-      session.endSession();
-      throw err;
+    } else {
+      // If currentOrderUpdated is null, it means it was already refunded/cancelled (e.g. by concurrent webhook).
+      // We ensure the status is set to Cancelled if it isn't already, without running the refund logic again.
+      await Order.findOneAndUpdate(
+        { _id: currentOrder._id, status: { $ne: "Cancelled" } },
+        {
+          $set: { status: "Cancelled" },
+          $push: {
+            tracking: {
+              status: "Cancelled",
+              StatusLocation: "",
+              Instructions: "Cancelled order by user",
+              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+            }
+          }
+        }
+      );
     }
+
+    return res.status(200).json({
+      success: true,
+      message: "Order cancelled successfully",
+    });
   } catch (error) {
     console.error("❌ Error cancelling order:", error);
     return res.status(500).json({
