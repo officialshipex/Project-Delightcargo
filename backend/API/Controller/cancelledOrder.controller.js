@@ -170,59 +170,91 @@ const cancelOrdersAtBooked = async (req, res) => {
     session.startTransaction();
 
     try {
-      // Re-fetch within session to lock
-      const currentOrderInSession = await Order.findById(currentOrder._id).session(session);
-      currentOrderInSession.status = "Cancelled";
-      currentOrderInSession.tracking.push({
-        status: "Cancelled",
-        StatusLocation: "",
-        Instructions: "Cancelled order by user",
-        StatusDateTime: new Date(),
-      });
-      await currentOrderInSession.save({ session });
+      // Atomically set status to Cancelled and walletRefunded to true (if not already refunded)
+      const currentOrderInSession = await Order.findOneAndUpdate(
+        {
+          _id: currentOrder._id,
+          walletRefunded: { $ne: true }
+        },
+        {
+          $set: {
+            status: "Cancelled",
+            walletRefunded: true
+          },
+          $push: {
+            tracking: {
+              status: "Cancelled",
+              StatusLocation: "",
+              Instructions: "Cancelled order by user",
+              StatusDateTime: new Date(),
+            }
+          }
+        },
+        { session, new: true }
+      );
 
-      const balanceToBeAdded =
-        currentOrderInSession.totalFreightCharges === "N/A"
-          ? 0
-          : parseFloat(currentOrderInSession.totalFreightCharges);
+      if (currentOrderInSession) {
+        const balanceToBeAdded =
+          currentOrderInSession.totalFreightCharges === "N/A"
+            ? 0
+            : parseFloat(currentOrderInSession.totalFreightCharges);
 
-      if (balanceToBeAdded > 0) {
-        const walletInSession = await Wallet.findById(currentWallet._id).select("balance").session(session);
-        const alreadyRefunded = await WalletTransaction.exists({
-          walletId: currentWallet._id,
-          awb_number: currentOrderInSession.awb_number,
-          category: "credit",
-          description: "Freight Charges Received"
-        });
+        if (balanceToBeAdded > 0) {
+          const walletInSession = await Wallet.findById(currentWallet._id).select("balance").session(session);
+          const alreadyRefunded = await WalletTransaction.exists({
+            walletId: currentWallet._id,
+            awb_number: currentOrderInSession.awb_number,
+            category: "credit",
+            description: "Freight Charges Received"
+          }).session(session);
 
-        if (!alreadyRefunded) {
-          const newBalance = walletInSession.balance + balanceToBeAdded;
+          if (!alreadyRefunded) {
+            const newBalance = (walletInSession.balance || 0) + balanceToBeAdded;
 
-          await Promise.all([
-            Wallet.findOneAndUpdate(
-              { _id: currentWallet._id },
-              {
-                $inc: { balance: balanceToBeAdded },
-              },
-              { session }
-            ),
-            WalletTransaction.create(
-              [
+            await Promise.all([
+              Wallet.findOneAndUpdate(
+                { _id: currentWallet._id },
                 {
-                  walletId: currentWallet._id,
-                  channelOrderId: currentOrderInSession.orderId || null,
-                  category: "credit",
-                  amount: balanceToBeAdded,
-                  balanceAfterTransaction: newBalance,
-                  date: new Date(),
-                  awb_number: currentOrderInSession.awb_number,
-                  description: "Freight Charges Received",
-                }
-              ],
-              { session }
-            )
-          ]);
+                  $inc: { balance: balanceToBeAdded },
+                },
+                { session }
+              ),
+              WalletTransaction.create(
+                [
+                  {
+                    walletId: currentWallet._id,
+                    channelOrderId: currentOrderInSession.orderId || null,
+                    category: "credit",
+                    amount: balanceToBeAdded,
+                    balanceAfterTransaction: newBalance,
+                    date: new Date(),
+                    awb_number: currentOrderInSession.awb_number,
+                    description: "Freight Charges Received",
+                  }
+                ],
+                { session }
+              )
+            ]);
+          }
         }
+      } else {
+        // If currentOrderInSession is null, it means it was already refunded/cancelled (e.g. by concurrent webhook).
+        // We ensure the status is set to Cancelled if it isn't already, without running the refund logic again.
+        await Order.findOneAndUpdate(
+          { _id: currentOrder._id, status: { $ne: "Cancelled" } },
+          {
+            $set: { status: "Cancelled" },
+            $push: {
+              tracking: {
+                status: "Cancelled",
+                StatusLocation: "",
+                Instructions: "Cancelled order by user",
+                StatusDateTime: new Date(),
+              }
+            }
+          },
+          { session }
+        );
       }
 
       await session.commitTransaction();

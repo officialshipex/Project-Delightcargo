@@ -212,37 +212,75 @@ const ShadowfaxWebhook = async (req, res) => {
         if (userDoc) {
           const currentWallet = await Wallet.findById(userDoc.Wallet).select("balance");
           if (currentWallet) {
-             // Check if already refunded
-             const alreadyRefunded = await WalletTransaction.exists({
-                walletId: currentWallet._id,
-                awb_number: order.awb_number,
-                category: "credit",
-                description: "Freight Charges Received"
-             });
+            // Try to atomically mark the order as walletRefunded: true
+            const orderUpdated = await Order.findOneAndUpdate(
+              {
+                _id: order._id,
+                walletRefunded: { $ne: true }
+              },
+              {
+                $set: { walletRefunded: true, status: "Cancelled", ndrStatus: "Cancelled" }
+              },
+              { new: true }
+            );
 
-             if (!alreadyRefunded) {
-                const newBalance = (currentWallet.balance || 0) + balanceTobeAdded;
-                 await Wallet.findOneAndUpdate(
+            if (orderUpdated) {
+              const mongoose = require("mongoose");
+              const session = await mongoose.startSession();
+              session.startTransaction();
+
+              try {
+                const alreadyRefunded = await WalletTransaction.exists({
+                  walletId: currentWallet._id,
+                  awb_number: order.awb_number,
+                  category: "credit",
+                  description: "Freight Charges Received"
+                }).session(session);
+
+                if (!alreadyRefunded) {
+                  const newBalance = (currentWallet.balance || 0) + balanceTobeAdded;
+                  await Wallet.findOneAndUpdate(
                     { _id: currentWallet._id },
                     {
-                       $inc: { balance: balanceTobeAdded },
-                    }
-                 );
+                      $inc: { balance: balanceTobeAdded },
+                    },
+                    { session }
+                  );
 
-                await WalletTransaction.create({
-                   walletId: currentWallet._id,
-                   channelOrderId: order.orderId || null,
-                   category: "credit",
-                   amount: balanceTobeAdded,
-                   balanceAfterTransaction: newBalance,
-                   date: new Date(),
-                   awb_number: order.awb_number,
-                   description: "Freight Charges Received",
-                }).catch(err => console.error("⚠️ WalletTransaction dual-write failed for ShadowfaxWebhook:", err.message));
+                  await WalletTransaction.create(
+                    [
+                      {
+                        walletId: currentWallet._id,
+                        channelOrderId: order.orderId || null,
+                        category: "credit",
+                        amount: balanceTobeAdded,
+                        balanceAfterTransaction: newBalance,
+                        date: new Date(),
+                        awb_number: order.awb_number,
+                        description: "Freight Charges Received",
+                      }
+                    ],
+                    { session }
+                  );
 
-                order.walletRefunded = true;
-                console.log(`Shadowfax Webhook: Refunded ₹${balanceTobeAdded} for AWB ${order.awb_number}`);
-             }
+                  console.log(`Shadowfax Webhook: Refunded ₹${balanceTobeAdded} for AWB ${order.awb_number}`);
+                }
+
+                await session.commitTransaction();
+                session.endSession();
+              } catch (err) {
+                await session.abortTransaction();
+                session.endSession();
+                console.error("⚠️ Transaction failed in ShadowfaxWebhook cancellation:", err.message);
+              }
+
+              order.walletRefunded = true;
+              order.status = "Cancelled";
+            } else {
+              console.log(`Shadowfax Webhook: Order ${order.awb_number} was already refunded/cancelled elsewhere. Skipping refund.`);
+              order.walletRefunded = true;
+              order.status = "Cancelled";
+            }
           }
         }
       }

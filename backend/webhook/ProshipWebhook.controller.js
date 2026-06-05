@@ -244,37 +244,76 @@ const ProshipWebhook = async (req, res) => {
             if (userDoc) {
               const currentWallet = await Wallet.findById(userDoc.Wallet).select("balance");
               if (currentWallet) {
-                const alreadyRefunded = await WalletTransaction.exists({
-                  walletId: currentWallet._id,
-                  awb_number: order.awb_number,
-                  category: "credit",
-                  description: "Freight Charges Received"
-                });
+                // Try to atomically mark the order as walletRefunded: true
+                const orderUpdated = await Order.findOneAndUpdate(
+                  {
+                    _id: order._id,
+                    walletRefunded: { $ne: true }
+                  },
+                  {
+                    $set: { walletRefunded: true, status: "Cancelled", ndrStatus: "Cancelled" }
+                  },
+                  { new: true }
+                );
 
-                if (!alreadyRefunded) {
-                  const newBalance = (currentWallet.balance || 0) + balanceToBeAdded;
-                  await Wallet.findOneAndUpdate(
-                    { _id: currentWallet._id },
-                    {
-                      $inc: { balance: balanceToBeAdded },
+                if (orderUpdated) {
+                  const mongoose = require("mongoose");
+                  const session = await mongoose.startSession();
+                  session.startTransaction();
+
+                  try {
+                    const alreadyRefunded = await WalletTransaction.exists({
+                      walletId: currentWallet._id,
+                      awb_number: order.awb_number,
+                      category: "credit",
+                      description: "Freight Charges Received"
+                    }).session(session);
+
+                    if (!alreadyRefunded) {
+                      const newBalance = (currentWallet.balance || 0) + balanceToBeAdded;
+                      await Wallet.findOneAndUpdate(
+                        { _id: currentWallet._id },
+                        {
+                          $inc: { balance: balanceToBeAdded },
+                        },
+                        { session }
+                      );
+
+                      await WalletTransaction.create(
+                        [
+                          {
+                            walletId: currentWallet._id,
+                            channelOrderId: order.orderId || null,
+                            category: "credit",
+                            amount: balanceToBeAdded,
+                            balanceAfterTransaction: newBalance,
+                            date: new Date(),
+                            awb_number: order.awb_number,
+                            description: "Freight Charges Received",
+                          }
+                        ],
+                        { session }
+                      );
+
+                      console.log(
+                        `Proship Webhook: Refunded ₹${balanceToBeAdded} for AWB ${order.awb_number} due to cancellation`
+                      );
                     }
-                  );
 
-                  await WalletTransaction.create({
-                    walletId: currentWallet._id,
-                    channelOrderId: order.orderId || null,
-                    category: "credit",
-                    amount: balanceToBeAdded,
-                    balanceAfterTransaction: newBalance,
-                    date: new Date(),
-                    awb_number: order.awb_number,
-                    description: "Freight Charges Received",
-                  }).catch(err => console.error("⚠️ WalletTransaction dual-write failed for ProshipWebhook:", err.message));
+                    await session.commitTransaction();
+                    session.endSession();
+                  } catch (err) {
+                    await session.abortTransaction();
+                    session.endSession();
+                    console.error("⚠️ Transaction failed in ProshipWebhook cancellation:", err.message);
+                  }
 
                   order.walletRefunded = true;
-                  console.log(
-                    `Proship Webhook: Refunded ₹${balanceToBeAdded} for AWB ${order.awb_number} due to cancellation`
-                  );
+                  order.status = "Cancelled";
+                } else {
+                  console.log(`Proship Webhook: Order ${order.awb_number} was already refunded/cancelled elsewhere. Skipping refund.`);
+                  order.walletRefunded = true;
+                  order.status = "Cancelled";
                 }
               }
             }
