@@ -1402,7 +1402,7 @@ const ShipeNowOrder = async (req, res) => {
     if (!plan) {
       return res.status(404).json({ error: "No plan found for this user" });
     }
-
+console.log("plans",plan)
     const [EDDRates, EPDRates, services] = await Promise.all([
       EDDMap.find().lean(),
       EPDMap.find().lean(),
@@ -1460,7 +1460,7 @@ const ShipeNowOrder = async (req, res) => {
         return [];
       }),
     );
-    // console.log("available", availableServicesResults);
+    console.log("available", availableServicesResults);
 
     const filteredServices = Array.from(
       new Map(
