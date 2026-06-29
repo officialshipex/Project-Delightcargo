@@ -11,51 +11,66 @@ const { getProshipAccessToken } = require("../Authorize/proship.controller");
 
 const PROSHIP_BASE_URL = "https://proship.prozo.com/api";
 
+const proshipServiceabilityCache = new Map();
+
 const checkProshipServiceability = async (payload) => {
-  try {
-    const token = await getProshipAccessToken();
-    if (!token) return { success: false, message: "Auth failed" };
-    // console.log("pickup pincode",payload.pickUpPincode)
-    // console.log("drop pincode",payload.deliveryPincode)
-    const response = await axios.post(
-      `${PROSHIP_BASE_URL}/tools/serviceability`,
-      [{
-        drop_pincode: parseInt(payload.deliveryPincode),
-        pickup_pincode: parseInt(payload.pickUpPincode)
-      }],
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 8000
-      }
-    );
-    // console.log("service", response.data)
-    const results = response.data.result || [];
-    // console.log("results", results)
-    // Filter Shadowfax & DTDC as requested
-    const shadowfax = results.find(c => c.name.toLowerCase().includes("shadowfax") || c.account_code.toLowerCase().includes("shadowfax"));
-    const dtdc = results.find(c => c.name.toLowerCase().includes("dtdc") || c.account_code.toLowerCase().includes("dtdc"));
+  const cacheKey = `${payload.pickUpPincode || payload.pickup_pincode}-${payload.deliveryPincode || payload.drop_pincode}`;
 
-    if (shadowfax || dtdc) {
-      const courier_ids = [];
-      if (shadowfax) courier_ids.push(shadowfax.cp_id);
-      if (dtdc) courier_ids.push(dtdc.cp_id);
-
-      return {
-        success: true,
-        courier_ids: courier_ids,
-        couriers: {
-          shadowfax: shadowfax ? shadowfax.cp_id : null,
-          dtdc: dtdc ? dtdc.cp_id : null
-        },
-        account_id: (shadowfax || dtdc).account_id
-      };
-    }
-
-    return { success: false, message: "Shadowfax or DTDC not available" };
-  } catch (error) {
-    console.error("Proship Serviceability Error:", error.response?.data || error.message);
-    return { success: false, error: error.message };
+  if (proshipServiceabilityCache.has(cacheKey)) {
+    return proshipServiceabilityCache.get(cacheKey);
   }
+
+  const promise = (async () => {
+    try {
+      const token = await getProshipAccessToken();
+      if (!token) return { success: false, message: "Auth failed" };
+      
+      const response = await axios.post(
+        `${PROSHIP_BASE_URL}/tools/serviceability`,
+        [{
+          drop_pincode: parseInt(payload.deliveryPincode || payload.drop_pincode),
+          pickup_pincode: parseInt(payload.pickUpPincode || payload.pickup_pincode)
+        }],
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 8000
+        }
+      );
+      
+      const results = response.data.result || [];
+      const shadowfax = results.find(c => c.name.toLowerCase().includes("shadowfax") || c.account_code.toLowerCase().includes("shadowfax"));
+      const dtdc = results.find(c => c.name.toLowerCase().includes("dtdc") || c.account_code.toLowerCase().includes("dtdc"));
+
+      if (shadowfax || dtdc) {
+        const courier_ids = [];
+        if (shadowfax) courier_ids.push(shadowfax.cp_id);
+        if (dtdc) courier_ids.push(dtdc.cp_id);
+
+        return {
+          success: true,
+          courier_ids: courier_ids,
+          couriers: {
+            shadowfax: shadowfax ? shadowfax.cp_id : null,
+            dtdc: dtdc ? dtdc.cp_id : null
+          },
+          account_id: (shadowfax || dtdc).account_id
+        };
+      }
+
+      return { success: false, message: "Shadowfax or DTDC not available" };
+    } catch (error) {
+      console.error("Proship Serviceability Error:", error.response?.data || error.message);
+      return { success: false, error: error.message };
+    }
+  })();
+
+  proshipServiceabilityCache.set(cacheKey, promise);
+
+  setTimeout(() => {
+    proshipServiceabilityCache.delete(cacheKey);
+  }, 10000); // 10 seconds cache
+
+  return promise;
 };
 // checkProshipServiceability({
 //   pickUpPincode: "110001",

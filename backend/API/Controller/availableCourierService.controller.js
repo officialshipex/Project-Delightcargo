@@ -4,6 +4,7 @@ const getZone = zoneManagementController.getZone;
 const Plan = require("../../models/Plan.model");
 const RateCard = require("../../models/rateCards");
 const Order = require("../../models/newOrder.model"); // ✅ import Order model
+const CourierService = require("../../models/CourierService.Schema");
 const {
   checkServiceabilityEcomExpress,
 } = require("../../AllCouriers/EcomExpress/Couriers/couriers.controllers.js");
@@ -123,6 +124,10 @@ const availableCourierService = async (req, res) => {
     const flatRateMap = new Map(
       rateCardDocs.map((doc) => [doc._id.toString(), doc.isFlatRate === true])
     );
+    const shipexServices = await CourierService.find({ provider: "ShipexIndia" }).lean();
+    const shipexServiceMap = new Map(
+      shipexServices.map(s => [s.name.toLowerCase().trim(), s.courier || s.name])
+    );
 
     // Collect unique active providers
     const activeProviders = new Set();
@@ -143,9 +148,9 @@ const availableCourierService = async (req, res) => {
             const payload = {
               origin: order.pickupAddress,
               destination: order.receiverAddress,
-              payment_type: order.paymentDetails?.method,
+              payment_type: paymentType,
               order_amount: order.paymentDetails?.amount || 0,
-              weight: weight || 0,
+              weight: weight,
               length: order.packageDetails.volumetricWeight?.length || 0,
               breadth: order.packageDetails.volumetricWeight?.width || 0,
               height: order.packageDetails.volumetricWeight?.height || 0,
@@ -224,6 +229,23 @@ const availableCourierService = async (req, res) => {
         } else if (sName.includes("dtdc")) {
           isServiceable = !!serviceable.couriers.dtdc;
         }
+      }
+
+      if (provider === "ShipexIndia" && isServiceable) {
+        let isCourierServiceable = false;
+        if (Array.isArray(serviceable.data)) {
+          const mappedName = shipexServiceMap.get(rc.courierServiceName.toLowerCase().trim()) || rc.courierServiceName;
+          const matchedCourier = serviceable.data.find(
+            (item) =>
+              item.courierServiceName &&
+              item.courierServiceName.toLowerCase().replace(/\s+/g, "") ===
+                mappedName.toLowerCase().replace(/\s+/g, "")
+          );
+          if (matchedCourier && matchedCourier.serviceable === true) {
+            isCourierServiceable = true;
+          }
+        }
+        isServiceable = isCourierServiceable;
       }
 
       if (!isServiceable) continue;

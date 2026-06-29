@@ -355,7 +355,31 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         paymentType: paymentMethod,
         declaredValue: currentOrder.paymentDetails?.amount || 0,
       };
-      return await checkShipexIndiaServiceability(payload);
+      const res = await checkShipexIndiaServiceability(payload);
+      if (res && res.success && Array.isArray(res.data)) {
+        let shipexCourierName = service.name;
+        try {
+          const CourierService = require("../models/CourierService.Schema");
+          const serviceDoc = await CourierService.findOne({ name: service.name, provider: "ShipexIndia" });
+          if (serviceDoc) {
+            shipexCourierName = serviceDoc.courier || serviceDoc.name;
+          }
+        } catch (dbErr) {
+          console.error("Error fetching CourierService details from DB:", dbErr.message);
+        }
+
+        const matchedCourier = res.data.find(
+          (item) =>
+            item.courierServiceName &&
+            item.courierServiceName.toLowerCase().replace(/\s+/g, "") ===
+              shipexCourierName.toLowerCase().replace(/\s+/g, "")
+        );
+        if (matchedCourier && matchedCourier.serviceable === true) {
+          return { ...res, success: true };
+        }
+        return { ...res, success: false, message: "Service not available for this courier" };
+      }
+      return res;
     }
 
     // Default

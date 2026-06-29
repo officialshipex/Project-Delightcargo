@@ -82,6 +82,13 @@ const calculateRate = async (req, res) => {
       rateCardDocs.map((doc) => [doc._id.toString(), doc.isFlatRate === true])
     );
 
+    // Fetch ShipexIndia courier services mapping for O(1) matching in loop
+    const CourierService = require("../models/CourierService.Schema");
+    const shipexServices = await CourierService.find({ provider: "ShipexIndia" }).lean();
+    const shipexServiceMap = new Map(
+      shipexServices.map(s => [s.name.toLowerCase().trim(), s.courier || s.name])
+    );
+
     for (let rc of rateCards) {
       // Use flag from object if present, otherwise fallback to lookup map (for legacy/sync cases)
       const isFlatRate = rc.isFlatRate === true || flatRateMap.get(rc._id?.toString()) === true;
@@ -111,6 +118,21 @@ const calculateRate = async (req, res) => {
         }
         const shipexResult = serviceabilityCache[provider];
         if (!shipexResult || shipexResult.success === false) continue;
+
+        let isServiceable = false;
+        if (Array.isArray(shipexResult.data)) {
+          const mappedName = shipexServiceMap.get(rc.courierServiceName.toLowerCase().trim()) || rc.courierServiceName;
+          const matchedCourier = shipexResult.data.find(
+            (item) =>
+              item.courierServiceName &&
+              item.courierServiceName.toLowerCase().replace(/\s+/g, "") ===
+                mappedName.toLowerCase().replace(/\s+/g, "")
+          );
+          if (matchedCourier && matchedCourier.serviceable === true) {
+            isServiceable = true;
+          }
+        }
+        if (!isServiceable) continue;
         serviceable = { success: true };
       } else if (provider === "BoxdLogistics") {
         if (!serviceabilityCache[provider]) {

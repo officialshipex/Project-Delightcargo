@@ -8,37 +8,56 @@ const { getZone } = require("../../../Rate/zoneManagementController");
 const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
 const { getShipexToken } = require("../Authorize/shipxIndia.controller");
 
+const shipexServiceabilityCache = new Map();
+
 const checkShipexIndiaServiceability = async (payload) => {
-  try {
-    const token = await getShipexToken();
-    if (!token) return { success: false, message: "Auth failed" };
+  const cacheKey = `${payload.pickUpPincode || payload.fromPincode}-${payload.deliveryPincode || payload.toPincode}-${payload.applicableWeight || payload.order_weight || 0.5}-${payload.paymentType === "COD" || payload.isCodOrder ? "COD" : "Prepaid"}`;
 
-    const response = await axios.post(
-      "https://api.shipexindia.com/v1/api/external/pincodeServiceability",
-      {
-        pickUpPincode: String(payload.pickUpPincode || payload.fromPincode),
-        deliveryPincode: String(payload.deliveryPincode || payload.toPincode),
-        applicableWeight: Number(payload.applicableWeight || payload.order_weight || 0.5),
-        length: Number(payload.length || 10),
-        width: Number(payload.width || 10),
-        height: Number(payload.height || 10),
-        paymentType: payload.paymentType === "COD" || payload.isCodOrder ? "COD" : "Prepaid",
-        declaredValue: Number(payload.declaredValue || payload.order_value || 0),
-      },
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 8000,
-      }
-    );
-
-    if (response.data && (response.data.serviceable === true || response.data.status === "success" || response.data.success === true)) {
-      return { success: true };
-    }
-    return { success: false, message: response.data?.message || "Not serviceable" };
-  } catch (error) {
-    console.error("ShipexIndia Serviceability Error:", error.response?.data || error.message);
-    return { success: false, error: error.message };
+  if (shipexServiceabilityCache.has(cacheKey)) {
+    return shipexServiceabilityCache.get(cacheKey);
   }
+
+  const promise = (async () => {
+    try {
+      const token = await getShipexToken();
+      if (!token) return { success: false, message: "Auth failed", data: [] };
+
+      const response = await axios.post(
+        "https://api.shipexindia.com/v1/api/external/pincodeServiceability",
+        {
+          pickUpPincode: String(payload.pickUpPincode || payload.fromPincode),
+          deliveryPincode: String(payload.deliveryPincode || payload.toPincode),
+          applicableWeight: Number(payload.applicableWeight || payload.order_weight || 0.5),
+          length: Number(payload.length || 10),
+          width: Number(payload.width || 10),
+          height: Number(payload.height || 10),
+          paymentType: payload.paymentType === "COD" || payload.isCodOrder ? "COD" : "Prepaid",
+          declaredValue: Number(payload.declaredValue || payload.order_value || 0),
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 8000,
+        }
+      );
+      console.log("shipex response", response.data);
+      if (response.data && (response.data.status === "success" || response.data.success === true || response.data.serviceable === true)) {
+        return { success: true, data: response.data.data || [] };
+      }
+      return { success: false, message: response.data?.message || "Not serviceable", data: [] };
+    } catch (error) {
+      console.error("ShipexIndia Serviceability Error:", error.response?.data || error.message);
+      return { success: false, error: error.message, data: [] };
+    }
+  })();
+
+  shipexServiceabilityCache.set(cacheKey, promise);
+
+  // Clear cache entry after 10 seconds (transient cache for concurrent checks)
+  setTimeout(() => {
+    shipexServiceabilityCache.delete(cacheKey);
+  }, 10000);
+
+  return promise;
 };
 
 const createShipexIndiaShipment = async (req, res) => {

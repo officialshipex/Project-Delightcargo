@@ -1402,7 +1402,7 @@ const ShipeNowOrder = async (req, res) => {
     if (!plan) {
       return res.status(404).json({ error: "No plan found for this user" });
     }
-console.log("plans",plan)
+// console.log("plans",plan)
     const [EDDRates, EPDRates, services] = await Promise.all([
       EDDMap.find().lean(),
       EPDMap.find().lean(),
@@ -1434,16 +1434,17 @@ console.log("plans",plan)
     const availableServicesResults = await Promise.all(
       enabledServices.map(async (item) => {
         const provider = item.provider;
-        // Optimization: Cache serviceability results per provider during this request
+        const cacheKey = `${provider}-${item.name}`;
+        // Optimization: Cache serviceability results per provider & service name during this request
         // We cache the PROMISE to handle concurrent requests correctly in Promise.all
-        if (!serviceabilityCache[provider]) {
-          serviceabilityCache[provider] = checkServiceabilityAll(
+        if (!serviceabilityCache[cacheKey]) {
+          serviceabilityCache[cacheKey] = checkServiceabilityAll(
             item,
             order._id,
             order.pickupAddress.pinCode,
           );
         }
-        let result = await serviceabilityCache[provider];
+        let result = await serviceabilityCache[cacheKey];
         // console.log("result",result)
         if (result && result.success) {
           if (item.provider?.toLowerCase() === "boxdlogistics" && Array.isArray(result.courier_ids)) {
@@ -1460,7 +1461,7 @@ console.log("plans",plan)
         return [];
       }),
     );
-    console.log("available", availableServicesResults);
+    // console.log("available", availableServicesResults);
 
     const filteredServices = Array.from(
       new Map(
