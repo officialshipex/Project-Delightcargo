@@ -14,6 +14,8 @@ const WalletTransaction = require("../models/WalletTransaction.model");
 const RateCard = require("../models/rateCards");
 const { getZone } = require("../Rate/zoneManagementController");
 
+let uploadQueue = Promise.resolve();
+
 const downloadExcel = async (req, res) => {
   try {
     const workbook = new ExcelJS.Workbook();
@@ -66,15 +68,18 @@ const downloadExcel = async (req, res) => {
 // ─── Background worker ────────────────────────────────────────────────────────
 // Called AFTER the HTTP response is already sent so the client is never blocked.
 async function _processDiscrepancyBatch(awbNumbers, chargeWeightMap, filePath) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     // 1. already existing discrepancies (batch query)
     const existing = await WeightDiscrepancy.find({
       awbNumber: { $in: awbNumbers },
-    }).select("awbNumber").lean();
+    }).session(session).select("awbNumber").lean();
     const existingSet = new Set(existing.map((e) => e.awbNumber));
 
     // 2. Fetch orders in one query with only the fields we need
     const orders = await Order.find({ awb_number: { $in: awbNumbers } })
+      .session(session)
       .select(
         "awb_number orderId userId status courierServiceName provider " +
         "productDetails pickupAddress receiverAddress packageDetails paymentDetails"
@@ -114,7 +119,7 @@ async function _processDiscrepancyBatch(awbNumbers, chargeWeightMap, filePath) {
 
     const userIds = Array.from(userIdsSet);
     if (userIds.length === 0) {
-      fs.promises.unlink(filePath).catch(() => {});
+      await session.commitTransaction();
       return;
     }
 
@@ -137,8 +142,8 @@ async function _processDiscrepancyBatch(awbNumbers, chargeWeightMap, filePath) {
 
     // 5. Parallel fetch: plans + users
     const [allPlans, allUsers] = await Promise.all([
-      Plan.find({ userId: { $in: userIds } }).lean(),
-      User.find({ _id: { $in: userIds } }).select("Wallet").lean(),
+      Plan.find({ userId: { $in: userIds } }).session(session).lean(),
+      User.find({ _id: { $in: userIds } }).session(session).select("Wallet").lean(),
     ]);
 
     const planMap = new Map(allPlans.map((p) => [p.userId.toString(), p]));
@@ -155,7 +160,7 @@ async function _processDiscrepancyBatch(awbNumbers, chargeWeightMap, filePath) {
     }
     const rateCardsList = await RateCard.find({
       _id: { $in: Array.from(rateCardIdsSet) },
-    }).select("_id isFlatRate").lean();
+    }).session(session).select("_id isFlatRate").lean();
     const rateCardFlatRateMap = new Map(
       rateCardsList.map((rc) => [rc._id.toString(), rc.isFlatRate === true])
     );
@@ -312,14 +317,18 @@ async function _processDiscrepancyBatch(awbNumbers, chargeWeightMap, filePath) {
         });
       }
 
-      await Promise.all([
-        WeightDiscrepancy.insertMany(discrepancies, { ordered: false }),
-        walletBulkOps.length > 0 ? Wallet.bulkWrite(walletBulkOps) : Promise.resolve(),
-      ]);
+      await WeightDiscrepancy.insertMany(discrepancies, { session, ordered: false });
+      if (walletBulkOps.length > 0) {
+        await Wallet.bulkWrite(walletBulkOps, { session });
+      }
     }
+
+    await session.commitTransaction();
   } catch (err) {
+    await session.abortTransaction();
     console.error("[uploadDispreancy background] Error:", err);
   } finally {
+    session.endSession();
     fs.promises.unlink(filePath).catch(() => {});
   }
 }
@@ -337,9 +346,12 @@ const uploadDispreancy = async (req, res) => {
     const sheetName = workbook.SheetNames[0];
     const sheetData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-    const awbNumbers = sheetData
-      .map((row) => row["*AWB Number"]?.toString().trim())
-      .filter(Boolean);
+    // unique the AWB numbers from Excel to prevent duplicates within the file itself
+    const awbNumbers = [...new Set(
+      sheetData
+        .map((row) => row["*AWB Number"]?.toString().trim())
+        .filter(Boolean)
+    )];
 
     if (awbNumbers.length === 0) {
       fs.promises.unlink(filePath).catch(() => {});
@@ -366,14 +378,18 @@ const uploadDispreancy = async (req, res) => {
       message: "File received. Discrepancies are being processed in the background.",
     });
 
-    // 🔄 Run all heavy DB work AFTER response is sent
-    setImmediate(() => {
-      _processDiscrepancyBatch(awbNumbers, chargeWeightMap, filePath).catch((err) => {
-        console.error("[uploadDispreancy] Background batch failed:", err);
-      });
+    // 🔄 Run all heavy DB work sequentially via uploadQueue to prevent race conditions & double updates
+    uploadQueue = uploadQueue.then(() => {
+      return _processDiscrepancyBatch(awbNumbers, chargeWeightMap, filePath);
+    }).catch((err) => {
+      console.error("[uploadDispreancy] Sequential background batch execution failed:", err);
     });
+
   } catch (error) {
     console.error("Error parsing upload:", error);
+    if (req.file && req.file.path) {
+      fs.promises.unlink(req.file.path).catch(() => {});
+    }
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: "Internal Server Error" });
     }
@@ -790,7 +806,7 @@ const AcceptDiscrepancy = async (req, res) => {
       description: `Weight Dispute Charges Applied`,
       priceBreakup: discrepancies.excessWeightCharges?.priceBreakup,
     };
-    await WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session });
+    await WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session, ordered: true });
 
     await wallet.save({ session });
 
@@ -906,7 +922,7 @@ const AcceptAllDiscrepancies = async (req, res) => {
         createdAt: new Date(),
       };
 
-      await WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session });
+      await WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session, ordered: true });
 
       // update discrepancy
       discrepancy.status = "Accepted";
@@ -998,7 +1014,7 @@ const autoAcceptDiscrepancies = async () => {
         createdAt: new Date(),
       };
 
-      await WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session });
+      await WalletTransaction.create([{ walletId: wallet._id, ...newTransaction }], { session, ordered: true });
 
       await wallet.save({ session });
 
@@ -1258,20 +1274,31 @@ const exportWeightDiscrepancy = async (req, res) => {
       {
         $project: {
           _id: 1,
-          userId: "$user.userId", // Use 5-digit userId from users collection
+          userId: "$user.userId",
           awbNumber: 1,
           orderId: 1,
           courierServiceName: 1,
           provider: 1,
 
-          // Keep full productDetails array for processing in JS
           productDetails: 1,
 
           enteredWeightApplicable: "$enteredWeight.applicableWeight",
+          enteredWeightDead: "$enteredWeight.deadWeight",
+          enteredWeightVolL: "$enteredWeight.volumetricWeight.length",
+          enteredWeightVolB: "$enteredWeight.volumetricWeight.breadth",
+          enteredWeightVolH: "$enteredWeight.volumetricWeight.height",
+
           chargedWeightApplicable: "$chargedWeight.applicableWeight",
+          chargedWeightDead: "$chargedWeight.deadWeight",
+
+          chargeDimensionL: "$chargeDimension.length",
+          chargeDimensionB: "$chargeDimension.breadth",
+          chargeDimensionH: "$chargeDimension.height",
 
           excessWeight: "$excessWeightCharges.excessWeight",
           excessCharges: "$excessWeightCharges.excessCharges",
+          pendingAmount: "$excessWeightCharges.pendingAmount",
+          priceBreakup: "$excessWeightCharges.priceBreakup",
 
           status: 1,
           adminStatus: 1,
@@ -1280,6 +1307,10 @@ const exportWeightDiscrepancy = async (req, res) => {
           updatedAt: 1,
           text: 1,
           imageUrl: 1,
+          discrepancyRaisedAt: 1,
+          discrepancyAcceptedAt: 1,
+          discrepancyDeclinedAt: 1,
+          discrepancyDeclinedReason: 1,
 
           user: {
             name: "$user.fullname",
@@ -1301,7 +1332,6 @@ const exportWeightDiscrepancy = async (req, res) => {
 
     // Process results for CSV export
     const csvData = results.map((item) => ({
-      // DiscrepancyID: item._id.toString(),
       UserID: item.userId || "",
       UserName: item.user.name || "",
       UserEmail: item.user.email || "",
@@ -1311,26 +1341,44 @@ const exportWeightDiscrepancy = async (req, res) => {
       CourierServiceName: item.courierServiceName || "",
       Provider: item.provider || "",
 
-      // Join product names by comma
       ProductNames: Array.isArray(item.productDetails)
-        ? item.productDetails
-          .map((pd) => pd.name)
-          .filter(Boolean)
-          .join(", ")
+        ? item.productDetails.map((pd) => pd.name).filter(Boolean).join(", ")
         : "",
 
+      // Entered Weight (declared)
       EnteredWeightApplicable: item.enteredWeightApplicable || "",
+      EnteredWeightDead: item.enteredWeightDead || "",
+      EnteredVolumetricL: item.enteredWeightVolL || "",
+      EnteredVolumetricB: item.enteredWeightVolB || "",
+      EnteredVolumetricH: item.enteredWeightVolH || "",
+
+      // Charged Weight (by courier)
       ChargedWeightApplicable: item.chargedWeightApplicable || "",
+      ChargedWeightDead: item.chargedWeightDead || "",
+
+      // Charge Dimensions
+      ChargeDimensionL: item.chargeDimensionL || "",
+      ChargeDimensionB: item.chargeDimensionB || "",
+      ChargeDimensionH: item.chargeDimensionH || "",
+
+      // Excess Weight & Charges
       ExcessWeight: item.excessWeight || "",
       ExcessCharges: item.excessCharges || "",
+      PendingAmount: item.pendingAmount || "",
+      PriceBreakup: item.priceBreakup ? JSON.stringify(item.priceBreakup) : "",
 
-      Status: item.status || "",
-      // AdminStatus: item.adminStatus || "",
-      // ClientStatus: item.clientStatus || "",
-      // CreatedAt: item.createdAt ? item.createdAt.toISOString() : "",
-      // UpdatedAt: item.updatedAt ? item.updatedAt.toISOString() : "",
-      // Text: item.text || "",
-      // ImageUrl: item.imageUrl || "",
+      // Status
+      DiscrepancyStatus: item.status || "",
+      AdminStatus: item.adminStatus || "",
+      ClientStatus: item.clientStatus || "",
+
+      // Timestamps
+      CreatedAt: item.createdAt ? new Date(item.createdAt).toLocaleString() : "",
+      UpdatedAt: item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "",
+      DiscrepancyRaisedAt: item.discrepancyRaisedAt ? new Date(item.discrepancyRaisedAt).toLocaleString() : "",
+      DiscrepancyAcceptedAt: item.discrepancyAcceptedAt ? new Date(item.discrepancyAcceptedAt).toLocaleString() : "",
+      DiscrepancyDeclinedAt: item.discrepancyDeclinedAt ? new Date(item.discrepancyDeclinedAt).toLocaleString() : "",
+      DiscrepancyDeclinedReason: item.discrepancyDeclinedReason || "",
     }));
 
     const csvHeaders = Object.keys(csvData[0]);

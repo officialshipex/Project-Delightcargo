@@ -69,7 +69,7 @@ const {
   cancelOrder: cancelShiprocketOrder,
 } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 const { cancelShadowfaxOrder } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
-const { cancelShipexIndiaOrder } = require("../AllCouriers/ShipxIndia/Courier/couriers.controller");
+const { cancelLosung360Order } = require("../AllCouriers/Losung360/Courier/couriers.controller");
 const WeightDiscrepancy = require("../WeightDispreancy/weightDispreancy.model");
 // Create a shipment
 const newOrder = async (req, res) => {
@@ -115,8 +115,7 @@ const newOrder = async (req, res) => {
     const computedTotal = productDetails.reduce((sum, p) => {
       const qty = Number(p.quantity) || 1;
       const price = Number(p.unitPrice) || 0;
-      const discount = Number(p.discount) || 0;
-      return sum + qty * (price - discount);
+      return sum + qty * price;
     }, 0);
 
     const declaredAmount = Number(paymentDetails.amount) || 0;
@@ -165,7 +164,7 @@ const newOrder = async (req, res) => {
     });
   } catch (error) {
     console.log("1111111111", error);
-    res.status(400).json({ error: error.message || "All fields are required" });
+    res.status(400).json({ error: "All fields are required" });
   }
 };
 // new pick up address
@@ -312,10 +311,16 @@ const newReciveAddress = async (req, res) => {
 const deletePickupAddress = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id;
+    const isAdmin = req.user?.isAdmin === true && req.user?.adminTab === true;
+    const isEmployee = req.isEmployee === true || !!req.employee;
+
+    let query = { _id: id };
+    if (!isAdmin && !isEmployee) {
+      query.userId = req.user?._id;
+    }
 
     // Find the pickup address and ensure it belongs to the user
-    const pickupAddress = await pickAddress.findOne({ _id: id, userId });
+    const pickupAddress = await pickAddress.findOne(query);
 
     if (!pickupAddress) {
       return res
@@ -456,7 +461,7 @@ const getOrders = async (req, res) => {
         statusCondition?.status === "new"
         ? { createdAt: -1 }
         : { updatedAt: -1 };
-    let query = Order.find(filter).sort(sortOption);
+    let query = Order.find(filter).sort(sortOption).allowDiskUse(true);
     if (limit) query = query.skip(skip).limit(limit);
 
     const orders = await query.lean();
@@ -614,7 +619,7 @@ const getShippingOrders = async (req, res) => {
 
     const totalCount = await Order.countDocuments(filter);
 
-    let query = Order.find(filter).sort({ createdAt: -1 });
+    let query = Order.find(filter).sort({ createdAt: -1 }).allowDiskUse(true);
     if (limit) query = query.skip(skip).limit(limit);
 
     const orders = await query.lean();
@@ -806,7 +811,7 @@ const getOrdersByNdrStatus = async (req, res) => {
     let query = Order.find(filter).sort({
       "ndrReason.date": -1,
       createdAt: -1,
-    });
+    }).allowDiskUse(true);
 
     if (limit) query = query.skip(skip).limit(limit);
 
@@ -843,15 +848,19 @@ const getOrdersByNdrStatus = async (req, res) => {
     console.error("Error fetching paginated orders:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-};
-
-const setPrimaryPickupAddress = async (req, res) => {
+};const setPrimaryPickupAddress = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id;
+    const isAdmin = req.user?.isAdmin === true && req.user?.adminTab === true;
+    const isEmployee = req.isEmployee === true || !!req.employee;
+
+    let query = { _id: id };
+    if (!isAdmin && !isEmployee) {
+      query.userId = req.user?._id;
+    }
 
     // 1. Check if the pickup address exists and belongs to the user
-    const pickupAddress = await pickAddress.findOne({ _id: id, userId });
+    const pickupAddress = await pickAddress.findOne(query);
     if (!pickupAddress) {
       return res
         .status(404)
@@ -859,7 +868,8 @@ const setPrimaryPickupAddress = async (req, res) => {
     }
 
     // 2. Set all other pickup addresses' isPrimary to false
-    await pickAddress.updateMany({ userId }, { $set: { isPrimary: false } });
+    const ownerUserId = pickupAddress.userId;
+    await pickAddress.updateMany({ userId: ownerUserId }, { $set: { isPrimary: false } });
 
     // 3. Set the selected address as primary
     pickupAddress.isPrimary = true;
@@ -874,17 +884,24 @@ const setPrimaryPickupAddress = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
 const updatePickupAddress = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id; // Ensure you have authentication middleware that sets req.user
+    const isAdmin = req.user?.isAdmin === true && req.user?.adminTab === true;
+    const isEmployee = req.isEmployee === true || !!req.employee;
+
+    let query = { _id: id };
+    if (!isAdmin && !isEmployee) {
+      query.userId = req.user?._id;
+    }
 
     console.log("Updating pickup address ID:", id);
 
     const { contactName, email, phoneNumber, address, pinCode, city, state } =
       req.body;
 
-    const pickupAddress = await pickAddress.findOne({ _id: id, userId });
+    const pickupAddress = await pickAddress.findOne(query);
 
     if (!pickupAddress) {
       return res
@@ -1228,7 +1245,7 @@ const bulkCloneOrders = async (req, res) => {
           {
             status: "new",
             StatusLocation: order.pickupAddress?.city || "N/A",
-            StatusDateTime: new Date(),
+            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
             Instructions: "Order created successfully",
           },
         ],
@@ -1252,34 +1269,46 @@ const bulkCloneOrders = async (req, res) => {
 
 const getpickupAddress = async (req, res) => {
   try {
-    // console.log("req.query.userId:", req.query.userId);
-    // console.log("req.user._id:", req.user?._id);
+    const isAdmin = req.user?.isAdmin === true && req.user?.adminTab === true;
+    const isEmployee = req.isEmployee === true || !!req.employee;
 
-    // ✅ Proper fallback handling (covers undefined, null, empty, and string "undefined")
-    const userId =
-      req.query.userId &&
-        req.query.userId !== "undefined" &&
-        req.query.userId !== "null" &&
-        req.query.userId.trim() !== ""
-        ? req.query.userId.trim()
-        : req.user?._id?.toString();
+    const { page = 1, limit = 20 } = req.query;
 
-    if (!userId) {
+    let query = {};
+    if (!isAdmin && !isEmployee) {
+      query.userId = req.user?._id?.toString();
+    } else {
+      if (req.query.userId && req.query.userId !== "all" && req.query.userId !== "undefined" && req.query.userId !== "null" && req.query.userId.trim() !== "") {
+        query.userId = req.query.userId.trim();
+      }
+    }
+
+    if (!query.userId && !isAdmin && !isEmployee) {
       return res.status(400).json({
         success: false,
         message: "User ID is missing or invalid",
       });
     }
 
-    // console.log("✅ Final userId used:", userId);
+    const parsedPage = Math.max(1, parseInt(page));
+    const parsedLimit = (isAdmin || isEmployee) ? Math.max(1, parseInt(limit)) : 1000;
+    const skip = (parsedPage - 1) * parsedLimit;
 
-    const pickupAddresses = await pickAddress.find({ userId });
+    const total = await pickAddress.countDocuments(query);
 
-    if (!pickupAddresses.length) {
-      return res.status(404).json({ message: "No pickup addresses found" });
-    }
+    const pickupAddresses = await pickAddress.find(query)
+      .populate("userId", "fullname company email userId")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parsedLimit)
+      .lean();
 
-    res.status(200).json({ success: true, data: pickupAddresses });
+    res.status(200).json({ 
+      success: true, 
+      data: pickupAddresses || [],
+      totalPages: Math.ceil(total / parsedLimit),
+      total
+    });
   } catch (error) {
     console.error("Error fetching pickup addresses:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
@@ -1402,7 +1431,7 @@ const ShipeNowOrder = async (req, res) => {
     if (!plan) {
       return res.status(404).json({ error: "No plan found for this user" });
     }
-// console.log("plans",plan)
+
     const [EDDRates, EPDRates, services] = await Promise.all([
       EDDMap.find().lean(),
       EPDMap.find().lean(),
@@ -1434,17 +1463,16 @@ const ShipeNowOrder = async (req, res) => {
     const availableServicesResults = await Promise.all(
       enabledServices.map(async (item) => {
         const provider = item.provider;
-        const cacheKey = `${provider}-${item.name}`;
-        // Optimization: Cache serviceability results per provider & service name during this request
+        // Optimization: Cache serviceability results per provider during this request
         // We cache the PROMISE to handle concurrent requests correctly in Promise.all
-        if (!serviceabilityCache[cacheKey]) {
-          serviceabilityCache[cacheKey] = checkServiceabilityAll(
+        if (!serviceabilityCache[provider]) {
+          serviceabilityCache[provider] = checkServiceabilityAll(
             item,
             order._id,
             order.pickupAddress.pinCode,
           );
         }
-        let result = await serviceabilityCache[cacheKey];
+        let result = await serviceabilityCache[provider];
         // console.log("result",result)
         if (result && result.success) {
           if (item.provider?.toLowerCase() === "boxdlogistics" && Array.isArray(result.courier_ids)) {
@@ -1694,12 +1722,7 @@ const cancelOrdersAtBooked = async (req, res) => {
       return res.status(400).send({ error: "Order is not ready to Cancelled" });
     }
 
-    if (currentOrder.partner === "ShipexIndia" || currentOrder.provider === "ShipexIndia") {
-      const result = await cancelShipexIndiaOrder(currentOrder.awb_number);
-      if (!result.success) {
-        return res.status(400).send({ error: result.error || "Failed to cancel order with ShipexIndia" });
-      }
-    } else if (currentOrder.provider === "Xpressbees") {
+    if (currentOrder.provider === "Xpressbees") {
       const result = await cancelShipmentXpressBees(currentOrder.awb_number);
       if (result.error) {
         return res.status(400).send({ error: "Failed to cancel order" });
@@ -1790,6 +1813,11 @@ const cancelOrdersAtBooked = async (req, res) => {
       if (result.success === false) {
         return res.status(400).send({ error: result.message || "Failed to cancel order with Shadowfax" });
       }
+    } else if (currentOrder.provider === "Losung360" || currentOrder.partner === "Losung360") {
+      const result = await cancelLosung360Order(currentOrder.awb_number);
+      if (result.success === false) {
+        return res.status(400).send({ error: result.message || "Failed to cancel order with Losung360" });
+      }
     } else {
       return res.status(400).json({
         error: "Unsupported courier provider",
@@ -1804,53 +1832,42 @@ const cancelOrdersAtBooked = async (req, res) => {
       console.error("[Pickup] Failed to remove order from manifest during cancellation:", err.message);
     }
 
-    // Atomically set status to Cancelled and walletRefunded to true (if not already refunded)
-    let currentOrderUpdated;
-    try {
-      currentOrderUpdated = await Order.findOneAndUpdate(
-        {
-          _id: currentOrder._id,
-          walletRefunded: { $ne: true }
-        },
-        {
-          $set: {
-            status: "Cancelled",
-            walletRefunded: true
-          },
-          $push: {
-            tracking: {
-              status: "Cancelled",
-              StatusLocation: "",
-              Instructions: "Order cancelled successfully",
-              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-            }
-          }
-        },
-        { new: true }
-      );
-    } catch (dbErr) {
-      console.error("Error updating order status atomically in cancelOrdersAtBooked:", dbErr);
-      return res.status(500).json({ success: false, message: "Database error during cancellation" });
-    }
+    // Compute refund amount before starting the transaction
+    const balanceTobeAdded =
+      currentOrder.totalFreightCharges === "N/A" || !currentOrder.totalFreightCharges
+        ? 0
+        : parseFloat(currentOrder.totalFreightCharges) || 0;
 
-    if (currentOrderUpdated) {
+    // Perform database updates inside a transaction with retry for write conflicts
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+
+    while (attempt < MAX_RETRIES) {
       const session = await mongoose.startSession();
       session.startTransaction();
 
       try {
-        let balanceTobeAdded =
-          currentOrderUpdated.totalFreightCharges == "N/A"
-            ? 0
-            : parseFloat(currentOrderUpdated.totalFreightCharges);
+        // Re-fetch inside session to get a clean locked copy for save
+        const orderInSession = await Order.findById(currentOrder._id).session(session);
+        // Set status and tracking inside session (once per attempt — safe because we re-fetch)
+        orderInSession.status = "Cancelled";
+        orderInSession.tracking.push({
+          status: "Cancelled",
+          StatusLocation: "",
+          StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+          Instructions: "Order cancelled successfully",
+        });
 
+        // ✅ Guard: Check if this AWB was already refunded
         const alreadyRefunded = await WalletTransaction.exists({
           walletId: currentWallet._id,
-          awb_number: currentOrderUpdated.awb_number,
+          awb_number: currentOrder.awb_number,
           category: "credit",
           description: "Freight Charges Received",
-        }).session(session);
+        });
 
         if (balanceTobeAdded > 0 && !alreadyRefunded) {
+          // Sequential writes inside transaction — avoids WriteConflict
           const updatedWallet = await Wallet.findOneAndUpdate(
             { _id: currentWallet._id },
             { $inc: { balance: balanceTobeAdded } },
@@ -1860,42 +1877,43 @@ const cancelOrdersAtBooked = async (req, res) => {
           await WalletTransaction.create(
             [{
               walletId: updatedWallet._id,
-              channelOrderId: currentOrderUpdated.orderId || null,
+              channelOrderId: currentOrder.orderId || null,
               category: "credit",
               amount: balanceTobeAdded,
               balanceAfterTransaction: updatedWallet.balance,
               date: new Date(),
-              awb_number: currentOrderUpdated.awb_number || "",
-              description: `Freight Charges Received`,
+              awb_number: currentOrder.awb_number || "",
+              description: "Freight Charges Received",
             }],
-            { session }
+            { session, ordered: true }
           );
+        } else if (balanceTobeAdded > 0 && alreadyRefunded) {
+          console.log(`[Cancel] Skipping wallet refund for AWB ${currentOrder.awb_number} — already refunded.`);
         }
 
+        await orderInSession.save({ session });
         await session.commitTransaction();
         session.endSession();
+        break; // success — exit retry loop
+
       } catch (err) {
         await session.abortTransaction();
         session.endSession();
+
+        // MongoDB TransientTransactionError: retry the whole transaction
+        const isTransient =
+          err.errorLabels?.includes("TransientTransactionError") ||
+          err.code === 112;
+
+        if (isTransient && attempt < MAX_RETRIES - 1) {
+          attempt++;
+          console.warn(`[CancelOrder] WriteConflict on attempt ${attempt}, retrying...`);
+          await new Promise((r) => setTimeout(r, 100 * attempt));
+          continue;
+        }
+
         throw err;
       }
-    } else {
-      // If currentOrderUpdated is null, it means it was already refunded/cancelled elsewhere.
-      // We ensure the status is set to Cancelled if it isn't already, without running the refund logic again.
-      await Order.findOneAndUpdate(
-        { _id: currentOrder._id, status: { $ne: "Cancelled" } },
-        {
-          $set: { status: "Cancelled" },
-          $push: {
-            tracking: {
-              status: "Cancelled",
-              StatusLocation: "",
-              Instructions: "Order cancelled successfully",
-              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-            }
-          }
-        }
-      );
     }
 
     // console.log("hii")
@@ -2143,9 +2161,7 @@ const bulkCancelOrder = async (req, res) => {
           // Call provider cancel API
           let cancelResponse;
           try {
-            if (partner === "ShipexIndia" || provider === "ShipexIndia") {
-              cancelResponse = await cancelShipexIndiaOrder(currentOrder.awb_number);
-            } else if (provider === "Xpressbees") {
+            if (provider === "Xpressbees") {
               cancelResponse = await cancelShipmentXpressBees(currentOrder.awb_number);
             } else if (provider === "Shiprocket" || partner === "Shiprocket") {
               cancelResponse = await cancelShiprocketOrder(currentOrder.awb_number);
@@ -2175,6 +2191,8 @@ const bulkCancelOrder = async (req, res) => {
               cancelResponse = await cancelProshipOrder(currentOrder.awb_number);
             } else if (provider === "Shadowfax" || partner === "Shadowfax") {
               cancelResponse = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
+            } else if (provider === "Losung360" || partner === "Losung360") {
+              cancelResponse = await cancelLosung360Order(currentOrder.awb_number);
             } else {
               cancelResponse = { success: false, error: `Unsupported courier provider: ${provider}` };
             }
@@ -2224,101 +2242,100 @@ const bulkCancelOrder = async (req, res) => {
             console.error("[Pickup] Failed to remove order from manifest during bulk cancellation:", err.message);
           }
 
-          // Try to atomically mark the order as walletRefunded: true
-          const orderUpdated = await Order.findOneAndUpdate(
-            {
-              _id: currentOrder._id,
-              walletRefunded: { $ne: true }
-            },
-            {
-              $set: {
-                status: "Cancelled",
-                walletRefunded: true
-              },
-              $push: {
-                tracking: {
-                  status: "Cancelled",
-                  StatusLocation: "",
-                  Instructions: isAlreadyCancelled
-                    ? "Order cancelled successfully (Courier already cancelled)"
-                    : "Order cancelled successfully",
-                  StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-                }
-              }
-            },
-            { new: true }
-          );
+          // Refund wallet balance safely
+          const balanceToAdd =
+            currentOrder.totalFreightCharges === "N/A"
+              ? 0
+              : parseFloat(currentOrder.totalFreightCharges) || 0;
 
-          if (orderUpdated) {
-            // Refund wallet balance safely inside a transaction session
-            const balanceToAdd =
-              orderUpdated.totalFreightCharges === "N/A"
-                ? 0
-                : parseFloat(orderUpdated.totalFreightCharges) || 0;
+          if (balanceToAdd > 0) {
+            // Guard: Check if this AWB was already refunded
+            const alreadyRefunded = await WalletTransaction.exists({
+              walletId: walletId,
+              awb_number: currentOrder.awb_number,
+              category: "credit",
+              description: "Freight Charges Received",
+            });
 
-            if (balanceToAdd > 0) {
-              const session = await mongoose.startSession();
-              session.startTransaction();
+            if (!alreadyRefunded) {
+              // Wrap in a session+transaction with retry for WriteConflict
+              const MAX_RETRIES = 3;
+              let attempt = 0;
+              while (attempt < MAX_RETRIES) {
+                const session = await mongoose.startSession();
+                session.startTransaction();
+                try {
+                  // Re-fetch inside session to get a fresh locked copy and avoid Mongoose save/retry state issues
+                  const orderInSession = await Order.findById(currentOrder._id).session(session);
+                  if (orderInSession) {
+                    orderInSession.status = "Cancelled";
+                    orderInSession.tracking.push({
+                      status: "Cancelled",
+                      StatusLocation: "",
+                      StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                      Instructions: isAlreadyCancelled
+                        ? "Order cancelled successfully (Courier already cancelled)"
+                        : "Order cancelled successfully",
+                    });
 
-              try {
-                // Guard: Check if this AWB was already refunded
-                const alreadyRefunded = await WalletTransaction.exists({
-                  walletId: walletId,
-                  awb_number: orderUpdated.awb_number,
-                  category: "credit",
-                  description: "Freight Charges Received",
-                }).session(session);
+                    // Sequential writes inside transaction — avoids WriteConflict
+                    const updatedWallet = await Wallet.findOneAndUpdate(
+                      { _id: walletId },
+                      { $inc: { balance: balanceToAdd } },
+                      { new: true, session },
+                    );
 
-                if (!alreadyRefunded) {
-                  const updatedWallet = await Wallet.findOneAndUpdate(
-                    { _id: walletId },
-                    { $inc: { balance: balanceToAdd } },
-                    { new: true, session },
-                  );
+                    await WalletTransaction.create([{
+                      walletId: walletId,
+                      channelOrderId: orderInSession.orderId || null,
+                      category: "credit",
+                      amount: balanceToAdd,
+                      balanceAfterTransaction: updatedWallet.balance,
+                      date: new Date(),
+                      awb_number: orderInSession.awb_number || "",
+                      description: "Freight Charges Received",
+                    }], { session, ordered: true });
 
-                  // Update cached balance
-                  walletDoc.balance = updatedWallet.balance;
-
-                  await WalletTransaction.create([{
-                    walletId: walletId,
-                    channelOrderId: orderUpdated.orderId || null,
-                    category: "credit",
-                    amount: balanceToAdd,
-                    balanceAfterTransaction: updatedWallet.balance,
-                    date: new Date(),
-                    awb_number: orderUpdated.awb_number || "",
-                    description: "Freight Charges Received",
-                  }], { session });
-                }
-
-                await session.commitTransaction();
-                session.endSession();
-              } catch (txnError) {
-                await session.abortTransaction();
-                session.endSession();
-                console.error(`[Background BulkCancel] Wallet txn failed for AWB ${orderUpdated.awb_number}:`, txnError.message);
-              }
-            }
-          } else {
-            // If orderUpdated is null, it means it was already refunded/cancelled elsewhere.
-            // We ensure the status is set to Cancelled if it isn't already, without running the refund logic again.
-            await Order.findOneAndUpdate(
-              { _id: currentOrder._id, status: { $ne: "Cancelled" } },
-              {
-                $set: { status: "Cancelled" },
-                $push: {
-                  tracking: {
-                    status: "Cancelled",
-                    StatusLocation: "",
-                    Instructions: isAlreadyCancelled
-                      ? "Order cancelled successfully (Courier already cancelled)"
-                      : "Order cancelled successfully",
-                    StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                    await orderInSession.save({ session });
                   }
+
+                  await session.commitTransaction();
+                  session.endSession();
+                  break; // success
+
+                } catch (txErr) {
+                  await session.abortTransaction();
+                  session.endSession();
+                  const isTransient =
+                    txErr.errorLabels?.includes("TransientTransactionError") ||
+                    txErr.code === 112;
+                  if (isTransient && attempt < MAX_RETRIES - 1) {
+                    attempt++;
+                    console.warn(`[BulkCancel] WriteConflict AWB ${currentOrder.awb_number}, retry ${attempt}...`);
+                    await new Promise((r) => setTimeout(r, 100 * attempt));
+                    continue;
+                  }
+                  throw txErr;
                 }
               }
-            );
+              console.log(`[Background BulkCancel] Successfully cancelled AWB ${currentOrder.awb_number}`);
+              continue; // Skip the standalone save below — already saved inside transaction
+            } else {
+              console.log(`[BulkCancel] Skipping refund for AWB ${currentOrder.awb_number} — already refunded.`);
+            }
           }
+
+          // Update order status to Cancelled (no refund case — balanceToAdd === 0 OR alreadyRefunded)
+          currentOrder.status = "Cancelled";
+          currentOrder.tracking.push({
+            status: "Cancelled",
+            StatusLocation: "",
+            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+            Instructions: isAlreadyCancelled
+              ? "Order cancelled successfully (Courier already cancelled)"
+              : "Order cancelled successfully",
+          });
+          await currentOrder.save();
 
           console.log(`[Background BulkCancel] Successfully cancelled AWB ${currentOrder.awb_number}`);
 
@@ -2509,6 +2526,7 @@ const masterSearch = async (req, res) => {
       .select("orderId awb_number status courierServiceName provider paymentDetails createdAt")
       .sort({ updatedAt: -1 })
       .limit(10)
+      .allowDiskUse(true)
       .lean();
 
     res.json({ orders });
@@ -2516,6 +2534,82 @@ const masterSearch = async (req, res) => {
   } catch (error) {
     console.error("Master search error:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+const downloadPickupAddressesExcel = async (req, res) => {
+  try {
+    const query = {};
+    
+    // Check if the requesting user is an Admin or an Employee
+    const isAdmin = req.user?.isAdmin === true && req.user?.adminTab === true;
+    const isEmployee = req.isEmployee === true || !!req.employee;
+
+    // If NOT an admin/employee, force filtering by their own userId
+    if (!isAdmin && !isEmployee) {
+      const userId = req.user?._id?.toString();
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: "User ID is missing or invalid",
+        });
+      }
+      query.userId = userId;
+    } else if (req.query.userId && req.query.userId !== "all") {
+      query.userId = req.query.userId;
+    }
+
+    const pickupAddresses = await pickAddress.find(query)
+      .populate("userId", "fullname company email userId")
+      .lean();
+
+    if (!pickupAddresses.length) {
+      return res.status(404).json({ message: "No pickup addresses found" });
+    }
+
+    const ExcelJS = require("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Pickup Addresses");
+
+    worksheet.columns = [
+      { header: "id", key: "id", width: 30 },
+      { header: "Contact Name", key: "contactName", width: 25 },
+      { header: "Email Address", key: "email", width: 25 },
+      { header: "Phone Number", key: "phoneNumber", width: 15 },
+      { header: "Address", key: "address", width: 40 },
+      { header: "Pincode", key: "pinCode", width: 15 },
+      { header: "City", key: "city", width: 20 },
+      { header: "State", key: "state", width: 20 },
+    ];
+
+    pickupAddresses.forEach((item) => {
+      const details = item.pickupAddress || {};
+      worksheet.addRow({
+        id: item._id ? item._id.toString() : "N/A",
+        contactName: details.contactName || "N/A",
+        email: details.email || "N/A",
+        phoneNumber: details.phoneNumber || "N/A",
+        address: details.address || "N/A",
+        pinCode: details.pinCode || "N/A",
+        city: details.city || "N/A",
+        state: details.state || "N/A",
+      });
+    });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=pickup-addresses.xlsx"
+    );
+
+    await workbook.xlsx.write(res);
+    res.status(200).end();
+  } catch (error) {
+    console.error("Error exporting pickup addresses:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -2528,6 +2622,7 @@ module.exports = {
   bulkCloneOrders,
   getOrdersById,
   getpickupAddress,
+  downloadPickupAddressesExcel,
   getreceiverAddress,
   searchReceiver,
   newPickupAddress,
