@@ -69,7 +69,7 @@ const {
   cancelOrder: cancelShiprocketOrder,
 } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 const { cancelShadowfaxOrder } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
-const { cancelLosung360Order } = require("../AllCouriers/Losung360/Courier/couriers.controller");
+// const { cancelLosung360Order } = require("../AllCouriers/Losung360/Courier/couriers.controller");
 const WeightDiscrepancy = require("../WeightDispreancy/weightDispreancy.model");
 // Create a shipment
 const newOrder = async (req, res) => {
