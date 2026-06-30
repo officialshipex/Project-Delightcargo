@@ -39,7 +39,7 @@ const checkShipexIndiaServiceability = async (payload) => {
           timeout: 8000,
         }
       );
-      console.log("shipex response", response.data);
+      // console.log("shipex response", response.data);
       if (response.data && (response.data.status === "success" || response.data.success === true || response.data.serviceable === true)) {
         return { success: true, data: response.data.data || [] };
       }
