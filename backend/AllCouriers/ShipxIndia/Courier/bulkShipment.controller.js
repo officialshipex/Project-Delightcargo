@@ -127,12 +127,12 @@ const createShipmentFunctionShipexIndia = async (
       const nameLower = String(shipexCourierName).toLowerCase();
       if (nameLower.includes("delhivery")) shipexCourierId = "02";
       else if (nameLower.includes("dtdc")) shipexCourierId = "03";
-      else if (nameLower.includes("bluedart")) shipexCourierId = "04";
+      else if (nameLower.includes("bluedart")) shipexCourierId = "13";
       else if (nameLower.includes("amazon")) shipexCourierId = "05";
-      else if (nameLower.includes("maruti")) shipexCourierId = "08";
-      else if (nameLower.includes("ekart")) shipexCourierId = "09";
-      else if (nameLower.includes("xpressbees")) shipexCourierId = "06";
-      else if (nameLower.includes("shadowfax")) shipexCourierId = "07";
+      else if (nameLower.includes("maruti")) shipexCourierId = "06";
+      else if (nameLower.includes("ekart")) shipexCourierId = "08";
+      else if (nameLower.includes("xpressbees")) shipexCourierId = "09";
+      else if (nameLower.includes("shadowfax")) shipexCourierId = "12";
       else shipexCourierId = "02";
     }
 

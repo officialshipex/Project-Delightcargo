@@ -1525,12 +1525,12 @@ const submitNdrToShipexIndia = async ({
       const s = String(serv).toLowerCase();
       if (p.includes("delhivery") || s.includes("delhivery")) return "02";
       if (p.includes("dtdc") || s.includes("dtdc")) return "03";
-      if (p.includes("bluedart") || s.includes("bluedart")) return "04";
+      if (p.includes("bluedart") || s.includes("bluedart")) return "13";
       if (p.includes("amazon") || s.includes("amazon")) return "05";
-      if (p.includes("maruti") || s.includes("maruti")) return "08";
-      if (p.includes("ekart") || s.includes("ekart")) return "09";
-      if (p.includes("xpressbees") || s.includes("xpressbees")) return "06";
-      if (p.includes("shadowfax") || s.includes("shadowfax")) return "07";
+      if (p.includes("maruti") || s.includes("maruti")) return "06";
+      if (p.includes("ekart") || s.includes("ekart")) return "08";
+      if (p.includes("xpressbees") || s.includes("xpressbees")) return "09";
+      if (p.includes("shadowfax") || s.includes("shadowfax")) return "12";
       return "02"; // default fallback
     };
     const courierId = getShipexCourierId(provider, courierServiceName);
