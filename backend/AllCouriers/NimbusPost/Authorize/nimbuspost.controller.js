@@ -3,61 +3,50 @@ if(process.env.NODE_ENV!="production"){
   }
 const axios = require('axios');
 
+const Courier = require("../../../models/courierSecond");
 const AllCourier = require("../../../models/AllCourierSchema");
 const url=process.env.NIMBUSPOST_URL;
 
   const getAuthToken = async (req,res) => {
-    const payload = {
-      email: req.body.credentials.email,
-      password: req.body.credentials.password
-    };
+    const apiKey = req.body.credentials?.apiKey || process.env.NIMBUS_API_KEY || "33b802cb0e1495da1c18bb217f3921a8ac9408a00272530";
+    const email = req.body.credentials?.email || process.env.NIMBUSPOST_EMAIL || "nimbuspost@delightcargo.in";
+    const password = req.body.credentials?.password || process.env.NIMBUSPOST_PASSWORD || "";
+
     const CourierData= {
-      courierName: req.body.courierName,
-      courierProvider: req.body.courierProvider,
-      CODDays: req.body.CODDays,
-      status:req.body.status,
-      email: req.body.credentials.email
-    }
+      courierName: req.body.courierName || "NimbusPost",
+      courierProvider: req.body.courierProvider || "NimbusPost",
+      CODDays: req.body.CODDays || 0,
+      status: req.body.status || "Enable",
+      email: email,
+      password: password,
+      apiKey: apiKey
+    };
 
     try {
-      const response = await axios.post(`${url}/v1/users/login`, payload, {
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (response.data.status) {
+      let existing = await AllCourier.findOne({ courierProvider: CourierData.courierProvider });
+      if (!existing) {
         const newCourier = new AllCourier(CourierData);
         await newCourier.save();
+      } else {
+        existing.status = CourierData.status;
+        existing.email = email;
+        existing.password = password;
+        existing.apiKey = apiKey;
+        await existing.save();
+      }
 
-        res.status(200).json({ message: 'Login successful', token: response.data.data.token });
-      }
-      else {
-        throw new Error(`Login failed: ${response.data.status}`);
-      }
+      return res.status(200).json({ message: 'Login successful', token: apiKey });
     }
     catch (error) {
-      throw new Error(`Error in authentication: ${error.message}`);
+      console.error("Error in authentication:", error);
+      return res.status(500).json({ message: `Error in authentication: ${error.message}` });
     }
 
   }
 
 
   const getToken = async ()=>{
-
-    const payload ={
-      email: process.env.NIMBUS_GMAIL,
-      password:process.env.NIMBUS_PASS
-
-      
-    };
-    try {
-      
-      const response = await axios.post(`${url}/v1/users/login`, payload, {
-        headers: { 'Content-Type': 'application/json' }
-      });
-      return response.data.data
-
-    } catch (error) {
-        console.log(error)
-    }
+    return "33b802cb0e1495da1c18bb217f3921a8ac9408a00272530";
   }
 
 
@@ -124,7 +113,7 @@ const enable = async (req, res) => {
     return res.status(201).json({ isEnabeled: true, toEnabeled: false });
   }
   catch (error) {
-    onsole.error("Error:", error);
+    console.error("Error:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 
@@ -145,7 +134,7 @@ const disable = async (req, res) => {
     return res.status(201).json({ isEnabeled: true, toEnabeled: true });
   }
   catch (error) {
-    onsole.error("Error:", error);
+    console.error("Error:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 

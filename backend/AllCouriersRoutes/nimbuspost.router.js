@@ -2,10 +2,8 @@ const express = require("express");
 const router = express.Router();
 const axios = require('axios');
 
-const {getAuthToken,saveNimbusPost,isEnabeled,disable,enable}=require("../../backend/AllCouriers/NimbusPost/Authorize/nimbuspost.controller");
-const nimbuspostCourierController=require("../AllCouriers/NimbusPost/Couriers/couriers.controller");
-const nimbuspostShipmentController=require("../AllCouriers/NimbusPost/Shipments/shipments.controller");
-const nimbuspostNDRController=require("../AllCouriers/NimbusPost/NDR/ndr.controller");
+const {getAuthToken,saveNimbusPost,isEnabeled,disable,enable}=require("../AllCouriers/NimbusPost/Authorize/nimbuspost.controller");
+const nimbuspostCourierController=require("../AllCouriers/NimbusPost/Courier/couriers.controller");
 
 
 router.get('/saveNew',saveNimbusPost);
@@ -23,15 +21,12 @@ router.post("/addService",nimbuspostCourierController.addService);
 router.post("/getServiceablePincodes",nimbuspostCourierController.getServiceablePincodes);
 // router.post("/getServiceablePincodesData",nimbuspostCourierController.getServiceablePincodesData);
 
-router.post("/createShipment",nimbuspostShipmentController.createShipment);
-// router.post("/trackShipment",nimbuspostShipmentController.trackShipment);
-router.post("/trackShipmentInBulk",nimbuspostShipmentController.trackShipmentsInBulk);
-router.post("/manifest",nimbuspostShipmentController.manifest);
-router.post("/cancelShipment",nimbuspostShipmentController.cancelShipment);
-router.post("/hyperLocalShipment",nimbuspostShipmentController.createHyperlocalShipment);
-
-router.post("/getNdrDetails",nimbuspostNDRController.getNdrDetails);
-router.post("/performNdrActions",nimbuspostNDRController.performNdrActions);
+router.post("/createShipment",nimbuspostCourierController.createShipment);
+// router.post("/trackShipment",nimbuspostCourierController.trackShipment);
+router.post("/trackShipmentInBulk",nimbuspostCourierController.trackShipmentsInBulk);
+router.post("/manifest",nimbuspostCourierController.manifest);
+router.post("/cancelShipment",nimbuspostCourierController.cancelShipment);
+router.post("/hyperLocalShipment",nimbuspostCourierController.createHyperlocalShipment);
 
 
 module.exports=router;

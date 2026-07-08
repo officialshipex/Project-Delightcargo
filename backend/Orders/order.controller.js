@@ -22,7 +22,7 @@ const {
 const {
   cancelShipment,
   trackShipmentNimbuspost,
-} = require("../AllCouriers/NimbusPost/Shipments/shipments.controller");
+} = require("../AllCouriers/NimbusPost/Courier/couriers.controller");
 const {
   createPickupRequest,
   cancelOrderDelhivery,
@@ -34,7 +34,7 @@ const {
 } = require("../AllCouriers/ShreeMaruti/Couriers/couriers.controller");
 const {
   createShipmentFunctionNimbusPost,
-} = require("../AllCouriers/NimbusPost/Shipments/bulkShipment.controller");
+} = require("../AllCouriers/NimbusPost/Courier/bulkShipment.controller");
 const {
   createShipmentFunctionShipRocket,
 } = require("../AllCouriers/ShipRocket/Courier/bulkShipment.controller");
@@ -290,7 +290,8 @@ const requestPickup = async (req, res) => {
 
         try {
           if (
-            currentOrder.service_details.courierProviderName === "NimbusPost"
+            currentOrder.service_details.courierProviderName === "NimbusPost" ||
+            currentOrder.partner === "NimbusPost"
           ) {
             currentOrder.status = "WaitingPickup";
             currentOrder.tracking.push({
@@ -448,11 +449,14 @@ const cancelOrdersAtBooked = async (req, res) => {
               orderId: currentOrder._id,
             };
           }
-        } else if (currentOrder.service_details.courierProviderName === "NimbusPost") {
+        } else if (
+          currentOrder.service_details.courierProviderName === "NimbusPost" ||
+          currentOrder.partner === "NimbusPost"
+        ) {
           const result = await cancelShipment(currentOrder.awb_number);
           if (result.error) {
             return {
-              error: "Failed to cancel shipment with NimbusPost",
+              error: result.details?.message || "Failed to cancel shipment with NimbusPost",
               details: result,
               orderId: currentOrder._id,
             };
@@ -650,7 +654,7 @@ const tracking = async (req, res) => {
         const { awb_number } = order;
         let result;
 
-        if (courierProviderName === "NimbusPost") {
+        if (courierProviderName === "NimbusPost" || order.partner === "NimbusPost") {
           result = await trackShipmentNimbuspost(awb_number);
         } else if (courierProviderName === "Shiprocket") {
           result = await getTrackingByAWB(awb_number);
@@ -664,25 +668,32 @@ const tracking = async (req, res) => {
         }
 
         if (result && result.success) {
-          const status = result.data.toLowerCase().replace(/_/g, " ");
-
-          const statusMap = {
-            cancelled: () =>
-              updateOrderStatus(order, "Not-Shipped", "Cancelled"),
-            canceled: () =>
-              updateOrderStatus(order, "Not-Shipped", "Cancelled"),
-            "out for delivery": () =>
-              updateOrderStatus(order, "Out For Delivery", "Out For Delivery"),
-            "in transit": () =>
-              updateOrderStatus(order, "In Transit", "In Transit"),
-            delivered: () => updateOrderStatus(order, "Delivered", "Delivered"),
-            delayed: () => updateOrderStatus(order, "Delayed", "Delayed"),
-          };
-
-          if (statusMap[status]) {
-            await statusMap[status]();
+          let status = "";
+          if (typeof result.data === "string") {
+            status = result.data.toLowerCase().replace(/_/g, " ");
+          } else if (Array.isArray(result.data)) {
+            status = (result.data[result.data.length - 1]?.current_status || result.data[result.data.length - 1]?.status || "").toLowerCase().replace(/_/g, " ");
+          } else if (result.data && typeof result.data === "object") {
+            status = (result.data.status || result.data.current_status || "").toLowerCase().replace(/_/g, " ");
           }
-        }
+
+            const statusMap = {
+              cancelled: () =>
+                updateOrderStatus(order, "Not-Shipped", "Cancelled"),
+              canceled: () =>
+                updateOrderStatus(order, "Not-Shipped", "Cancelled"),
+              "out for delivery": () =>
+                updateOrderStatus(order, "Out For Delivery", "Out For Delivery"),
+              "in transit": () =>
+                updateOrderStatus(order, "In Transit", "In Transit"),
+              delivered: () => updateOrderStatus(order, "Delivered", "Delivered"),
+              delayed: () => updateOrderStatus(order, "Delayed", "Delayed"),
+            };
+
+            if (statusMap[status]) {
+              await statusMap[status]();
+            }
+          }
       } catch (error) {
         console.error(
           `Error processing order ID: ${order._id}, AWB: ${order.awb_number}`,

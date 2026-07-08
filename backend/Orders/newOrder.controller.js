@@ -70,6 +70,7 @@ const {
 } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
 const { cancelShadowfaxOrder } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
 // const { cancelLosung360Order } = require("../AllCouriers/Losung360/Courier/couriers.controller");
+const { cancelShipment: cancelShipmentNimbusPost } = require("../AllCouriers/NimbusPost/Courier/couriers.controller");
 const WeightDiscrepancy = require("../WeightDispreancy/weightDispreancy.model");
 // Create a shipment
 const newOrder = async (req, res) => {
@@ -1735,10 +1736,10 @@ const cancelOrdersAtBooked = async (req, res) => {
           orderId: currentOrder._id,
         });
       }
-    } else if (currentOrder.provider === "Nimuspost") {
-      const result = await cancelShipmentXpressBees(currentOrder.awb_number);
+    } else if (currentOrder.partner === "NimbusPost" || currentOrder.provider === "NimbusPost" || currentOrder.provider === "Nimuspost") {
+      const result = await cancelShipmentNimbusPost(currentOrder.awb_number);
       if (result.error) {
-        return res.status(400).send({ error: "Failed to cancel order" });
+        return res.status(400).send({ error: result.details?.message || result.error || "Failed to cancel order" });
       }
     } else if (currentOrder.provider === "Delhivery") {
       // console.log("I am in it");
@@ -2164,8 +2165,8 @@ const bulkCancelOrder = async (req, res) => {
               cancelResponse = await cancelShipmentXpressBees(currentOrder.awb_number);
             } else if (provider === "Shiprocket" || partner === "Shiprocket") {
               cancelResponse = await cancelShiprocketOrder(currentOrder.awb_number);
-            } else if (provider === "Nimuspost") {
-              cancelResponse = await cancelShipmentXpressBees(currentOrder.awb_number);
+            } else if (partner === "NimbusPost" || provider === "NimbusPost" || provider === "Nimuspost") {
+              cancelResponse = await cancelShipmentNimbusPost(currentOrder.awb_number);
             } else if (provider === "Delhivery") {
               cancelResponse = await cancelOrderDelhivery(currentOrder.awb_number);
             } else if (provider === "Shree Maruti") {

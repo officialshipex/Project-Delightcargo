@@ -1,7 +1,7 @@
 const Order = require("../models/newOrder.model");
 const {
   getServiceablePincodesData,
-} = require("../AllCouriers/NimbusPost/Couriers/couriers.controller");
+} = require("../AllCouriers/NimbusPost/Courier/couriers.controller");
 const {
   checkServiceabilityShipRocket,
 } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
@@ -81,9 +81,9 @@ const checkServiceabilityAll = async (service, id, pincode) => {
     };
     // console.log("Checking serviceability for", service.provider);
     // ----------------------- NimbusPost -----------------------
-    if (service.provider === "NimbusPostt") {
-      const local = await checkLocalServiceability();
-      if (local) return local;
+    if (service.provider === "NimbusPost" || service.partner === "NimbusPost") {
+      // const local = await checkLocalServiceability();
+      // if (local) return local;
 
       const payload = {
         origin: pickupPincode,
@@ -95,6 +95,7 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         breadth: currentOrder.packageDetails.volumetricWeight?.width || 0,
         height: currentOrder.packageDetails.volumetricWeight?.height || 0,
       };
+      // console.log("payload",payload)
       return await getServiceablePincodesData(service.courier, payload);
     }
 

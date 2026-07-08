@@ -47,6 +47,9 @@ const {
   trackShadowfaxOrder,
 } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
 const {
+  trackShipmentNimbuspost,
+} = require("../AllCouriers/NimbusPost/Courier/couriers.controller");
+const {
   trackEkartShipment,
 } = require("../AllCouriers/Ekart/Couriers/couriers.controller");
 const Bottleneck = require("bottleneck");
@@ -95,6 +98,8 @@ const trackSingleOrder = async (order) => {
       Shiprocket: trackShiprocketOrder,
       Shadowfax: trackShadowfaxOrder,
       Ekart: trackEkartShipment,
+      NimbusPost: trackShipmentNimbuspost,
+      nimbuspost: trackShipmentNimbuspost,
     };
 
     // if (!trackingFunctions[provider]) {
@@ -114,6 +119,8 @@ const trackSingleOrder = async (order) => {
       result = await trackingFunctions["Shadowfax"](awb_number);
     } else if (provider && provider === "Shadowfax") {
       result = await trackingFunctions["Shadowfax"](awb_number);
+    } else if (partner && partner === "NimbusPost") {
+      result = await trackingFunctions["NimbusPost"](awb_number);
     } else if (provider && trackingFunctions[provider]) {
       result = await trackingFunctions[provider](awb_number, shipment_id);
     } else {
@@ -130,7 +137,7 @@ const trackSingleOrder = async (order) => {
     // Normalize only the latest one
     const normalizedData = mapTrackingResponse(
       [latestTrackingEvent],
-      (partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket" || partner === "Ekart") ? partner : provider,
+      (partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket" || partner === "Ekart" || partner === "NimbusPost") ? partner : provider,
     );
     // console.log("normalized", normalizedData);
 
@@ -1696,11 +1703,42 @@ const trackSingleOrder = async (order) => {
       }
     }
 
+    if (provider === "NimbusPost" || partner === "NimbusPost") {
+      const currentStatus = (normalizedData.Status || "").toLowerCase().trim();
+
+      if (currentStatus === "delivered") {
+        order.status = "Delivered";
+        order.ndrStatus = "Delivered";
+      } else if (currentStatus === "out for delivery" || currentStatus === "ofd") {
+        order.status = "Out for Delivery";
+        order.ndrStatus = "Out for Delivery";
+      } else if (currentStatus === "in transit" || currentStatus === "it") {
+        order.status = "In-transit";
+        order.ndrStatus = "In-transit";
+      } else if (currentStatus === "rto") {
+        order.status = "RTO";
+        order.ndrStatus = "RTO";
+      } else if (currentStatus === "rto in transit" || currentStatus === "rt-it") {
+        order.status = "RTO In-transit";
+        order.ndrStatus = "RTO In-transit";
+      } else if (currentStatus === "rto delivered" || currentStatus === "rt-dl") {
+        order.status = "RTO Delivered";
+        order.ndrStatus = "RTO Delivered";
+      } else if (currentStatus === "cancelled" || currentStatus === "canceled") {
+        order.status = "Cancelled";
+        order.ndrStatus = "Cancelled";
+        shouldUpdateWallet = true;
+        balanceTobeAdded = order.totalFreightCharges === "N/A" || !order.totalFreightCharges
+          ? 0
+          : parseFloat(order.totalFreightCharges);
+      }
+    }
+
     if (Array.isArray(result.data) && result.data.length > 0) {
       // If API returned a full list of tracking events
       const newTrackingArray = result.data.map((item) => {
         const mapped =
-          partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket" || partner === "Ekart"
+          partner === "ZipyPost" || partner === "BoxdLogistics" || partner === "Proship" || partner === "Shiprocket" || partner === "Ekart" || partner === "NimbusPost"
             ? mapTrackingResponse([item], partner)
             : mapTrackingResponse([item], provider, result?.remark);
 
@@ -1731,10 +1769,13 @@ const trackSingleOrder = async (order) => {
       //   return; // 🔥 skip further processing and DB writes
       // }
 
-      // Replace entire tracking array
-      order.tracking = newTrackingArray;
+      // Preserve the first two events from existing tracking
+      const localEvents = (order.tracking || []).slice(0, 2);
+
+      // Replace entire tracking array, prepending local events
+      order.tracking = [...localEvents, ...newTrackingArray];
       await order.save();
-      console.log(`Tracking history replaced for ${order.awb_number}`);
+      console.log(`Tracking history updated for ${order.awb_number}`);
 
       // 🔹 Trigger Notifications are now handled automatically by the Order model hook (post-save)
       // No manual calls needed here.
@@ -1829,7 +1870,7 @@ const trackOrders = async () => {
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
       provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery","Ekart"] },
-      // awb_number:"52710410010006",
+      // awb_number:"23645496816295",
       $or: [
         { lastTrackedAt: { $exists: false } },
         { lastTrackedAt: null },
@@ -2084,11 +2125,11 @@ const mapTrackingResponse = (data, provider, remark) => {
       shipment_status: data[0]?.shipment_status || null,
     },
     NimbusPost: {
-      Status: data.status || null,
-      StatusCode: data.status_code || null,
-      StatusLocation: data.city || "Unknown",
-      StatusDateTime: data.updated_on || null,
-      Instructions: data.remarks || null,
+      Status: (data[0]?.status || data.status) || null,
+      StatusCode: (data[0]?.status_code || data.status_code) || null,
+      StatusLocation: (data[0]?.city || data.city) || "Unknown",
+      StatusDateTime: (data[0]?.updated_on || data.updated_on) || null,
+      Instructions: (data[0]?.remarks || data.remarks) || null,
     },
     Delhivery: {
       Status: data[0].Scan || "N/A",
@@ -2099,11 +2140,11 @@ const mapTrackingResponse = (data, provider, remark) => {
       Instructions: data[0].Instructions || null,
     },
     Xpressbees: {
-      Status: data.tracking_status || null,
-      StatusCode: data.status_code || null,
-      StatusLocation: data.location || "Unknown",
-      StatusDateTime: data.last_update || null,
-      Instructions: data.remarks || null,
+      Status: (data[0]?.tracking_status || data.tracking_status) || null,
+      StatusCode: (data[0]?.status_code || data.status_code) || null,
+      StatusLocation: (data[0]?.location || data.location) || "Unknown",
+      StatusDateTime: (data[0]?.last_update || data.last_update) || null,
+      Instructions: (data[0]?.remarks || data.remarks) || null,
     },
   };
 

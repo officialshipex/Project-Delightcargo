@@ -18,6 +18,7 @@ const createProshipShipment = require("../Courier/proshipShipmentCreation.contro
 const createShiprocketShipment = require("../Courier/shiprocketShipmentCreation.controller");
 const createShadowfaxShipment = require("../Courier/shadowfaxShipmentCreation.controller");
 const createShipexIndiaShipment = require("../Courier/shipexIndiaShipmentCreation.controller");
+const createNimbuspostShipment = require("../Courier/nimbuspostShipmentCreation.controller");
 
 // Provider mapping
 const providerMap = {
@@ -34,6 +35,7 @@ const providerMap = {
   "11": "Shiprocket",
   "12": "Shadowfax",
   "13": "ShipexIndia",
+  "14": "NimbusPost",
 };
 
 // Validation schema
@@ -367,6 +369,21 @@ const bookOrder = async (req, res) => {
 
       case "ShipexIndia":
         shipmentResult = await createShipexIndiaShipment({
+          id: order._id,
+          provider,
+          finalCharges,
+          courierServiceName,
+          priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
+        });
+        break;
+
+      case "NimbusPost":
+        shipmentResult = await createNimbuspostShipment({
           id: order._id,
           provider,
           finalCharges,
