@@ -18,21 +18,16 @@ const Services = require("../../../models/courierServiceSecond.model");
 const AllCourier = require("../../../models/AllCourierSchema");
 const CourierService = require("../../../models/CourierService.Schema");
 
-const url = process.env.NIMBUSPOST_URL || "https://ship.nimbuspost.com/api";
-const API_KEY = process.env.NIMBUS_API_KEY;
+const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api.nimbuspost.com/v1';
+const { getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken } = require('../nimbusAuth');
 
 // ─── Courier Setup (Admin) ────────────────────────────────────────────────────
 const getCouriers = async (req, res) => {
     try {
-        const response = await axios.get(`${url}/couriers`, {
-            headers: {
-                'Content-Type': 'application/json',
-                'NP-API-KEY': API_KEY
-            }
-        });
+        const headers = await getNimbusGetHeaders();
+        const response = await axios.get(`${BASE_URL}/courier`, { headers });
         
         if (response.data.status) {
-            // console.log("courier",response.data)
             const servicesData = response.data.data;
             const allServices = servicesData.map(element => ({
                 service: element.name,
@@ -44,6 +39,7 @@ const getCouriers = async (req, res) => {
         res.status(400).json({ message: 'Failed to fetch services' });
 
     } catch (error) {
+        if (error.response?.status === 401) clearNimbusToken();
         console.error('Error in getCouriers:', error.response ? error.response.data : error.message);
         res.status(500).json({ error: 'Failed to fetch couriers', details: error.message });
     }
@@ -116,6 +112,7 @@ const getServiceablePincodes = async (req, res) => {
 
 // NimbusPost is a courier aggregator/partner — always serviceable
 const getServiceablePincodesData = async (service, payload) => {
+    // console.log("Serviceable")
     return { success: true, cod: true, prepaid: true };
 };
 
@@ -208,16 +205,14 @@ const trackShipmentNimbuspost = async (trackingNumber) => {
     }
 
     try {
-        const response = await axios.get(`${url}/shipments/track_awb/${trackingNumber}`, {
-            headers: {
-                'Content-Type': 'application/json',
-                'NP-API-KEY': API_KEY
-            }
-        });
+        const headers = await getNimbusGetHeaders();
+        const response = await axios.get(`${BASE_URL}/shipments/track/${trackingNumber}`, { headers });
 
         if (response.data.status) {
             const result = response.data.data;
-            const statusMap = {
+
+            // Status code → human readable map (old API codes kept for compat)
+            const statusCodeMap = {
                 'PP': 'pending pickup',
                 'IT': 'in transit',
                 'EX': 'exception',
@@ -225,7 +220,14 @@ const trackShipmentNimbuspost = async (trackingNumber) => {
                 'DL': 'delivered',
                 'RT': 'rto',
                 'RT-IT': 'rto in transit',
-                'RT-DL': 'rto delivered'
+                'RT-DL': 'rto delivered',
+                // New API string statuses (already human-readable)
+                'pending pickup': 'pending pickup',
+                'in transit': 'in transit',
+                'out for delivery': 'out for delivery',
+                'delivered': 'delivered',
+                'rto': 'rto',
+                'cancelled': 'cancelled',
             };
 
             const parseDate = (timeVal) => {
@@ -233,42 +235,41 @@ const trackShipmentNimbuspost = async (trackingNumber) => {
                 if (!isNaN(timeVal)) {
                     return new Date(Number(timeVal) * 1000 + 5.5 * 60 * 60 * 1000);
                 }
-                const parts = String(timeVal).trim().split(/[T\-:\s]/);
-                if (parts.length >= 6) {
-                    const year = parseInt(parts[0], 10);
-                    const month = parseInt(parts[1], 10) - 1;
-                    const day = parseInt(parts[2], 10);
-                    const hour = parseInt(parts[3], 10);
-                    const minute = parseInt(parts[4], 10);
-                    const second = parseInt(parts[5], 10);
-                    return new Date(Date.UTC(year, month, day, hour, minute, second));
-                }
                 return new Date(timeVal);
             };
 
+            // New API: history items have { status, location, timestamp, remark }
+            // Old API: history items have { status_code, location, event_time, message }
+            // Normalize both into the standard shape
+            const normalizeHistoryItem = (h) => {
+                const rawCode = h.status_code || h.status || '';
+                const mappedDesc = statusCodeMap[rawCode.toLowerCase()] || statusCodeMap[rawCode] || rawCode;
+                return {
+                    status: mappedDesc,
+                    status_code: rawCode,
+                    city: h.location || h.city || 'Unknown',
+                    updated_on: parseDate(h.timestamp || h.event_time || h.updated_on),
+                    remarks: h.remark || h.message || h.remarks || '',
+                };
+            };
+
             let trackingHistory = [];
-            if (result.history && Array.isArray(result.history) && result.history.length > 0) {
-                trackingHistory = result.history.map(h => {
-                    const rawCode = h.status_code || "";
-                    const mappedDesc = statusMap[rawCode] || rawCode;
-                    return {
-                        status: mappedDesc,
-                        status_code: rawCode,
-                        city: h.location || "Unknown",
-                        updated_on: parseDate(h.event_time),
-                        remarks: h.message || h.remarks || ""
-                    };
-                });
+            const historyArray = result.history || result.scan_details || result.tracking_details;
+
+            if (historyArray && Array.isArray(historyArray) && historyArray.length > 0) {
+                trackingHistory = historyArray.map(normalizeHistoryItem);
+                // Reverse so oldest→newest (consistent with Delhivery)
                 trackingHistory.reverse();
             } else {
-                const rawStatus = result.status || "";
-                const mappedDesc = statusMap[rawStatus] || rawStatus;
+                // Flat response with single status (fallback)
+                const rawStatus = result.status || '';
+                const mappedDesc = statusCodeMap[rawStatus.toLowerCase()] || rawStatus;
                 trackingHistory = [{
                     status: mappedDesc,
                     status_code: rawStatus,
-                    city: "Unknown",
-                    updated_on: parseDate(result.event_time),
-                    remarks: result.shipment_info || ""
+                    city: result.location || result.city || 'Unknown',
+                    updated_on: parseDate(result.timestamp || result.event_time),
+                    remarks: result.remark || result.message || result.shipment_info || '',
                 }];
             }
 
@@ -279,14 +280,15 @@ const trackShipmentNimbuspost = async (trackingNumber) => {
         } else {
             return {
                 success: false,
-                data: "Error in tracking"
+                data: 'Error in tracking'
             };
         }
     } catch (error) {
-        console.error("NimbusPost trackShipment Error:", error.response?.data || error.message);
+        if (error.response?.status === 401) clearNimbusToken();
+        console.error('NimbusPost trackShipment Error:', error.response?.data || error.message);
         return {
             success: false,
-            data: "Error in tracking"
+            data: 'Error in tracking'
         };
     }
 };
@@ -317,13 +319,9 @@ const manifest = async (req, res) => {
     }
 
     try {
+        const headers = await getNimbusJsonHeaders();
         const payload = { awbs: awbNumbers };
-        const response = await axios.post(`${url}/shipments/manifest`, payload, {
-            headers: {
-                'Content-Type': 'application/json',
-                'NP-API-KEY': API_KEY
-            }
-        });
+        const response = await axios.post(`${BASE_URL}/shipments/manifest`, payload, { headers });
 
         if (response.data.status) {
             return res.status(200).json(response.data.data);
@@ -331,6 +329,7 @@ const manifest = async (req, res) => {
             return res.status(400).json({ error: 'Error in manifest creation', details: response.data });
         }
     } catch (error) {
+        if (error.response?.status === 401) clearNimbusToken();
         console.error('Error in creating manifest:', error.response?.data || error.message);
         return res.status(500).json({ error: 'Internal Server Error', message: error.message });
     }
@@ -342,20 +341,20 @@ const cancelShipment = async (awb) => {
     }
 
     try {
-        let shipmentId = awb;
+        // New API uses AWB number directly (not shipment_id)
+        // Ensure we use the AWB number from the order record
+        let awbNumber = awb;
         const order = await Order.findOne({ $or: [{ awb_number: awb }, { shipment_id: awb }] });
-        if (order && order.shipment_id) {
-            shipmentId = order.shipment_id;
+        if (order && order.awb_number) {
+            awbNumber = order.awb_number;
         }
 
-        const response = await axios.post(`${url}/shipments/cancel`, {
-            id: shipmentId
-        }, {
-                headers: {
-                    'Content-Type': 'application/json',
-                'NP-API-KEY': API_KEY
-                }
-        });
+        const headers = await getNimbusJsonHeaders();
+        const response = await axios.post(
+            `${BASE_URL}/shipments/cancel`,
+            { awb: awbNumber },
+            { headers }
+        );
 
         const { status, data } = response.data;
         if (status) {
@@ -368,6 +367,7 @@ const cancelShipment = async (awb) => {
             };
         }
     } catch (error) {
+        if (error.response?.status === 401) clearNimbusToken();
         console.error('Error in cancelling shipment:', error.response?.data || error.message);
         return {
             error: 'Internal Server Error',
@@ -384,12 +384,8 @@ const createHyperlocalShipment = async (req, res) => {
     }
 
     try {
-        const response = await axios.post(`${url}/shipments/hyperlocal`, shipmentData, {
-            headers: {
-                'Content-Type': 'application/json',
-                'NP-API-KEY': API_KEY,
-            },
-        });
+        const headers = await getNimbusJsonHeaders();
+        const response = await axios.post(`${BASE_URL}/shipments/hyperlocal`, shipmentData, { headers });
 
         if (response.data.status) {
             return res.status(200).json(response.data.data);
@@ -397,6 +393,7 @@ const createHyperlocalShipment = async (req, res) => {
             return res.status(400).json({ error: 'Error in creating hyperlocal shipment', details: response.data });
         }
     } catch (error) {
+        if (error.response?.status === 401) clearNimbusToken();
         console.error('Error in creating hyperlocal shipment:', error.response?.data || error.message);
         return res.status(500).json({ error: 'Internal Server Error', message: error.message });
     }

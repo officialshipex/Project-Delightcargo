@@ -9,8 +9,8 @@ const { getZone } = require("../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
-const BASE_URL = process.env.NIMBUSPOST_URL || "https://ship.nimbuspost.com/api";
-const API_KEY = process.env.NIMBUS_API_KEY;
+const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api.nimbuspost.com/v1';
+const { getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken } = require('../../AllCouriers/NimbusPost/nimbusAuth');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const generateSKU = (name) => {
@@ -120,87 +120,9 @@ const createNimbuspostShipment = async ({
       }
     }
 
-    // Headers for NimbusPost API
-    // NOTE: GET requests must NOT include Content-Type — NimbusPost rejects it
-    const getHeaders = {
-      "NP-API-KEY": API_KEY,
-    };
-    const postHeaders = {
-      "Content-Type": "application/json",
-      "NP-API-KEY": API_KEY,
-    };
-
-    // Step 6️⃣ Get or Create Warehouse in NimbusPost
-    let pickupWarehouseId = "";
-    try {
-      // Fetch all warehouses — use getHeaders (no Content-Type)
-      const warehouseResponse = await axios.get(`${BASE_URL}/warehouse`, {
-        headers: getHeaders,
-        timeout: 10000,
-      });
-
-      const existingWarehouses = warehouseResponse.data?.data || [];
-      const orderPin = String(currentOrder.pickupAddress.pinCode);
-      const orderAddr = (currentOrder.pickupAddress.address || "").toLowerCase();
-
-      // Find match
-      const match = existingWarehouses.find((wh) => {
-        const whPin = String(wh.zip || wh.pincode || wh.pin_code || "");
-        const whAddr = (wh.address_1 || wh.address || "").toLowerCase();
-        return whPin === orderPin && (orderAddr.includes(whAddr.substring(0, 10)) || whAddr.includes(orderAddr.substring(0, 10)));
-      }) || existingWarehouses.find((wh) => String(wh.zip || wh.pincode || wh.pin_code || "") === orderPin);
-
-      if (match) {
-        pickupWarehouseId = String(match.id);
-        console.log("Matched existing NimbusPost warehouse ID:", pickupWarehouseId);
-      } else {
-        console.log("No matching warehouse found for pincode:", orderPin, ". Creating new warehouse.");
-
-        // NimbusPost warehouse/create requires multipart/form-data (not JSON)
-        // Name must be alphanumeric + spaces only (no hyphens, special chars), max 20 chars
-        const whName = `${currentOrder.pickupAddress.contactName || "WH"} ${orderPin}`
-          .replace(/[^a-zA-Z0-9 ]/g, "")
-          .substring(0, 20)
-          .trim();
-        const whForm = new FormData();
-        whForm.append("name", whName);
-        whForm.append("contact_name", currentOrder.pickupAddress.contactName || "Warehouse Contact");
-        whForm.append("phone", cleanPhone(currentOrder.pickupAddress.phoneNumber));
-        whForm.append("address_1", ensureAddress(currentOrder.pickupAddress.address));
-        whForm.append("address_2", currentOrder.pickupAddress.landmark || "N/A");
-        whForm.append("city", currentOrder.pickupAddress.city);
-        whForm.append("state", currentOrder.pickupAddress.state);
-        whForm.append("zip", orderPin);
-
-        const createWhResponse = await axios.post(`${BASE_URL}/warehouse/create`, whForm, {
-          headers: {
-            "NP-API-KEY": API_KEY,
-            ...whForm.getHeaders(),
-          },
-          timeout: 10000,
-        });
-
-        if (createWhResponse.data?.status) {
-          pickupWarehouseId = String(createWhResponse.data.data?.id || createWhResponse.data.data);
-          console.log("Created new NimbusPost warehouse ID:", pickupWarehouseId);
-        } else {
-          throw new Error(createWhResponse.data?.message || "Failed to create warehouse in NimbusPost response");
-        }
-      }
-    } catch (e) {
-      console.error("NimbusPost Warehouse Sync Error:", e.response?.data || e.message);
-      await Order.findByIdAndUpdate(id, { status: "new" });
-      await session.abortTransaction();
-      session.endSession();
-      return { success: false, message: `NimbusPost Warehouse Sync Error: ${e.response?.data?.message || e.message}` };
-    }
-
-    if (!pickupWarehouseId) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
-      await session.abortTransaction();
-      session.endSession();
-      return { success: false, message: "Failed to resolve or create warehouse in NimbusPost." };
-    }
+    // Headers for NimbusPost API (fetched from auth helper)
+    const getHeaders = await getNimbusGetHeaders();
+    const postHeaders = await getNimbusJsonHeaders();
 
     // Step 7️⃣ Fetch Courier Service doc to get courier_id
     // NimbusPost is a partner/aggregator — the actual courier (e.g. Delhivery, BlueDart)
@@ -244,7 +166,19 @@ const createNimbuspostShipment = async ({
       sku: p.sku || generateSKU(p.name),
     }));
 
+    // New API uses flat structure (no nested order:{} object)
     const nimbusPayload = {
+      order_number: String(currentOrder.orderId),
+      shipping_charges: 0,
+      discount: 0,
+      cod_charges: 0,
+      payment_type: isCOD ? "cod" : "prepaid",
+      order_amount: currentOrder.paymentDetails.amount,
+      package_weight: Math.round((currentOrder.packageDetails.applicableWeight || 0.5) * 1000), // in grams
+      package_length: currentOrder.packageDetails.volumetricWeight?.length || 10,
+      package_height: currentOrder.packageDetails.volumetricWeight?.height || 10,
+      package_breadth: currentOrder.packageDetails.volumetricWeight?.width || 10,
+      request_auto_pickup: "yes",
       consignee: {
         name: currentOrder.receiverAddress.contactName || "Receiver",
         address: ensureAddress(currentOrder.receiverAddress.address),
@@ -254,21 +188,17 @@ const createNimbuspostShipment = async ({
         pincode: String(currentOrder.receiverAddress.pinCode),
         phone: cleanPhone(currentOrder.receiverAddress.phoneNumber),
       },
-      order: {
-        order_number: String(currentOrder.orderId),
-        shipping_charges: 0,
-        discount: 0,
-        cod_charges: 0,
-        payment_type: isCOD ? "cod" : "prepaid",
-        total: currentOrder.paymentDetails.amount,
-        package_weight: Math.round((currentOrder.packageDetails.applicableWeight || 0.5) * 1000), // in grams
-        package_length: currentOrder.packageDetails.volumetricWeight?.length || 10,
-        package_height: currentOrder.packageDetails.volumetricWeight?.height || 10,
-        package_breadth: currentOrder.packageDetails.volumetricWeight?.width || 10,
+      pickup: {
+        warehouse_name: `WH${String(currentOrder.pickupAddress.pinCode)}`,
+        name: currentOrder.pickupAddress.contactName || "Pickup Contact",
+        address: ensureAddress(currentOrder.pickupAddress.address),
+        address_2: currentOrder.pickupAddress.landmark || ".",
+        city: currentOrder.pickupAddress.city,
+        state: currentOrder.pickupAddress.state,
+        pincode: String(currentOrder.pickupAddress.pinCode),
+        phone: cleanPhone(currentOrder.pickupAddress.phoneNumber),
       },
       order_items: orderItems,
-      pickup_warehouse_id: pickupWarehouseId,
-      rto_warehouse_id: pickupWarehouseId,
     };
 
     if (providerCourierId) {
@@ -277,8 +207,8 @@ const createNimbuspostShipment = async ({
 
     console.log("NimbusPost Create Shipment Payload:", JSON.stringify(nimbusPayload, null, 2));
 
-    // Step 9️⃣ Call Create Shipment API
-    const createResponse = await axios.post(`${BASE_URL}/shipments/create`, nimbusPayload, {
+    // Step 9️⃣ Call Create Shipment API — new endpoint is POST /shipments (not /shipments/create)
+    const createResponse = await axios.post(`${BASE_URL}/shipments`, nimbusPayload, {
       headers: postHeaders,
       timeout: 20000,
     });
@@ -292,7 +222,7 @@ const createNimbuspostShipment = async ({
       return { success: false, message: createResponse.data?.message || "NimbusPost order creation failed" };
     }
 
-    const { awb_number, shipment_id, courier_name } = createResponse.data.data;
+    const { awb_number, shipment_id, courier_name, label } = createResponse.data.data;
     const resolvedProvider = identifyProviderFromService(courier_name || finalProvider);
 
     // Step 1️⃣1️⃣ Update Order and Wallet details
@@ -312,7 +242,7 @@ const createNimbuspostShipment = async ({
             zone: zone.zone,
             estimatedDeliveryDate: estimateDate,
             priceBreakup,
-            label: "",
+            label: label || "",
           },
           $push: {
             tracking: {
@@ -353,23 +283,13 @@ const createNimbuspostShipment = async ({
     await session.commitTransaction();
     session.endSession();
 
-    // Trigger background pickup request
+    // Trigger background pickup manifest assignment
     process.nextTick(async () => {
       try {
-        await axios.post(
-          `${BASE_URL}/shipments/pickups`,
-          JSON.stringify({ ids: [shipment_id] }),
-          {
-            headers: {
-              "Content-Type": "application/json",
-              "NP-API-KEY": API_KEY,
-            },
-          }
-        );
         const fresh = await Order.findById(id);
         if (fresh) await assignPickupManifest(fresh);
       } catch (e) {
-        console.error("NimbusPost Pickup Request Error:", e.response?.data || e.message);
+        console.error("NimbusPost Pickup Assign Error:", e.message);
       }
     });
 
@@ -377,7 +297,7 @@ const createNimbuspostShipment = async ({
       success: true,
       message: "Shipment Created Successfully",
       awb_number,
-      labelUrl: labelUrl || null,
+      labelUrl: label || null,
     };
   } catch (error) {
     if (session.inTransaction()) await session.abortTransaction();

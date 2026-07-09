@@ -1869,8 +1869,8 @@ const trackOrders = async () => {
     // Find orders that are due for tracking (polling as a fallback to webhooks)
     const allOrders = await Order.find({
       status: { $nin: ["new", "Cancelled", "Delivered", "RTO Delivered"] },
-      provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery","Ekart"] },
-      // awb_number:"23645496816295",
+      provider: { $nin: ["Shree Maruti", "Dtdc", "DTDC", "Delhivery", "Ekart", "NimbusPost"] },
+      // awb_number:"23645496844085",
       $or: [
         { lastTrackedAt: { $exists: false } },
         { lastTrackedAt: null },
@@ -2125,11 +2125,12 @@ const mapTrackingResponse = (data, provider, remark) => {
       shipment_status: data[0]?.shipment_status || null,
     },
     NimbusPost: {
-      Status: (data[0]?.status || data.status) || null,
-      StatusCode: (data[0]?.status_code || data.status_code) || null,
-      StatusLocation: (data[0]?.city || data.city) || "Unknown",
-      StatusDateTime: (data[0]?.updated_on || data.updated_on) || null,
-      Instructions: (data[0]?.remarks || data.remarks) || null,
+      // trackShipmentNimbuspost normalizes history items to: { status, status_code, city, updated_on, remarks }
+      Status: data[0]?.status || null,
+      StatusCode: data[0]?.status_code || null,
+      StatusLocation: data[0]?.city || data[0]?.location || 'Unknown',
+      StatusDateTime: data[0]?.updated_on || data[0]?.timestamp || null,
+      Instructions: data[0]?.remarks || data[0]?.remark || null,
     },
     Delhivery: {
       Status: data[0].Scan || "N/A",
