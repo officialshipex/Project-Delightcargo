@@ -24,7 +24,12 @@ const {
 } = require("./checkPincodeServiceability/checkPincodeServiceability.controller");
 const app = express();
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({
+  limit: "10mb",
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString();
+  }
+}));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.use(helmet());
 app.use(cors());
