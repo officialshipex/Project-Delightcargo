@@ -2,7 +2,6 @@ if (process.env.NODE_ENV != "production") {
     require('dotenv').config();
 }
 
-const axios = require('axios');
 const mongoose = require("mongoose");
 const getUniqueId = require("../../getUniqueId");
 const createNimbuspostShipment = require("../../../API/Courier/nimbuspostShipmentCreation.controller");
@@ -19,7 +18,7 @@ const AllCourier = require("../../../models/AllCourierSchema");
 const CourierService = require("../../../models/CourierService.Schema");
 
 const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api.nimbuspost.com/v1';
-const { getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken } = require('../nimbusAuth');
+const { getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken, nimbusAxios: axios } = require('../nimbusAuth');
 
 // ─── Courier Setup (Admin) ────────────────────────────────────────────────────
 const getCouriers = async (req, res) => {
@@ -35,7 +34,7 @@ const getCouriers = async (req, res) => {
             }));
             return res.status(201).json(allServices);
         }
-
+console.log("couriers",response.data)
         res.status(400).json({ message: 'Failed to fetch services' });
 
     } catch (error) {

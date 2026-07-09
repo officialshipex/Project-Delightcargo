@@ -94,5 +94,38 @@ const clearNimbusToken = () => {
     _tokenExpiry = null;
 };
 
-module.exports = { getNimbusToken, getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken };
+// Create a custom axios instance for NimbusPost to transparently handle token refreshes
+const nimbusAxios = axios.create();
+
+nimbusAxios.interceptors.response.use(
+    async (response) => {
+        // If NimbusPost returns status: false with an invalid/missing token message, retry the request
+        if (response.data && response.data.status === false && 
+            (response.data.message === 'Missing or invalid Token in request' || 
+             response.data.message === 'invalid token' ||
+             String(response.data.message).toLowerCase().includes('token'))) {
+            
+            console.warn('[NimbusPost] Invalid token detected in response. Clearing cache and retrying...');
+            clearNimbusToken();
+            
+            const config = response.config;
+            const isJson = config.headers['Content-Type'] === 'application/json' || (config.data && typeof config.data === 'object');
+            const freshHeaders = isJson ? await getNimbusJsonHeaders() : await getNimbusGetHeaders();
+            
+            config.headers = {
+                ...config.headers,
+                ...freshHeaders
+            };
+            
+            // Retry the request using the main axios instance to avoid infinite loop
+            return axios(config);
+        }
+        return response;
+    },
+    (error) => {
+        return Promise.reject(error);
+    }
+);
+
+module.exports = { getNimbusToken, getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken, nimbusAxios };
 

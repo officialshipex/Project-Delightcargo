@@ -1,4 +1,3 @@
-const axios = require("axios");
 const FormData = require("form-data");
 const Order = require("../../models/newOrder.model");
 const User = require("../../models/User.model");
@@ -10,7 +9,7 @@ const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
 const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api.nimbuspost.com/v1';
-const { getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken } = require('../../AllCouriers/NimbusPost/nimbusAuth');
+const { getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken, nimbusAxios: axios } = require('../../AllCouriers/NimbusPost/nimbusAuth');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const generateSKU = (name) => {

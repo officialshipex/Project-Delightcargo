@@ -8,7 +8,7 @@ const mongoose = require("mongoose");
 const NimbusPostWebhook = async (req, res) => {
   try {
     const signatureHeader = req.headers["x-hmac-sha256"] || req.headers["X-Hmac-SHA256"];
-    console.log("signature",signatureHeader)
+    // console.log("signature",signatureHeader)
     const secret = process.env.NIMBUSPOST_WEBHOOK_SECRET;
 
     // Webhook Signature verification (if secret configured)
