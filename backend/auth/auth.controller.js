@@ -154,7 +154,7 @@ const register = async (req, res) => {
       userId: newUser._id,
       userName: fullname,
       planName: "LITE",
-      b2bRateCard: liteRateCard,
+      B2BRateCard: liteRateCard,
     });
     await b2bPlan.save();
 

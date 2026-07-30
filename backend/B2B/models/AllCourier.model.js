@@ -18,6 +18,18 @@ const allCourierSchema = new mongoose.Schema({
         required: true,
         enum: ["Enable", "Disable"],
       },
+    username: {
+        type: String,
+        required: false,
+    },
+    password: {
+        type: String,
+        required: false,
+    },
+    apiKey: {
+        type: String,
+        required: false,
+    },
     date: {
         type: Date,
         default: Date.now,

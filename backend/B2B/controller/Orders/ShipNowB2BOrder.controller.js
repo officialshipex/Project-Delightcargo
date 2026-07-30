@@ -277,15 +277,17 @@ const ShipNowB2BOrder = async (req, res) => {
       // ===============================
       // SERVICEABILITY CHECK (ONCE PER PROVIDER)
       // ===============================
-      if (!serviceabilityCache[provider]) {
-        serviceabilityCache[provider] = await checkB2BServiceability({
+      const cacheKey = provider?.toLowerCase() === "delhivery" ? rc.courierServiceName : provider;
+      if (!serviceabilityCache[cacheKey]) {
+        serviceabilityCache[cacheKey] = await checkB2BServiceability({
           provider,
           order,
           packages: order.B2BPackageDetails.packages,
+          courierServiceName: rc.courierServiceName,
         });
       }
 
-      const serviceability = serviceabilityCache[provider];
+      const serviceability = serviceabilityCache[cacheKey];
 
       // ===============================
       // AGGREGATOR (SHIPROCKET)
@@ -358,8 +360,8 @@ const ShipNowB2BOrder = async (req, res) => {
   }
 };
 
-const checkB2BServiceability = async ({ provider, order, packages }) => {
-  const providerName = provider.toLowerCase();
+const checkB2BServiceability = async ({ provider, order, packages, courierServiceName }) => {
+  const providerName = provider?.toLowerCase() || "";
 
   // ===============================
   // SHIPROCKET (AGGREGATOR)
@@ -383,6 +385,7 @@ const checkB2BServiceability = async ({ provider, order, packages }) => {
     const isServiceable = await checkDelhiveryServiceability({
       order,
       packages,
+      courierServiceName, // pass so it can fetch correct credentials
     });
 
     return {
