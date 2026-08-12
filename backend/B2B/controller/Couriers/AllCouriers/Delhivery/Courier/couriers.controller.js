@@ -7,6 +7,7 @@ const WalletTransaction = require("../../../../../../models/WalletTransaction.mo
 const mongoose = require("mongoose");
 const Order = require("../../../../../../models/newOrder.model");
 const crypto = require("crypto");
+const { getAuthoritativeB2BRate } = require("../../../../../utils/b2bRateEngine");
 
 const createdDelhiveryB2BWarehouses = new Set();
 
@@ -120,7 +121,7 @@ const createDelhiveryB2BShipment = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    const { id, provider, courierServiceName, finalCharges, rateBreakup } = req.body;
+    const { id, provider, courierServiceName } = req.body;
     console.log("Creating Delhivery B2B Shipment for Order ID:", req.body);
 
     session.startTransaction();
@@ -137,6 +138,19 @@ const createDelhiveryB2BShipment = async (req, res) => {
     if (!order) throw new Error("Order already processed");
     if (order.orderType !== "B2B")
       throw new Error("Delhivery supports B2B only");
+
+    /* ================================
+       1️⃣.5 RECOMPUTE AUTHORITATIVE CHARGE
+       Never trust a client-supplied finalCharges/rateBreakup for a wallet
+       debit — recompute it from the order's own active rate card.
+    ================================= */
+    const { working } = await getAuthoritativeB2BRate({
+      order,
+      provider: "Delhivery",
+      courierServiceName,
+    });
+    const finalCharges = working.grand_total;
+    const rateBreakup = working;
 
     /* ================================
        2️⃣ WALLET CHECK

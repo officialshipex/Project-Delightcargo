@@ -118,7 +118,7 @@ const createShipmentFunctionShipRocket = async (
       billing_pincode: String(currentOrder.pickupAddress.pinCode),
       billing_state: currentOrder.pickupAddress.state,
       billing_country: "India",
-      billing_email: currentOrder.pickupAddress.email || user.email || SHIPROCKET_EMAIL,
+      billing_email: currentOrder.pickupAddress.email || SHIPROCKET_EMAIL,
       billing_phone: cleanPhone(currentOrder.pickupAddress.phoneNumber),
       shipping_is_billing: false,
       shipping_customer_name: receiverName.first,
@@ -150,10 +150,11 @@ const createShipmentFunctionShipRocket = async (
     if (!awbResult?.awb_code) return { status: 400, error: "Failed to assign AWB" };
 
     const awb_number = awbResult.awb_code;
+    const courier_name = awbResult.courier_name || null;
     currentOrder.status = "Booked";
     currentOrder.awb_number = awb_number;
     currentOrder.shipment_id = String(shipment_id);
-    currentOrder.provider = "Shiprocket";
+    currentOrder.provider = courier_name || "Shiprocket";
     currentOrder.partner = "Shiprocket";
     currentOrder.totalFreightCharges = charges;
     currentOrder.courierServiceName = serviceDetails.name || serviceDetails.courierProviderServiceName;

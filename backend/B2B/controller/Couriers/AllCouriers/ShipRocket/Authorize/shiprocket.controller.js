@@ -47,11 +47,23 @@ const getToken = async (req, res) => {
 
 /**
  * Refresh Shiprocket Cargo Access Token
+ * Access tokens are valid ~1 day (per Shiprocket Cargo docs), so we cache the
+ * refreshed token in memory and only hit /api/token/refresh/ when it's missing
+ * or close to expiry, instead of on every single API call.
  */
+let cachedAccessToken = null;
+let cachedTokenExpiresAt = 0; // epoch ms
+const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before expiry
+const TOKEN_ASSUMED_TTL_MS = 24 * 60 * 60 * 1000; // ~1 day, per docs
+
 const refreshToken = async () => {
+  if (cachedAccessToken && Date.now() < cachedTokenExpiresAt - TOKEN_REFRESH_BUFFER_MS) {
+    return cachedAccessToken;
+  }
+
   try {
     const REFRESH_TOKEN = process.env.SHIPROCKET_CARGO_REFRESH_TOKEN;
-    const AUTH_TOKEN = process.env.SHIPROCKET_CARGO_AUTH_TOKEN;
+    const AUTH_TOKEN = cachedAccessToken || process.env.SHIPROCKET_CARGO_AUTH_TOKEN;
 
     if (!REFRESH_TOKEN || !AUTH_TOKEN) {
       throw new Error("Shiprocket Cargo AUTH or REFRESH token missing");
@@ -70,8 +82,11 @@ const refreshToken = async () => {
       }
     );
 
+    cachedAccessToken = response.data.access;
+    cachedTokenExpiresAt = Date.now() + TOKEN_ASSUMED_TTL_MS;
+
   //  console.log("access token",response.data.access)
-    return response.data.access;
+    return cachedAccessToken;
   } catch (error) {
     console.error(
       "Shiprocket Cargo Token Refresh Error:",

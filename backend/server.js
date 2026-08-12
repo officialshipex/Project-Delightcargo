@@ -18,6 +18,7 @@ const otpRouter = require("./auth/auth.otp");
 const emailOtpRouter = require("./notification/emailOtpVerification");
 const { resetPassword } = require("./notification/resetPassword");
 require("./cron/ndrCron"); // Initialize NDR cron jobs
+require("./B2B/controller/Orders/tracking.controller"); // Initialize B2B Shiprocket Cargo tracking cron
 
 const {
   loadCourierPincodes,

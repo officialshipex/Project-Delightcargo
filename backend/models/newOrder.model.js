@@ -115,6 +115,7 @@ const orderSchema = new mongoose.Schema(
       resellerName: { type: String },
       gstin: { type: String },
       ewaybill: { type: String },
+      transporterId: { type: String }, // Shiprocket Cargo transportar_id, used to generate the e-way bill for this shipment
     },
     compositeOrderId: {
       type: String,

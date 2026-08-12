@@ -38,6 +38,9 @@ const {
 const {
   checkShipexIndiaServiceability,
 } = require("../../AllCouriers/ShipxIndia/Courier/couriers.controller.js");
+const {
+  checkServiceabilityShipRocket,
+} = require("../../AllCouriers/ShipRocket/Courier/couriers.controller.js");
 
 // Define courier IDs for each provider
 const courierIds = {
@@ -51,6 +54,7 @@ const courierIds = {
   Ekart: "08",
   BoxdLogistics: "09",
   Proship: "10",
+  Shiprocket: "11",
   ShipexIndia: "13",
 };
 
@@ -131,16 +135,20 @@ const availableCourierService = async (req, res) => {
 
     // Collect unique active providers
     const activeProviders = new Set();
+    const shiprocketServiceNames = new Set();
     for (let rc of rateCards) {
       if (rc.status !== "Active") continue;
       const provider = rc.courierProviderName;
-      if (Object.keys(courierIds).includes(provider)) {
+      if (!Object.keys(courierIds).includes(provider)) continue;
+      if (provider === "Shiprocket") {
+        shiprocketServiceNames.add(rc.courierServiceName);
+      } else {
         activeProviders.add(provider);
       }
     }
 
-    const checkResults = await Promise.all(
-      Array.from(activeProviders).map(async (provider) => {
+    const checkResults = await Promise.all([
+      ...Array.from(activeProviders).map(async (provider) => {
         let result = { success: false };
         try {
           if (provider === "Amazon Shipping") {
@@ -195,8 +203,24 @@ const availableCourierService = async (req, res) => {
           result = { success: false, error: err.message };
         }
         return { provider, result };
-      })
-    );
+      }),
+      ...Array.from(shiprocketServiceNames).map(async (serviceName) => {
+        let result = { success: false };
+        try {
+          result = await checkServiceabilityShipRocket({
+            serviceName,
+            origin: pickUpPincode,
+            destination: deliveryPincode,
+            payment_type: paymentType === "COD",
+            weight: applicableWeight,
+          });
+        } catch (err) {
+          console.error(`Serviceability check failed for Shiprocket_${serviceName}:`, err);
+          result = { success: false, error: err.message };
+        }
+        return { provider: `Shiprocket_${serviceName}`, result };
+      }),
+    ]);
 
     for (const item of checkResults) {
       serviceabilityCache[item.provider] = item.result;
@@ -208,7 +232,9 @@ const availableCourierService = async (req, res) => {
       const provider = rc.courierProviderName;
       if (!Object.keys(courierIds).includes(provider)) continue;
 
-      const serviceable = serviceabilityCache[provider];
+      const serviceable = provider === "Shiprocket"
+        ? serviceabilityCache[`Shiprocket_${rc.courierServiceName}`]
+        : serviceabilityCache[provider];
       let isServiceable = serviceable && serviceable.success !== false;
 
       if (provider === "BoxdLogistics" && isServiceable && Array.isArray(serviceable.courier_ids)) {

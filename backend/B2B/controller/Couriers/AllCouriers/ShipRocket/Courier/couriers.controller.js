@@ -6,6 +6,7 @@ const User = require("../../../../../../models/User.model");
 const Wallet = require("../../../../../../models/wallet");
 const WalletTransaction = require("../../../../../../models/WalletTransaction.model");
 const mongoose = require("mongoose");
+const { getAuthoritativeB2BRate } = require("../../../../../utils/b2bRateEngine");
 
 exports.createShiprocketCargoShipment = async (req, res) => {
   const session = await mongoose.startSession();
@@ -15,10 +16,6 @@ exports.createShiprocketCargoShipment = async (req, res) => {
       id,
       provider,
       courierServiceName,
-      serviceId,
-      modeId,
-      finalCharges,
-      rateBreakup,
     } = req.body;
     console.log("Creating Shiprocket Cargo Shipment for Order ID:", req.body);
     session.startTransaction();
@@ -37,6 +34,32 @@ exports.createShiprocketCargoShipment = async (req, res) => {
     if (order.orderType !== "B2B")
       throw new Error("Shiprocket Cargo supports B2B only");
 
+    // Shiprocket requires an e-way bill number for any shipment with invoice
+    // value over 50,000 — and there's no window in this flow to generate one
+    // mid-booking (order_creation and shipment_association happen back-to-back
+    // in the same request, with no time for the external GST e-way-bill
+    // generation step in between). Fail fast, before touching the wallet or
+    // calling Shiprocket at all, instead of letting a doomed booking through.
+    // otherDetails.ewaybill can be set ahead of time via bulk order upload.
+    if (Number(order.paymentDetails.amount) > 50000 && !order.otherDetails?.ewaybill) {
+      throw new Error(
+        "This shipment's invoice value exceeds ₹50,000, which requires an e-way bill number. Add the e-way bill number to this order before booking."
+      );
+    }
+
+    /* ================================
+       1️⃣.5 RECOMPUTE AUTHORITATIVE CHARGE
+       Never trust a client-supplied finalCharges/rateBreakup for a wallet
+       debit — recompute it from the order's own active rate card.
+    ================================= */
+    const { working } = await getAuthoritativeB2BRate({
+      order,
+      provider: "Shiprocket",
+      courierServiceName,
+    });
+    const finalCharges = working.grand_total;
+    const rateBreakup = working;
+
     /* ================================
        2️⃣ WALLET CHECK
     ================================= */
@@ -47,7 +70,13 @@ exports.createShiprocketCargoShipment = async (req, res) => {
     const balance = effectiveBalance + wallet.creditLimit;
 
     if (balance < finalCharges) throw new Error("Insufficient Wallet Balance");
-    const isAppointment = rateBreakup.appointment_charge > 0 ? true : false;
+    // NOTE: appointment_charge is only a rate-card pricing surcharge — we have
+    // no PO number / appointment date anywhere in the order to send alongside
+    // is_appointment_taken:true, and we never call Shiprocket's Add Appointment
+    // API. Claiming an appointment without following through would leave
+    // Shiprocket waiting on a slot that's never scheduled, so always send false
+    // until real appointment capture (PO number + date) is built.
+    const isAppointment = false;
     /* ================================
        3️⃣ DEDUCT WALLET (IMMEDIATE)
     ================================= */
@@ -127,7 +156,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
           ? order.paymentDetails.amount
           : null,
 
-      mode_name: "surface",
+      mode_name: (courierServiceName || "").toLowerCase().includes("air") ? "air" : "surface",
       source: "API",
 
       supporting_docs: [
@@ -153,19 +182,41 @@ exports.createShiprocketCargoShipment = async (req, res) => {
     );
     console.log("Order Creation Response:", orderRes.data);
 
-    const { order_id, mode_id, delivery_partner_id } = orderRes.data;
+    // Shiprocket auto-assigns the carrier during order_creation — the client
+    // never gets to pick one. On success we get mode_id/delivery_partner_id;
+    // on a "soft failure" it still returns success:true/201 but omits those
+    // and includes a message instead (e.g. no auto-assignment configured, or
+    // a wallet/serviceability issue on Shiprocket's side). Must not proceed
+    // to shipment association without a real assignment.
+    const { order_id, mode_id, delivery_partner_id, transportar_id } = orderRes.data;
+    if (!mode_id || !delivery_partner_id) {
+      throw new Error(
+        orderRes.data?.message ||
+          "Shiprocket could not auto-assign a carrier for this shipment"
+      );
+    }
+
+    // transportar_id is what Shiprocket says to generate the e-way bill
+    // (Part-A) against — saved on the order below for the seller's records
+    // (the >50,000 e-way-bill requirement itself is already enforced earlier,
+    // before this API call, so no repeat check needed here).
+
+    // Pickup time must be in the future (IST) or Shiprocket rejects it with
+    // "Pickup time already over. Please select a future time."
+    const pickupDateTime = new Date(Date.now() + 5.5 * 60 * 60 * 1000 + 15 * 60 * 1000);
+
     const shipmentAssociationPayload = {
       client_id: Number(process.env.SHIPROCKET_CARGO_CLIENT_ID),
       order_id,
       remarks: "Shipment booked via API",
 
-      // REQUIRED
+      // REQUIRED — must reuse exactly what order_creation auto-assigned above
       to_pay_amount: "0",
-      modeId,
-      serviceId,
+      mode_id,
+      delivery_partner_id,
 
-      // REQUIRED FORMAT: "YYYY-MM-DD HH:mm:ss"
-      pickup_date_time: new Date().toISOString().slice(0, 19).replace("T", " "),
+      // REQUIRED FORMAT: "YYYY-MM-DD HH:mm:ss", IST, at least a few minutes ahead
+      pickup_date_time: pickupDateTime.toISOString().slice(0, 19).replace("T", " "),
 
       // GST / EWAY
       recipient_GST: order.otherDetails?.gstin || null,
@@ -208,6 +259,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
           totalFreightCharges: finalCharges,
           rateBreakup,
           walletDeducted: true,
+          "otherDetails.transporterId": transportar_id || null,
         },
         $push: {
           tracking: {
@@ -233,7 +285,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
       60 * 1000
     );
   } catch (err) {
-    console.log("Error in Shiprocket Cargo Shipment:", err.response.data);
+    console.log("Error in Shiprocket Cargo Shipment:", err.response?.data || err.message);
     await session.abortTransaction();
     session.endSession();
 
@@ -246,7 +298,26 @@ exports.createShiprocketCargoShipment = async (req, res) => {
   }
 };
 
-const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
+// Shiprocket Cargo has no webhook/callback for status updates, so this is the
+// only way we find out the AWB was assigned. A single 60s check isn't enough —
+// retry with backoff before giving up, instead of leaving the order stuck in
+// "Booked" with no AWB forever.
+const SHIPMENT_STATUS_RETRY_DELAYS_MS = [60 * 1000, 3 * 60 * 1000, 10 * 60 * 1000, 30 * 60 * 1000];
+
+const scheduleShiprocketCargoStatusRetry = (shipmentId, attempt) => {
+  if (attempt >= SHIPMENT_STATUS_RETRY_DELAYS_MS.length) {
+    console.error(
+      `⚠️ Shiprocket Cargo shipment ${shipmentId} still has no AWB after ${attempt} status checks — needs manual follow-up.`
+    );
+    return;
+  }
+  setTimeout(
+    () => getShiprocketCargoShipmentDetailsInternal(shipmentId, attempt + 1),
+    SHIPMENT_STATUS_RETRY_DELAYS_MS[attempt]
+  );
+};
+
+const getShiprocketCargoShipmentDetailsInternal = async (shipmentId, attempt = 0) => {
   try {
     const order = await Order.findOne({ shipment_id: shipmentId });
     if (!order) return;
@@ -303,9 +374,12 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
     }
 
     /* ================================
-       ⏳ STILL PROCESSING
+       ⏳ STILL PROCESSING → RETRY WITH BACKOFF
     ================================= */
-    if (!data.waybill_no) return;
+    if (!data.waybill_no) {
+      scheduleShiprocketCargoStatusRetry(shipmentId, attempt);
+      return;
+    }
 
     /* ================================
        ✅ SUCCESS → SAVE AWB + CHILD AWBs
@@ -318,6 +392,10 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
         label: data.label_url,
         partner: data.delivery_partner?.name,
         courierServiceName: data.delivery_partner?.common_name,
+        // Usually still null this early (Shiprocket hasn't computed it yet at
+        // AWB-assignment time per their own sample response) — wired up now so
+        // it's captured whenever it does become available on a later check.
+        estimatedDeliveryDate: data.edd || null,
         status: "Ready To Ship",
       },
       $addToSet: {
@@ -347,6 +425,7 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId) => {
     ).catch(e => console.error("⚠️ WalletTransaction B2B ShipRocket AWB update failed:", e.message));
   } catch (err) {
     console.error("Shiprocket async error:", err.message);
+    scheduleShiprocketCargoStatusRetry(shipmentId, attempt);
   }
 };
 
@@ -381,6 +460,8 @@ const trackShiprocketCargoShipmentInternal = async (awb) => {
 };
 
 // trackShiprocketCargoShipmentInternal("20894534977234")
+
+exports.trackShiprocketCargoShipmentInternal = trackShiprocketCargoShipmentInternal;
 
 exports.getCargoServiceableCouriers = async ({ order, packages }) => {
   const accessToken = await refreshToken();
