@@ -6,28 +6,57 @@ const express = require("express");
 const app = express();
 app.use(express.json());
 const Order = require("../models/newOrder.model");
+const PickupAddress = require("../models/pickupAddress.model");
 const { generateUniqueOrderIds } = require("../utils/generateUniqueOrderId");
 const {
   createWooCommerceWebhook,
 } = require("./WooCommerce/woocommerce.controller");
 
 const createWebhook = async (storeURL, storeAccessToken) => {
-  const webhookURL = "https://api.delightcargo.com/v1/channel/webhook/orders";
+  const webhookURL = "https://api.delightcargo.in/v1/channel/webhook/orders";
   const webhookTopic = "orders/create";
 
   try {
+    let cleanURL = storeURL.replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim();
+    let apiDomain = cleanURL;
+
+    // Try fetching shop details to get the primary myshopify domain
+    try {
+      const shopRes = await axios.get(
+        `https://${cleanURL}/admin/api/2025-01/shop.json`,
+        {
+          headers: {
+            "X-Shopify-Access-Token": storeAccessToken,
+            "Content-Type": "application/json",
+          },
+          timeout: 10000,
+        }
+      );
+      if (shopRes.data?.shop?.myshopify_domain) {
+        apiDomain = shopRes.data.shop.myshopify_domain;
+        console.log(`Resolved Shopify canonical domain: ${apiDomain}`);
+      }
+    } catch (shopErr) {
+      console.warn(`Could not fetch shop.json on ${cleanURL}: ${shopErr.message}`);
+      if (cleanURL.startsWith("www.")) {
+        apiDomain = cleanURL.replace(/^www\./, "");
+      }
+    }
+
     // Step 1: Fetch existing webhooks
     const existingWebhooksResponse = await axios.get(
-      `https://${storeURL}/admin/api/2025-01/webhooks.json`,
+      `https://${apiDomain}/admin/api/2025-01/webhooks.json`,
       {
         headers: {
           "X-Shopify-Access-Token": storeAccessToken,
           "Content-Type": "application/json",
         },
+        timeout: 15000,
       }
     );
 
-    const existingWebhooks = existingWebhooksResponse.data.webhooks;
+    const existingWebhooks = existingWebhooksResponse.data.webhooks || [];
+    console.log("webhook", existingWebhooks);
 
     // Step 2: Check if the webhook already exists
     const existingWebhook = existingWebhooks.find(
@@ -36,12 +65,12 @@ const createWebhook = async (storeURL, storeAccessToken) => {
 
     if (existingWebhook) {
       console.log("Webhook already exists:", existingWebhook.id);
-      return { message: "Webhook already exists", webhook: existingWebhook };
+      return { message: "Webhook already exists", webhook: existingWebhook, resolvedDomain: apiDomain };
     }
 
     // Step 3: Create the webhook if it does not exist
     const response = await axios.post(
-      `https://${storeURL}/admin/api/2025-01/webhooks.json`,
+      `https://${apiDomain}/admin/api/2025-01/webhooks.json`,
       {
         webhook: {
           topic: webhookTopic,
@@ -54,14 +83,16 @@ const createWebhook = async (storeURL, storeAccessToken) => {
           "X-Shopify-Access-Token": storeAccessToken,
           "Content-Type": "application/json",
         },
+        timeout: 15000,
       }
     );
 
     console.log("Webhook Created:", response.data);
-    return response.data;
+    return { ...response.data, resolvedDomain: apiDomain };
   } catch (error) {
-    console.error("Error creating webhook:", error.response?.data || error);
-    return { error: error.response?.data || error.message };
+    const errDetail = error.response?.data || error.message;
+    console.error("Error creating webhook:", errDetail);
+    return { error: errDetail };
   }
 };
 
@@ -141,6 +172,12 @@ const fetchExistingOrders = async (req, res) => {
       }
     } while (pageInfo);
 
+    // Fetch primary seller pickup address
+    const primaryPickup = await PickupAddress.findOne({
+      userId: channel.userId,
+      isPrimary: true,
+    }).lean();
+
     for (const order of allOrders) {
       const compositeOrderId = `${storeURL}-${order.id}`;
 
@@ -151,13 +188,19 @@ const fetchExistingOrders = async (req, res) => {
       }
 
       // Extract product details
-      const productDetails = order.line_items.map((item) => ({
-        id: item.id,
-        quantity: item.quantity,
-        name: item.name,
-        sku: item.sku,
-        unitPrice: item.price,
-      }));
+      const productDetails = (order.line_items || []).map((item) => {
+        const tax = (item.tax_lines || []).reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
+        const discount = (item.discount_allocations || []).reduce((acc, d) => acc + parseFloat(d.amount || 0), 0);
+        return {
+          id: item.id,
+          quantity: item.quantity,
+          name: item.name,
+          sku: item.sku || "",
+          unitPrice: String(item.price || "0"),
+          tax: String(tax),
+          discount: String(discount),
+        };
+      });
 
       // Default package dimensions
       let totalWeight = 0;
@@ -165,7 +208,7 @@ const fetchExistingOrders = async (req, res) => {
         totalWidth = 10,
         totalHeight = 10;
 
-      for (const item of order.line_items) {
+      for (const item of (order.line_items || [])) {
         try {
           const productInfo = await getProductDetails(
             item.product_id,
@@ -184,29 +227,43 @@ const fetchExistingOrders = async (req, res) => {
         }
       }
 
-      // Generate a unique internal orderId (do not use Shopify's order_number to avoid duplicates)
       const internalOrderId = await generateUniqueOrderIds(1);
+
+      const pickupAddressObj = (primaryPickup && primaryPickup.pickupAddress)
+        ? {
+            contactName: primaryPickup.pickupAddress.contactName,
+            email: primaryPickup.pickupAddress.email,
+            phoneNumber: primaryPickup.pickupAddress.phoneNumber,
+            address: primaryPickup.pickupAddress.address,
+            pinCode: primaryPickup.pickupAddress.pinCode,
+            city: primaryPickup.pickupAddress.city,
+            state: primaryPickup.pickupAddress.state,
+          }
+        : {
+            contactName: order.billing_address?.name || "N/A",
+            email: order.email || "unknown@example.com",
+            phoneNumber: order.billing_address?.phone || "0000000000",
+            address: `${order.billing_address?.address1 || ""}, ${order.billing_address?.address2 || ""}`.trim().replace(/^,\s*|,\s*$/g, ""),
+            pinCode: order.billing_address?.zip || "000000",
+            city: order.billing_address?.city || "Unknown",
+            state: order.billing_address?.province || "Unknown",
+          };
+
+      const receiverAddressStr = `${order.shipping_address?.address1 || ""}, ${order.shipping_address?.address2 || ""}`.trim().replace(/^,\s*|,\s*$/g, "") || "Not Provided";
 
       const newOrder = new Order({
         userId: channel.userId,
         orderId: internalOrderId,
         channelId: order.id,
+        channel: "Shopify",
+        storeUrl: storeURL,
         compositeOrderId,
-        pickupAddress: {
-          contactName: order.billing_address?.name || "N/A",
-          email: order.email || "unknown@example.com",
-          phoneNumber: order.billing_address?.phone || "0000000000",
-          address: `${order.billing_address?.address1 || ""}, ${order.billing_address?.address2 || ""
-            }`.trim(),
-          pinCode: order.billing_address?.zip || "000000",
-          city: order.billing_address?.city || "Unknown",
-          state: order.billing_address?.province || "Unknown",
-        },
+        pickupAddress: pickupAddressObj,
         receiverAddress: {
           contactName: order.shipping_address?.name || "N/A",
           email: order.email || "unknown@example.com",
           phoneNumber: order.shipping_address?.phone || "0000000000",
-          address: order.shipping_address?.address1 || "Not Provided",
+          address: receiverAddressStr,
           pinCode: order.shipping_address?.zip || "000000",
           city: order.shipping_address?.city || "Unknown",
           state: order.shipping_address?.province || "Unknown",
@@ -266,28 +323,50 @@ const fetchExistingOrders = async (req, res) => {
 
 const webhookhandler = async (req, res) => {
   try {
-    const storeURL = req.headers["x-shopify-shop-domain"];
-    console.log("storeURL", storeURL);
+    const rawDomain = req.headers["x-shopify-shop-domain"];
+    console.log("Shopify webhook header domain:", rawDomain);
 
-    const user = await AllChannel.findOne({ storeURL: storeURL });
+    // Handle express.raw Buffer body
+    const shopifyOrder = Buffer.isBuffer(req.body)
+      ? JSON.parse(req.body.toString("utf8"))
+      : (typeof req.body === "string" ? JSON.parse(req.body) : req.body);
+
+    if (!shopifyOrder) {
+      return res.status(400).json({ error: "Invalid webhook body" });
+    }
+
+    const cleanDomain = rawDomain ? rawDomain.replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim() : "";
+
+    let user = await AllChannel.findOne({
+      $or: [
+        { storeURL: cleanDomain },
+        { myshopifyDomain: cleanDomain },
+        { storeURL: { $regex: cleanDomain.replace(/\./g, "\\."), $options: "i" } },
+      ],
+    });
+
+    if (!user && cleanDomain) {
+      const domainPrefix = cleanDomain.split(".")[0];
+      user = await AllChannel.findOne({
+        $or: [
+          { storeURL: { $regex: domainPrefix, $options: "i" } },
+          { storeName: { $regex: domainPrefix, $options: "i" } },
+        ],
+      });
+    }
+
     if (!user) {
-      console.error("Store not found in AllChannel");
+      console.error("Store not found in AllChannel for domain:", cleanDomain);
       return res.status(404).json({ error: "Store not found" });
     }
 
-    // Fetch store location details
-    const location = await axios.get(
-      `https://${storeURL}/admin/api/2024-01/locations.json`,
-      {
-        headers: {
-          "X-Shopify-Access-Token": user.storeAccessToken,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-    const locations = location.data.locations[0];
+    // Auto-populate myshopifyDomain if missing
+    if (!user.myshopifyDomain && cleanDomain.includes("myshopify.com")) {
+      user.myshopifyDomain = cleanDomain;
+      await user.save().catch(e => console.warn("Could not auto-save myshopifyDomain:", e.message));
+    }
 
-    const shopifyOrder = req.body;
+    const storeURL = user.myshopifyDomain || user.storeURL;
     const compositeOrderId = `${storeURL}-${shopifyOrder.id}`;
     const firstLineItemId = shopifyOrder.line_items?.[0]?.id;
 
@@ -298,14 +377,44 @@ const webhookhandler = async (req, res) => {
       return res.status(200).json({ message: "Duplicate order ignored" });
     }
 
-    // Extract product details
-    const productDetails = shopifyOrder.line_items.map((item) => ({
-      id: item.id,
-      quantity: item.quantity,
-      name: item.name,
-      sku: item.sku,
-      unitPrice: item.price,
-    }));
+    // Fetch primary seller pickup address if available
+    const primaryPickup = await PickupAddress.findOne({
+      userId: user.userId,
+      isPrimary: true,
+    }).lean();
+
+    // Fetch store location details safely if fallback needed
+    let locations;
+    try {
+      const locationRes = await axios.get(
+        `https://${storeURL}/admin/api/2024-01/locations.json`,
+        {
+          headers: {
+            "X-Shopify-Access-Token": user.storeAccessToken,
+            "Content-Type": "application/json",
+          },
+          timeout: 10000,
+        }
+      );
+      locations = locationRes.data?.locations?.[0];
+    } catch (locErr) {
+      console.warn("Locations fetch warning:", locErr.message);
+    }
+
+    // Extract product details with tax and discount
+    const productDetails = (shopifyOrder.line_items || []).map((item) => {
+      const tax = (item.tax_lines || []).reduce((acc, t) => acc + parseFloat(t.price || 0), 0);
+      const discount = (item.discount_allocations || []).reduce((acc, d) => acc + parseFloat(d.amount || 0), 0);
+      return {
+        id: item.id,
+        quantity: item.quantity,
+        name: item.name,
+        sku: item.sku || "",
+        unitPrice: String(item.price || "0"),
+        tax: String(tax),
+        discount: String(discount),
+      };
+    });
 
     // Fetch package weight & dimensions
     let totalWeight = 0;
@@ -313,42 +422,56 @@ const webhookhandler = async (req, res) => {
       totalWidth = 10,
       totalHeight = 10;
 
-    for (const item of shopifyOrder.line_items) {
+    for (const item of (shopifyOrder.line_items || [])) {
       const productInfo = await getProductDetails(
         item.product_id,
         storeURL,
         user.storeAccessToken
       );
 
-      totalWeight += productInfo.weight;
-      totalLength = Math.max(totalLength, productInfo.length);
-      totalWidth = Math.max(totalWidth, productInfo.width);
-      totalHeight = Math.max(totalHeight, productInfo.height);
+      totalWeight += productInfo.weight || 0;
+      totalLength = Math.max(totalLength, productInfo.length || 0);
+      totalWidth = Math.max(totalWidth, productInfo.width || 0);
+      totalHeight = Math.max(totalHeight, productInfo.height || 0);
     }
 
-    // Generate a unique internal orderId (do not use Shopify's order_number to avoid duplicates)
     const internalOrderId = await generateUniqueOrderIds(1);
+
+    const pickupAddressObj = (primaryPickup && primaryPickup.pickupAddress)
+      ? {
+          contactName: primaryPickup.pickupAddress.contactName,
+          email: primaryPickup.pickupAddress.email,
+          phoneNumber: primaryPickup.pickupAddress.phoneNumber,
+          address: primaryPickup.pickupAddress.address,
+          pinCode: primaryPickup.pickupAddress.pinCode,
+          city: primaryPickup.pickupAddress.city,
+          state: primaryPickup.pickupAddress.state,
+        }
+      : {
+          contactName: shopifyOrder.billing_address?.name || "N/A",
+          email: shopifyOrder.email || "abc@gmail.com",
+          phoneNumber: shopifyOrder.billing_address?.phone || "0000000000",
+          address: `${shopifyOrder.billing_address?.address1 || ""}, ${shopifyOrder.billing_address?.address2 || ""}`.trim().replace(/^,\s*|,\s*$/g, ""),
+          pinCode: shopifyOrder.billing_address?.zip || "000000",
+          city: shopifyOrder.billing_address?.city || "abc",
+          state: locations?.localized_province_name || shopifyOrder.billing_address?.province || "N/A",
+        };
+
+    const receiverAddressStr = `${shopifyOrder.shipping_address?.address1 || ""}, ${shopifyOrder.shipping_address?.address2 || ""}`.trim().replace(/^,\s*|,\s*$/g, "") || "Not Provided";
 
     const newOrder = new Order({
       userId: user.userId,
       orderId: internalOrderId,
-      compositeOrderId, // Ensure uniqueness
-      channelId: firstLineItemId,
-      pickupAddress: {
-        contactName: shopifyOrder.billing_address?.name || "N/A",
-        email: shopifyOrder.email || "abc@gmail.com",
-        phoneNumber: shopifyOrder.billing_address?.phone || "0000000000",
-        address: `${shopifyOrder.billing_address?.address1 || ""},${shopifyOrder.billing_address?.address2 || ""
-          }`,
-        pinCode: shopifyOrder.billing_address?.zip || "000000",
-        city: shopifyOrder.billing_address?.city || "abc",
-        state: locations?.localized_province_name || "N/A",
-      },
+      compositeOrderId,
+      channelId: firstLineItemId || shopifyOrder.id,
+      channel: "Shopify",
+      storeUrl: storeURL,
+      pickupAddress: pickupAddressObj,
       receiverAddress: {
         contactName: shopifyOrder.shipping_address?.name || "N/A",
         email: shopifyOrder.email || "abc@gmail.com",
         phoneNumber: shopifyOrder.shipping_address?.phone || "0000000000",
-        address: shopifyOrder.shipping_address?.address1 || "abc,abc,abc",
+        address: receiverAddressStr,
         pinCode: shopifyOrder.shipping_address?.zip || "000000",
         city: shopifyOrder.shipping_address?.city || "abc",
         state: shopifyOrder.shipping_address?.province || "abc",
@@ -368,7 +491,7 @@ const webhookhandler = async (req, res) => {
         amount:
           shopifyOrder.financial_status === "paid"
             ? 0
-            : shopifyOrder.total_price,
+            : parseFloat(shopifyOrder.total_price || 0),
       },
       status: "new",
       tracking: [
@@ -413,51 +536,71 @@ const storeAllChannelDetails = async (req, res) => {
       syncInventory,
       syncDate,
     } = req.body;
-    // console.log("req",req.body)
-    if (
-      !storeName ||
-      !storeURL ||
-      !storeClientId ||
-      !storeClientSecret
-      // !storeAccessToken
-    ) {
+
+    if (!storeName || !storeURL || !storeClientId || !storeClientSecret) {
       return res
         .status(400)
         .json({ success: false, message: "Missing required fields" });
     }
 
-    const existingStore = await AllChannel.findOne({ storeURL });
+    const cleanStoreURL = storeURL.replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim();
+
+    const existingStore = await AllChannel.findOne({
+      $or: [{ storeURL }, { storeURL: cleanStoreURL }],
+    });
     if (existingStore) {
       return res.status(400).json({ message: "Store URL already exists" });
     }
 
     // ✅ Register Webhook
     let webHook;
-    let webhookId;
+    let webhookId = null;
+    let myshopifyDomain = "";
+
     if (channel === "Shopify") {
-      webHook = await createWebhook(storeURL, storeAccessToken);
-      console.log("✅ Webhook created successfully:", webHook);
-      if (webHook.error === "socket hang up") {
+      if (!storeAccessToken) {
+        return res.status(400).json({ success: false, message: "Access Token is required for Shopify." });
+      }
+
+      webHook = await createWebhook(cleanStoreURL, storeAccessToken);
+      console.log("✅ Webhook creation response:", webHook);
+
+      if (webHook.error) {
+        const errorDetail = typeof webHook.error === "object"
+          ? JSON.stringify(webHook.error)
+          : webHook.error;
         return res.status(400).json({
-          message: "URL or Token or Secret key or Client ID are not matching",
+          success: false,
+          message: `Failed to create webhook on Shopify: ${errorDetail}. Please check Store URL and Access Token.`,
         });
       }
-      webhookId = webHook?.webhook?.id || "";
+
+      webhookId = webHook?.webhook?.id || webHook?.id || "";
+      if (webHook.resolvedDomain) {
+        myshopifyDomain = webHook.resolvedDomain;
+      }
     }
+
     if (channel === "WooCommerce") {
       webHook = await createWooCommerceWebhook(
-        storeURL,
+        cleanStoreURL,
         storeClientId,
         storeClientSecret
       );
+      if (webHook?.error) {
+        return res.status(400).json({
+          success: false,
+          message: "Failed to create webhook on WooCommerce. Please check Consumer Key & Secret.",
+        });
+      }
       webhookId = webHook?.id || webHook?.webhook?.id || "";
     }
-    console.log("wekdfn", webHook);
+
     const newChannel = new AllChannel({
       userId,
       channel,
       storeName,
-      storeURL,
+      storeURL: cleanStoreURL,
       storeClientId,
       storeClientSecret,
       storeAccessToken,
@@ -469,7 +612,8 @@ const storeAllChannelDetails = async (req, res) => {
       multiSeller,
       syncInventory,
       syncFromDate: syncDate || null,
-      webhookId: webhookId,
+      webhookId: webhookId ? String(webhookId) : null,
+      myshopifyDomain,
     });
 
     await newChannel.save();
@@ -483,7 +627,7 @@ const storeAllChannelDetails = async (req, res) => {
     console.error("❌ Error storing channel details:", error);
     return res
       .status(500)
-      .json({ success: false, message: "Internal Server Error." });
+      .json({ success: false, message: error.message || "Internal Server Error." });
   }
 };
 
@@ -510,7 +654,7 @@ const getOrders = async (storeURL) => {
         },
       }
     );
-
+// console.log("response",response.data)
     const response1 = await axios.get(
       `https://${storeURL}/admin/api/2024-01/locations.json`,
       {
@@ -533,7 +677,7 @@ const getOrders = async (storeURL) => {
   }
 };
 
-// getOrders(SHOPIFY_STORE);
+// getOrders("www.savagemods.com");
 
 const fulfillOrder = async (req, res) => {
   try {
@@ -756,7 +900,117 @@ const deleteChannel = async (req, res) => {
   }
 };
 
+const fulfillShopifyOrderHelper = async (order) => {
+  try {
+    if (!order || order.channel !== "Shopify" || !order.awb_number) return;
+
+    const channel = await AllChannel.findOne({
+      userId: order.userId,
+      channel: "Shopify",
+    });
+
+    if (!channel) return;
+
+    const shopifyStore = channel.myshopifyDomain || channel.storeURL;
+    const accessToken = channel.storeAccessToken;
+    const shopifyOrderId = order.compositeOrderId
+      ? order.compositeOrderId.split("-").pop()
+      : order.channelId;
+
+    if (!shopifyOrderId) return;
+
+    console.log(`🚚 Syncing Fulfillment to Shopify for Order ${shopifyOrderId} | AWB: ${order.awb_number} | Courier: ${order.provider || order.courierName}`);
+
+    // Try fulfillment_orders API first (modern Shopify standard)
+    try {
+      const foRes = await axios.get(
+        `https://${shopifyStore}/admin/api/2025-01/orders/${shopifyOrderId}/fulfillment_orders.json`,
+        {
+          headers: { "X-Shopify-Access-Token": accessToken },
+          timeout: 10000,
+        }
+      );
+
+      const openFo = (foRes.data?.fulfillment_orders || []).find(
+        (f) => f.status === "open" || f.status === "in_progress"
+      );
+
+      if (openFo) {
+        await axios.post(
+          `https://${shopifyStore}/admin/api/2025-01/fulfillments.json`,
+          {
+            fulfillment: {
+              line_items_by_fulfillment_order: [
+                { fulfillment_order_id: openFo.id }
+              ],
+              tracking_info: {
+                number: order.awb_number,
+                company: order.provider || order.courierName || "Custom Carrier",
+                url: `https://api.delightcargo.in/track/${order.awb_number}`,
+              },
+              notify_customer: true,
+            },
+          },
+          {
+            headers: {
+              "X-Shopify-Access-Token": accessToken,
+              "Content-Type": "application/json",
+            },
+            timeout: 15000,
+          }
+        );
+        console.log(`✅ Shopify Order ${shopifyOrderId} fulfilled successfully via fulfillment_orders API!`);
+        return;
+      }
+    } catch (foErr) {
+      console.warn(`fulfillment_orders API warning for Shopify Order ${shopifyOrderId}:`, foErr.response?.data || foErr.message);
+    }
+
+    // Fallback: Legacy fulfillment API
+    try {
+      const shopData = await axios.get(
+        `https://${shopifyStore}/admin/api/2024-04/locations.json`,
+        {
+          headers: { "X-Shopify-Access-Token": accessToken },
+          timeout: 10000,
+        }
+      );
+      const locationId = shopData.data?.locations?.[0]?.id;
+
+      if (locationId) {
+        await axios.post(
+          `https://${shopifyStore}/admin/api/2024-04/orders/${shopifyOrderId}/fulfillments.json`,
+          {
+            fulfillment: {
+              notify_customer: true,
+              location_id: locationId,
+              tracking_info: {
+                number: order.awb_number,
+                company: order.provider || order.courierName || "Custom Carrier",
+                url: `https://api.delightcargo.in/track/${order.awb_number}`,
+              },
+            },
+          },
+          {
+            headers: {
+              "X-Shopify-Access-Token": accessToken,
+              "Content-Type": "application/json",
+            },
+            timeout: 15000,
+          }
+        );
+        console.log(`✅ Shopify Order ${shopifyOrderId} fulfilled successfully via legacy API!`);
+      }
+    } catch (legacyErr) {
+      console.warn(`Legacy fulfillment warning for Shopify Order ${shopifyOrderId}:`, legacyErr.response?.data || legacyErr.message);
+    }
+  } catch (error) {
+    console.error(`❌ Error in fulfillShopifyOrderHelper:`, error.message);
+  }
+};
+
 module.exports = {
+  createWebhook,
   storeAllChannelDetails,
   webhookhandler,
   getOrders,
@@ -765,5 +1019,6 @@ module.exports = {
   updateChannel,
   deleteChannel,
   fulfillOrder,
+  fulfillShopifyOrderHelper,
   fetchExistingOrders,
 };

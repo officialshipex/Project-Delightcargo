@@ -1803,6 +1803,18 @@ const trackSingleOrder = async (order) => {
         })();
       }
 
+      // 🔹 Sync status back to Shopify if this is a Shopify order
+      if (order.channel === "Shopify") {
+        (async () => {
+          try {
+            const { fulfillShopifyOrderHelper } = require("../Channels/allChannel.controller");
+            await fulfillShopifyOrderHelper(order);
+          } catch (e) {
+            console.error(`⚠️ Shopify fulfillment status sync failed for AWB ${order.awb_number}:`, e.message);
+          }
+        })();
+      }
+
       console.log("saved");
     }
 

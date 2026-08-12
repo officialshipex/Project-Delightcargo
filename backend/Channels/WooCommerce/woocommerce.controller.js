@@ -95,34 +95,36 @@ const createWooCommerceWebhook = async (
   consumerSecret
 ) => {
   try {
+    const cleanURL = storeURL.replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim();
+    const formattedURL = `https://${cleanURL}`;
+
+    const deliveryUrl = `${process.env.BACKEND_PUBLIC_URL || "https://api.delightcargo.in"}/v1/channel/webhook/woocommerce`;
+
     // 🔍 Step 1: Check if a webhook already exists
     const existingWebhooks = await checkExistingWooCommerceWebhooks(
-      storeURL,
+      formattedURL,
       consumerKey,
       consumerSecret
     );
 
-    // 🔄 Step 2: Filter Webhooks for our "Order Created" event
-    const existingWebhook = existingWebhooks.find(
+    const existingWebhook = (existingWebhooks || []).find(
       (webhook) =>
-        webhook.topic.includes("order") &&
-        webhook.delivery_url ===
-        "https://api.delightcargo.com/v1/channel/webhook/woocommerce"
+        webhook.topic?.includes("order") &&
+        webhook.delivery_url === deliveryUrl
     );
 
     if (existingWebhook) {
       console.log("✅ Webhook already exists:", existingWebhook);
-      return existingWebhook; // Return existing webhook details
+      return existingWebhook;
     }
 
     // 🚀 Step 3: Create new webhook if none exists
     const response = await axios.post(
-      `${storeURL}/wp-json/wc/v3/webhooks`,
+      `${formattedURL}/wp-json/wc/v3/webhooks`,
       {
         name: "Order Created Webhook",
         topic: "order.created",
-        delivery_url:
-          "https://api.delightcargo.com/v1/channel/webhook/woocommerce",
+        delivery_url: deliveryUrl,
         status: "active",
       },
       {
@@ -130,17 +132,18 @@ const createWooCommerceWebhook = async (
           username: consumerKey,
           password: consumerSecret,
         },
+        timeout: 15000,
       }
     );
 
     console.log("✅ Webhook created successfully:", response.data);
-    return response.data; // Return newly created webhook details
+    return response.data;
   } catch (error) {
     console.error(
       "❌ Error creating WooCommerce webhook:",
-      error.response?.data || error
+      error.response?.data || error.message || error
     );
-    throw new Error("Failed to create WooCommerce webhook.");
+    return { error: error.response?.data || error.message || "Failed to create WooCommerce webhook" };
   }
 };
 
@@ -154,18 +157,30 @@ const generateUniqueOrderId = async () => {
 
 const wooCommerceWebhookHandler = async (req, res) => {
   try {
-    const orderData = req.body;
-    console.log("orderData for Woo commerce", req.body);
+    const orderData = Buffer.isBuffer(req.body)
+      ? JSON.parse(req.body.toString("utf8"))
+      : (typeof req.body === "string" ? JSON.parse(req.body) : req.body);
+
+    console.log("orderData for Woo commerce", orderData);
 
     // Extract store URL from body or header
-    const storeURL = orderData.store_url || req.headers["x-wc-webhook-source"];
-    console.log("req headers", req.headers["x-wc-webhook-source"]);
+    let storeURL = orderData.store_url || req.headers["x-wc-webhook-source"];
+    console.log("req headers x-wc-webhook-source", req.headers["x-wc-webhook-source"]);
+
     if (!storeURL) {
       return res.status(400).json({ error: "Missing store URL in webhook" });
     }
 
+    storeURL = storeURL.replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim();
+
     // Find store in DB
-    const store = await AllChannel.findOne({ storeURL });
+    const store = await AllChannel.findOne({
+      $or: [
+        { storeURL },
+        { storeURL: { $regex: storeURL.replace(/\./g, "\\."), $options: "i" } },
+      ],
+    });
+
     if (!store) {
       return res.status(404).json({ error: "Store not found" });
     }

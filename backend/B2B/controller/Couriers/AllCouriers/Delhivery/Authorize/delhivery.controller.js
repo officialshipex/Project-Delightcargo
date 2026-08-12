@@ -84,7 +84,7 @@ const getToken = async (req, res) => {
 const refreshToken = async (courierName) => {
   try {
     const { username, password } = await getDelhiveryB2BCredentials(courierName);
-console.log("user",username,"pass",password)
+console.log("user",username,"pass",password,"base url",BASE_URL)
     if (!username || !password) {
       throw new Error("Delhivery Cargo username or password missing");
     }

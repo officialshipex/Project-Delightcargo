@@ -312,6 +312,18 @@ const ShadowfaxWebhook = async (req, res) => {
         })();
       }
 
+      // Sync to Shopify if applicable
+      if (order.channel === "Shopify") {
+        (async () => {
+          try {
+            const { fulfillShopifyOrderHelper } = require("../Channels/allChannel.controller");
+            await fulfillShopifyOrderHelper(order);
+          } catch (e) {
+            console.error(`⚠️ Shopify fulfillment sync failed for AWB ${order.awb_number}:`, e.message);
+          }
+        })();
+      }
+
       console.log(`Shadowfax Webhook: AWB ${awb} updated → status=${order.status}`);
     }
 

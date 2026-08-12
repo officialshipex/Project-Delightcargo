@@ -224,6 +224,18 @@ const NimbusPostWebhook = async (req, res) => {
       })();
     }
 
+    // Sync to Shopify if applicable
+    if (order.channel === "Shopify") {
+      (async () => {
+        try {
+          const { fulfillShopifyOrderHelper } = require("../Channels/allChannel.controller");
+          await fulfillShopifyOrderHelper(order);
+        } catch (e) {
+          console.error(`⚠️ Shopify fulfillment sync failed for AWB ${order.awb_number}:`, e.message);
+        }
+      })();
+    }
+
     return res.status(200).json({ success: true, message: "Webhook processed successfully" });
   } catch (error) {
     console.error("NimbusPost Webhook Error:", error);

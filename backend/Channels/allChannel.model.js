@@ -61,7 +61,10 @@ const AllChannel = new mongoose.Schema({
     default: Date.now,
   },
   webhookId:{
-    type:Number
+    type: mongoose.Schema.Types.Mixed
+  },
+  myshopifyDomain:{
+    type: String
   },
   lastSync:{
     type:Date

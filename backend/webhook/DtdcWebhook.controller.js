@@ -221,6 +221,18 @@ const DTDCWebhook = async (req, res) => {
       })();
     }
 
+    // Sync to Shopify if applicable
+    if (order.channel === "Shopify") {
+      (async () => {
+        try {
+          const { fulfillShopifyOrderHelper } = require("../Channels/allChannel.controller");
+          await fulfillShopifyOrderHelper(order);
+        } catch (e) {
+          console.error(`⚠️ Shopify fulfillment sync failed for AWB ${order.awb_number}:`, e.message);
+        }
+      })();
+    }
+
     console.log("DTDC Webhook Processed for AWB:", awb);
     return res.status(200).send("Webhook Processed");
   } catch (err) {
