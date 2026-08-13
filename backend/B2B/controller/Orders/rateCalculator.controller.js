@@ -2,13 +2,11 @@ const ZoneMatrix = require("../../models/zoneMatrix.model");
 const Plan = require("../../models/plan.model");
 const courierServiceB2B = require("../../models/courierService.model");
 const { findByPincode } = require("../../pincodeLoader");
-const {
-  getCargoServiceableCouriers,
-} = require("../Couriers/AllCouriers/ShipRocket/Courier/couriers.controller");
 
 const {
   getZoneByCityOrState,
   calculateB2BCargoRate,
+  checkB2BServiceability,
 } = require("./ShipNowB2BOrder.controller");
 
 const CalculateB2BRateWithoutOrder = async (req, res) => {
@@ -61,7 +59,7 @@ const CalculateB2BRateWithoutOrder = async (req, res) => {
       });
     }
 
-    /* ================= MOCK ORDER (FOR SHIPROCKET CHECK) ================= */
+    /* ================= MOCK ORDER (FOR SERVICEABILITY CHECKS) ================= */
     const mockOrder = {
       pickupAddress: {
         city: pickupCity,
@@ -79,40 +77,64 @@ const CalculateB2BRateWithoutOrder = async (req, res) => {
       },
     };
 
-    const serviceableCouriers = await getCargoServiceableCouriers({
-      order: mockOrder,
-      packages,
-    });
-    // console.log("Serviceable Couriers:", serviceableCouriers);
+    const isCOD = paymentType?.toUpperCase() === "COD";
+    const orderValue = Number(paymentValue || 0);
 
     /* ================= RATE CALCULATION ================= */
+    // Same serviceability dispatch (aggregator vs direct) and per-provider
+    // caching as the real "Ship Now" flow — this was previously reimplemented
+    // here with two bugs: comparing a string against an array of objects
+    // (always false, so every rate card was silently skipped), and lowercasing
+    // the match key when the real values preserve their original case. It also
+    // had no branch for non-Shiprocket providers at all, so Delhivery rate
+    // cards were being filtered out here too. Reusing checkB2BServiceability
+    // fixes all of that by construction instead of patching around it.
+    const serviceabilityCache = {};
     const results = [];
 
     for (const rc of rateCards) {
       const courier = await courierServiceB2B
         .findById(rc.courierService)
         .select("weight courier");
+      if (!courier) continue;
 
-      const serviceName = courier?.courier?.toLowerCase()?.trim();
-    //   console.log("Evaluating Courier Service:", serviceName);
-      if (!serviceableCouriers.includes(serviceName)) continue;
+      const provider = rc.courierProviderName;
+      const cacheKey = provider?.toLowerCase() === "delhivery" ? rc.courierServiceName : provider;
+      if (!serviceabilityCache[cacheKey]) {
+        serviceabilityCache[cacheKey] = await checkB2BServiceability({
+          provider,
+          order: mockOrder,
+          packages,
+          courierServiceName: rc.courierServiceName,
+        });
+      }
+      const serviceability = serviceabilityCache[cacheKey];
+
+      let matchedService = null;
+      if (serviceability.type === "aggregator") {
+        const serviceName = courier.courier?.trim();
+        matchedService = serviceability.couriers.find((s) => s.key === serviceName);
+        if (!matchedService) continue;
+      }
+      if (serviceability.type === "direct" && !serviceability.serviceable) continue;
 
       const working = calculateB2BCargoRate({
         rateCard: rc,
         fromZone,
         toZone,
         packages,
-        minWeight: courier?.weight || 10,
-        isCOD: paymentType?.toUpperCase() === "COD",
-        orderValue: Number(paymentValue || 0),
+        minWeight: courier.weight || 10,
+        isCOD,
+        orderValue,
         rovType,
+        ...(matchedService ? { isODA: Boolean(matchedService.isODA) } : {}),
       });
 
       if (!working) continue;
 
       results.push({
         courierServiceName: rc.courierServiceName,
-        provider: rc.courierProviderName,
+        provider,
         orderType:"B2B",
         mode_name: rc.courierServiceName?.toLowerCase()?.includes("air")
           ? "air"

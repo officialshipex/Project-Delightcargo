@@ -5,6 +5,9 @@ const path = require("path");
 const csv = require("fast-csv");
 const XLSX = require("xlsx");
 const CourierPincodeB2B = require("../../models/serviceableCourierPincode.model");
+const {
+  getCargoServiceableCouriers,
+} = require("./AllCouriers/ShipRocket/Courier/couriers.controller");
 
 const getAllCouriers = async (req, res) => {
   try {
@@ -382,41 +385,46 @@ const downloadPincode = async (req, res) => {
 };
 
 const getShiprocketCourierServices = async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    data: [
-      {
-        service: ["Bluedart-surface"],
-      },
-      {
-        service: ["Delhivery-surface"],
-      },
-      {
-        service: ["Delhivery Heavy-surface"],
-      },
-      {
-        service: ["Gati-surface"],
-      },
-      {
-        service: ["Xpressbees-surface"],
-      },
-      {
-        service: ["VXpress-surface"],
-      },
-      {
-        service: ["DP World-surface"],
-      },
-      {
-        service: ["Movin-air"],
-      },
-      {
-        service: ["Movin-surface"],
-      },
-      {
-        service: ["Smart Cargo Advantage-surface"],
-      },
-    ],
-  });
+  // Shiprocket Cargo has no "list everything my account can do" endpoint —
+  // the only live signal is the route-specific shipment charge calculator,
+  // which needs an origin/destination pincode pair. This used to be a static
+  // hardcoded list of 10 possible carrier names, which didn't reflect what
+  // was actually live on the account — that's exactly what let someone pick
+  // "Bluedart-surface" here even though Shiprocket never offered it. Now we
+  // call the real API against a fixed major-hub reference route (Delhi <->
+  // Mumbai) as a representative check of what's actually available today.
+  // Real serviceability can still vary by the true pickup/delivery pincode.
+  try {
+    const referenceOrder = {
+      pickupAddress: { pinCode: "110001", city: "Delhi", state: "Delhi" },
+      receiverAddress: { pinCode: "400001", city: "Mumbai", state: "Maharashtra" },
+      paymentDetails: { amount: 5000 },
+    };
+    const referencePackages = [
+      { noOfBox: 1, weightPerBox: 10, length: 30, width: 30, height: 30 },
+    ];
+
+    const services = await getCargoServiceableCouriers({
+      order: referenceOrder,
+      packages: referencePackages,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: services.map((s) => ({ service: [s.key] })),
+      note: "Based on live Shiprocket serviceability for a Delhi<->Mumbai reference route — actual availability can vary by real pickup/delivery pincode.",
+    });
+  } catch (error) {
+    console.error(
+      "Error fetching live Shiprocket courier services:",
+      error?.response?.data || error.message
+    );
+    return res.status(500).json({
+      success: false,
+      message: "Could not fetch live Shiprocket courier services.",
+      data: [],
+    });
+  }
 };
 
 module.exports = {

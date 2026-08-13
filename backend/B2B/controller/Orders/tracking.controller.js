@@ -85,14 +85,18 @@ const refreshShiprocketCargoTracking = async (order) => {
   }
 };
 
-// Dispatches to the right courier's tracking refresh based on order.provider —
+// Dispatches to the right courier's tracking refresh based on order.partner
+// (the aggregator/platform the shipment was booked through — order.provider
+// holds the real underlying carrier, e.g. "delhivery", which varies per
+// shipment and isn't what identifies "this is a Shiprocket booking"). This is
 // the single entry point the tracking cron (and anything else) should call.
 // Currently only Shiprocket has a live B2B tracking integration; other
-// providers (e.g. Delhivery) don't have one yet, so this is a no-op for them.
+// providers (e.g. Delhivery, which isn't booked through an aggregator) don't
+// have one yet, so this is a no-op for them.
 const refreshB2BOrderTracking = async (order) => {
-  const providerName = order.provider?.toLowerCase() || "";
+  const partnerName = order.partner?.toLowerCase() || "";
 
-  if (providerName === "shiprocket") {
+  if (partnerName === "shiprocket") {
     return refreshShiprocketCargoTracking(order);
   }
 
@@ -113,7 +117,7 @@ const refreshAllB2BShiprocketTracking = async () => {
   try {
     const orders = await Order.find({
       orderType: "B2B",
-      provider: "shiprocket",
+      partner: "Shiprocket",
       awb_number: { $exists: true, $ne: null },
       status: { $in: IN_FLIGHT_STATUSES },
     });

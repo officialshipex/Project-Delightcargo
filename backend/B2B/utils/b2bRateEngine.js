@@ -120,6 +120,12 @@ const calculateB2BCargoRate = ({
   isCOD = false,
   orderValue = 0,
   rovType = "ROV Owner",
+  isAppointment = false,
+  // Defaults to true (always charge) to preserve existing behavior for any
+  // caller that doesn't have a live remoteness signal (e.g. Delhivery isn't
+  // wired up to check this yet). Shiprocket's booking flow passes the real
+  // value once it has live serviceability data for the actual route.
+  isODA = true,
 }) => {
   const divisor = Number(rateCard.overheadCharges?.divisor.value);
   const actualChargeableWeight = calculateChargeableWeight(packages, divisor);
@@ -149,7 +155,11 @@ const calculateB2BCargoRate = ({
       : calculateOverhead(overheads.rovOwner, freight, billableWeight);
 
   const fsc = calculateOverhead(overheads.fuelCharge, freight, billableWeight);
-  const oda = calculateOverhead(overheads.odaCharges, freight, billableWeight);
+  // Only charge ODA/OPA when the route is actually confirmed remote — see
+  // isODA default comment above for why this defaults to "always charge".
+  const oda = isODA
+    ? calculateOverhead(overheads.odaCharges, freight, billableWeight)
+    : 0;
   const green = calculateOverhead(overheads.greenTax, freight, billableWeight);
   const pickup = calculateOverhead(
     overheads.pickupCharge,
@@ -161,11 +171,12 @@ const calculateB2BCargoRate = ({
     freight,
     billableWeight
   );
-  const appointment = calculateOverhead(
-    overheads.appointmentDelivery,
-    freight,
-    billableWeight
-  );
+  // Only charge for appointment delivery when the shipment actually is one —
+  // otherwise every order (including the vast majority that never request
+  // it) would silently absorb this charge's minimum floor.
+  const appointment = isAppointment
+    ? calculateOverhead(overheads.appointmentDelivery, freight, billableWeight)
+    : 0;
 
   const codCharge = isCOD
     ? calculateCodCharge({
@@ -222,7 +233,13 @@ const calculateB2BCargoRate = ({
 // and running it through calculateB2BCargoRate — instead of trusting a
 // client-supplied finalCharges/rateBreakup, which a tampered or buggy request
 // could otherwise set to anything before it gets debited from the wallet.
-const getAuthoritativeB2BRate = async ({ order, provider, courierServiceName }) => {
+// liveServiceability (optional): the array Shiprocket's live charges API
+// returns (each entry { key, isODA, ... }), when the caller has already
+// fetched it for this exact order. Used to only charge ODA/OPA when the
+// route is actually confirmed remote, instead of always. Deliberately kept
+// out of this shared engine's own responsibilities (it has no knowledge of
+// Shiprocket's API) — the caller fetches it and passes it in.
+const getAuthoritativeB2BRate = async ({ order, provider, courierServiceName, liveServiceability }) => {
   const plan = await Plan.findOne({ userId: order.userId });
   if (!plan) throw new Error("Plan not found");
 
@@ -249,6 +266,12 @@ const getAuthoritativeB2BRate = async ({ order, provider, courierServiceName }) 
     const courier = await courierServiceB2B.findById(rc.courierService).select("weight courier");
     if (!courier) continue;
 
+    let isODA = true;
+    if (liveServiceability) {
+      const match = liveServiceability.find((s) => s.key === courier.courier);
+      if (match) isODA = Boolean(match.isODA);
+    }
+
     const working = calculateB2BCargoRate({
       rateCard: rc,
       fromZone,
@@ -258,6 +281,7 @@ const getAuthoritativeB2BRate = async ({ order, provider, courierServiceName }) 
       isCOD,
       orderValue,
       rovType: order.rovType,
+      isODA,
     });
 
     if (!working) continue;

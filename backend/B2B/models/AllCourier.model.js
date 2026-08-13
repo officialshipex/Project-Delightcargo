@@ -30,6 +30,18 @@ const allCourierSchema = new mongoose.Schema({
         type: String,
         required: false,
     },
+    clientId: {
+        type: String,
+        required: false,
+    },
+    refreshToken: {
+        type: String,
+        required: false,
+    },
+    authToken: {
+        type: String,
+        required: false,
+    },
     date: {
         type: Date,
         default: Date.now,

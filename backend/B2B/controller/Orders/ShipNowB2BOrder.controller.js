@@ -111,6 +111,11 @@ const ShipNowB2BOrder = async (req, res) => {
       const isCOD = order.paymentDetails?.method?.toUpperCase() === "COD";
       const orderValue = Number(order.paymentDetails?.amount || 0);
 
+      // Shiprocket's aggregator match already tells us whether this exact
+      // route is confirmed remote — use it so the preview only shows ODA/OPA
+      // when it's actually warranted. Non-aggregator providers (e.g.
+      // Delhivery) have no such signal yet, so isODA stays at its default
+      // (always charge), unchanged from before.
       const working = calculateB2BCargoRate({
         rateCard: rc,
         fromZone,
@@ -120,6 +125,7 @@ const ShipNowB2BOrder = async (req, res) => {
         isCOD,
         orderValue,
         rovType: order.rovType,
+        ...(matchedService ? { isODA: Boolean(matchedService.isODA) } : {}),
       });
 
       if (!working) continue;
@@ -206,4 +212,5 @@ module.exports = {
   resolveDivisor,
   calculateCodCharge,
   calculateB2BCargoRate,
+  checkB2BServiceability,
 };

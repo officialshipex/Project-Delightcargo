@@ -1,6 +1,6 @@
 const Order = require("../../../../../../models/newOrder.model");
 const BASE_URL = process.env.B2B_SHIPROCKET_URL;
-const { refreshToken } = require("../Authorize/shiprocket.controller");
+const { refreshToken, getShiprocketCargoCredentials } = require("../Authorize/shiprocket.controller");
 const axios = require("axios");
 const User = require("../../../../../../models/User.model");
 const Wallet = require("../../../../../../models/wallet");
@@ -50,12 +50,24 @@ exports.createShiprocketCargoShipment = async (req, res) => {
     /* ================================
        1️⃣.5 RECOMPUTE AUTHORITATIVE CHARGE
        Never trust a client-supplied finalCharges/rateBreakup for a wallet
-       debit — recompute it from the order's own active rate card.
+       debit — recompute it from the order's own active rate card. Fetch
+       Shiprocket's live serviceability for this exact route first so ODA/OPA
+       only gets charged when the route is actually remote — if this check
+       fails, fall back to the safe default (always charge) rather than
+       blocking the booking over an optional pricing refinement.
     ================================= */
+    const liveServiceability = await exports
+      .getCargoServiceableCouriers({ order, packages: order.B2BPackageDetails.packages })
+      .catch((err) => {
+        console.warn("[Shiprocket Cargo] Live serviceability check for ODA pricing failed, defaulting to always-charge:", err.message);
+        return null;
+      });
+
     const { working } = await getAuthoritativeB2BRate({
       order,
       provider: "Shiprocket",
       courierServiceName,
+      liveServiceability,
     });
     const finalCharges = working.grand_total;
     const rateBreakup = working;
@@ -102,6 +114,8 @@ exports.createShiprocketCargoShipment = async (req, res) => {
       ], { session })
     ]);
 
+    const { clientId: shiprocketClientId } = await getShiprocketCargoCredentials();
+
     const orderCreationPayload = {
       no_of_packages: order.B2BPackageDetails.packages.reduce(
         (s, p) => s + p.noOfBox,
@@ -140,7 +154,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
       recipient_contact_person_contact_no: order.receiverAddress.phoneNumber,
 
       /* ===== OTHER ===== */
-      client_id: Number(process.env.SHIPROCKET_CARGO_CLIENT_ID),
+      client_id: Number(shiprocketClientId),
 
       packaging_unit_details: order.B2BPackageDetails.packages.map((pkg) => ({
         units: pkg.noOfBox,
@@ -188,7 +202,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
     // and includes a message instead (e.g. no auto-assignment configured, or
     // a wallet/serviceability issue on Shiprocket's side). Must not proceed
     // to shipment association without a real assignment.
-    const { order_id, mode_id, delivery_partner_id, transportar_id } = orderRes.data;
+    const { order_id, mode_id, delivery_partner_id, delivery_partner_name, transportar_id } = orderRes.data;
     if (!mode_id || !delivery_partner_id) {
       throw new Error(
         orderRes.data?.message ||
@@ -206,7 +220,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
     const pickupDateTime = new Date(Date.now() + 5.5 * 60 * 60 * 1000 + 15 * 60 * 1000);
 
     const shipmentAssociationPayload = {
-      client_id: Number(process.env.SHIPROCKET_CARGO_CLIENT_ID),
+      client_id: Number(shiprocketClientId),
       order_id,
       remarks: "Shipment booked via API",
 
@@ -252,7 +266,14 @@ exports.createShiprocketCargoShipment = async (req, res) => {
       {
         $set: {
           status: "Booked",
-          provider: "shiprocket",
+          // provider = the real carrier actually moving the package (e.g.
+          // "delhivery") — Shiprocket auto-assigns this and tells us right
+          // away in the order_creation response, same convention as the B2C
+          // Shiprocket flow. partner = "Shiprocket" (the aggregator/platform
+          // used to book it) is what everything downstream (cancel,
+          // tracking) should key off of, not provider.
+          provider: delivery_partner_name || "Shiprocket",
+          partner: "Shiprocket",
           courierServiceName,
           shipment_id: shipmentRes.data.id,
           shipmentCreatedAt: new Date(),
@@ -285,7 +306,15 @@ exports.createShiprocketCargoShipment = async (req, res) => {
       60 * 1000
     );
   } catch (err) {
-    console.log("Error in Shiprocket Cargo Shipment:", err.response?.data || err.message);
+    // Always print the full Shiprocket error body (pretty-printed, no
+    // truncation) when one exists, instead of drilling into one specific
+    // field — different failures put the useful detail in different places
+    // (non_field_errors, a field-specific key, etc.), and silently falling
+    // back to the generic axios message hides the actual reason every time.
+    console.error(
+      "Error in Shiprocket Cargo Shipment:",
+      err.response?.data ? JSON.stringify(err.response.data, null, 2) : err.message
+    );
     await session.abortTransaction();
     session.endSession();
 
@@ -390,7 +419,11 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId, attempt = 0
         lrn: data.lrn,
         oid: data.order_id,
         label: data.label_url,
-        partner: data.delivery_partner?.name,
+        // Refresh provider with the more authoritative real carrier name from
+        // get_shipment (order_creation's value was already correct, this is
+        // just confirmation/update) — partner stays "Shiprocket", set once at
+        // booking time, not touched here.
+        provider: data.delivery_partner?.name || data.delivery_partner?.common_name,
         courierServiceName: data.delivery_partner?.common_name,
         // Usually still null this early (Shiprocket hasn't computed it yet at
         // AWB-assignment time per their own sample response) — wired up now so
@@ -513,6 +546,13 @@ exports.getCargoServiceableCouriers = async ({ order, packages }) => {
       key,
       id: services[key]?.id || null,
       modeId: services[key]?.mode_id || null,
+      // Shiprocket's own real cost for this exact route already tells us
+      // whether it's actually out-of-pickup/out-of-delivery-area — used to
+      // only charge our own ODA/OPA overhead when it's genuinely warranted,
+      // instead of a blanket charge on every order regardless of route.
+      isODA: Boolean(
+        (services[key]?.working?.oda > 0) || (services[key]?.working?.opa > 0)
+      ),
     }));
 };
 
