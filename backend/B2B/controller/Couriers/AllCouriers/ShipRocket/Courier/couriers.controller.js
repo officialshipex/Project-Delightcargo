@@ -286,7 +286,7 @@ exports.createShiprocketCargoShipment = async (req, res) => {
           tracking: {
             status: "Booked",
             Instructions: "Shipment booked, awaiting AWB",
-            StatusDateTime: new Date(),
+            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
           },
         },
       },
@@ -394,7 +394,7 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId, attempt = 0
           tracking: {
             status: "Cancelled",
             Instructions: data.api_error || "Carrier rejected shipment",
-            StatusDateTime: new Date(),
+            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
           },
         },
       });
@@ -424,7 +424,6 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId, attempt = 0
         // just confirmation/update) — partner stays "Shiprocket", set once at
         // booking time, not touched here.
         provider: data.delivery_partner?.name || data.delivery_partner?.common_name,
-        courierServiceName: data.delivery_partner?.common_name,
         // Usually still null this early (Shiprocket hasn't computed it yet at
         // AWB-assignment time per their own sample response) — wired up now so
         // it's captured whenever it does become available on a later check.
@@ -440,7 +439,7 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId, attempt = 0
         tracking: {
           status: "Ready To Ship",
           Instructions: "AWB generated successfully",
-          StatusDateTime: new Date(),
+          StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
         },
       },
     });

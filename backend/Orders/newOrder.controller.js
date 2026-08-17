@@ -941,6 +941,10 @@ const updateOrder = async (req, res) => {
       paymentDetails,
       packageDetails,
       otherDetails,
+      productDetails,
+      orderType,
+      rovType,
+      B2BPackageDetails,
     } = req.body;
 
     console.log(req.body);
@@ -1027,6 +1031,33 @@ const updateOrder = async (req, res) => {
     if (otherDetails) {
       updateFields.otherDetails = {
         gstin: otherDetails.gstin || existingOrder.otherDetails?.gstin,
+      };
+    }
+
+    // Update productDetails if provided
+    if (productDetails) {
+      updateFields.productDetails = productDetails;
+    }
+
+    // Update orderType / rovType if provided
+    if (orderType) {
+      updateFields.orderType = orderType;
+    }
+    if (rovType) {
+      updateFields.rovType = rovType;
+    }
+
+    // Update B2BPackageDetails (boxes/weights/dimensions) if provided
+    if (B2BPackageDetails) {
+      updateFields.B2BPackageDetails = {
+        applicableWeight:
+          B2BPackageDetails.applicableWeight ??
+          existingOrder.B2BPackageDetails?.applicableWeight,
+        volumetricWeight:
+          B2BPackageDetails.volumetricWeight ??
+          existingOrder.B2BPackageDetails?.volumetricWeight,
+        packages:
+          B2BPackageDetails.packages || existingOrder.B2BPackageDetails?.packages,
       };
     }
 

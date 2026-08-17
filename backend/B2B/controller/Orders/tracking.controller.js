@@ -71,7 +71,7 @@ const refreshShiprocketCargoTracking = async (order) => {
       tracking: {
         status: mappedStatus,
         Instructions: data.status_dp || data.status || "Status updated",
-        StatusDateTime: new Date(),
+        StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
       },
     };
   }

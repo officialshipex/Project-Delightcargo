@@ -53,7 +53,7 @@ const externalOrderSchema = Joi.object({
 
   packageDetails: Joi.object({
     deadWeight: Joi.number().required(),
-    applicableWeight: Joi.number().required(),
+    applicableWeight: Joi.number().optional(),
     volumetricWeight: Joi.object({
       length: Joi.number().required(),
       width: Joi.number().required(),
@@ -69,6 +69,8 @@ const externalOrderSchema = Joi.object({
       then: Joi.required(),
       otherwise: Joi.optional(),
     }),
+    totalDiscount: Joi.number().min(0).default(0).optional(),
+    otherCharges: Joi.number().min(0).default(0).optional(),
   }).required(),
 
   shipmentId: Joi.number().optional(),
@@ -98,14 +100,48 @@ const orderCreationController = async (req, res) => {
 
     const userId = req.user?._id || "external";
 
+    const totalDiscount = paymentDetails.totalDiscount || 0;
+    const otherCharges = paymentDetails.otherCharges || 0;
+
     // 💰 Calculate and validate total amount based on products
     const calculatedTotalAmount = productDetails.reduce((acc, item) => {
-      return acc + (item.unitPrice * item.quantity);
+      return acc + (Number(item.unitPrice) * Number(item.quantity));
     }, 0);
 
-    // Default to calculated total if amount is not provided
+    const expectedAmount = calculatedTotalAmount - totalDiscount + otherCharges;
+
+    // Default to calculated expected total if amount is not provided
     if (paymentDetails.amount === undefined || paymentDetails.amount === null) {
-      paymentDetails.amount = calculatedTotalAmount;
+      paymentDetails.amount = expectedAmount;
+    } else if (paymentDetails.method === "COD") {
+      if (Math.abs(paymentDetails.amount - expectedAmount) > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: `Payment amount mismatch: declared ₹${paymentDetails.amount} but calculated total is ₹${expectedAmount} (Products total: ₹${calculatedTotalAmount}, total discount: ₹${totalDiscount}, other charges: ₹${otherCharges})`,
+        });
+      }
+    }
+
+    // 📦 Calculate volumetric weight and validate / enforce applicable weight
+    const deadWeight = Number(packageDetails.deadWeight) || 0;
+    const length = Number(packageDetails.volumetricWeight?.length) || 0;
+    const width = Number(packageDetails.volumetricWeight?.width) || 0;
+    const height = Number(packageDetails.volumetricWeight?.height) || 0;
+
+    const calculatedVolumetricWeight = Number(((length * width * height) / 5000).toFixed(3));
+    packageDetails.volumetricWeight.calculatedWeight = calculatedVolumetricWeight;
+
+    const expectedApplicableWeight = Math.max(deadWeight, calculatedVolumetricWeight);
+
+    if (packageDetails.applicableWeight !== undefined && packageDetails.applicableWeight !== null) {
+      if (Math.abs(Number(packageDetails.applicableWeight) - expectedApplicableWeight) > 0.001) {
+        return res.status(400).json({
+          success: false,
+          message: `Applicable weight mismatch: declared ${packageDetails.applicableWeight} kg but calculated applicable weight is ${expectedApplicableWeight} kg (higher of dead weight ${deadWeight} kg and volumetric weight ${calculatedVolumetricWeight} kg)`,
+        });
+      }
+    } else {
+      packageDetails.applicableWeight = expectedApplicableWeight;
     }
 
 
@@ -156,7 +192,7 @@ const orderCreationController = async (req, res) => {
         {
           status: "new",
           StatusLocation: pickupAddress.city || "N/A",
-          StatusDateTime: new Date(),
+          StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
           Instructions: "Order created successfully via API",
         },
       ],

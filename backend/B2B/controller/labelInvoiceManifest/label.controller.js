@@ -1,16 +1,24 @@
 const PDFDocument = require("pdfkit");
 const bwipjs = require("bwip-js");
 const https = require("https");
+const path = require("path");
+const fs = require("fs");
 
 const Order = require("../../../models/newOrder.model");
 
 /* ===============================
    IMAGE FETCH HELPER
 ================================ */
+// Some CDNs (e.g. Shiprocket's, fronted by CloudFront) reject bare requests
+// with no User-Agent — send a browser-like one so those don't 403.
 const fetchImageBuffer = (url) =>
   new Promise((resolve, reject) => {
     https
-      .get(url, (res) => {
+      .get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error(`Failed to fetch image (${res.statusCode}): ${url}`));
+        }
         const chunks = [];
         res.on("data", (c) => chunks.push(c));
         res.on("end", () => resolve(Buffer.concat(chunks)));
@@ -50,13 +58,34 @@ exports.generateLabel = async (req, res) => {
     /* ===============================
        LOGOS
     ================================ */
-    const delightcargoLogo = await fetchImageBuffer(
-      "https://delightcargo-india.s3.ap-south-1.amazonaws.com/uploads/1767099868221_DelightCargo.jpg"
-    );
+    // Best-effort — a broken/missing logo shouldn't block the whole label
+    // from generating.
+    let delightcargoLogo = null;
+    let courierLogo = null;
 
-    const courierLogo = await fetchImageBuffer(
-      "https://delightcargo-india.s3.ap-south-1.amazonaws.com/uploads/1767333425857_Delhivery.png"
-    );
+    // DelightCargo's own logo ships with the backend (same file the working
+    // B2C invoice PDF already uses) — a local path is more reliable than any
+    // URL, and needs no network call.
+    try {
+      const localLogoPath = path.join(__dirname, "../../../public/assets/DelightCargo.jpg");
+      if (fs.existsSync(localLogoPath)) {
+        delightcargoLogo = localLogoPath;
+      }
+    } catch (err) {
+      console.error("B2B Label: failed to load DelightCargo logo:", err.message);
+    }
+
+    // Courier logo — Shiprocket's own CDN URL for the assigned carrier
+    // (seen in the order/get_shipment response's delivery_partner.logo).
+    // Still hardcoded to Delhivery for now, same as before; making this
+    // dynamic per-assigned-carrier is a separate follow-up.
+    try {
+      courierLogo = await fetchImageBuffer(
+        "https://do7bjkxn3nrf2.cloudfront.net/delhivery.png"
+      );
+    } catch (err) {
+      console.error("B2B Label: failed to load courier logo:", err.message);
+    }
 
     /* ===============================
        LABEL & PAGE CONFIG
@@ -99,8 +128,12 @@ exports.generateLabel = async (req, res) => {
         .lineTo(x + LABEL_W / 2, cy + LOGO_H)
         .stroke();
 
-      doc.image(courierLogo, x + 10, cy + 9, { width: 60 });
-      doc.image(delightcargoLogo, x + LABEL_W / 2 + 10, cy + 6, { width: 60 });
+      // `fit` (not `width`) so a square/tall logo (e.g. Delhivery's 200x200)
+      // can't overflow the 36pt-tall row into the meta row below it — width
+      // alone only bounds one axis and let that happen.
+      const LOGO_FIT = [60, 24];
+      if (courierLogo) doc.image(courierLogo, x + 10, cy + 6, { fit: LOGO_FIT });
+      if (delightcargoLogo) doc.image(delightcargoLogo, x + LABEL_W / 2 + 10, cy + 6, { fit: LOGO_FIT });
 
       cy += LOGO_H;
 
