@@ -116,6 +116,7 @@ const orderSchema = new mongoose.Schema(
       gstin: { type: String },
       ewaybill: { type: String },
       transporterId: { type: String }, // Shiprocket Cargo transportar_id, used to generate the e-way bill for this shipment
+      bigshipOrderId: { type: String }, // BigShip's CustomGlobalOrderId for the draft order, cached so re-opening courier selection doesn't create a duplicate draft
     },
     compositeOrderId: {
       type: String,

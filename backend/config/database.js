@@ -1,4 +1,13 @@
 const mongoose = require("mongoose");
+const dns = require("dns");
+
+// Some networks (mobile carrier DNS in particular) refuse SRV-type DNS
+// queries, which the mongodb+srv:// connection string depends on to find
+// Atlas's servers — this fails with a querySrv ECONNREFUSED error even
+// though the network otherwise works fine. Cloudflare/Google's resolvers
+// handle SRV queries correctly, so pin to those instead of whatever DNS
+// the OS/network hands out.
+dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 async function connectDB() {
   try {

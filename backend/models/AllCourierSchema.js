@@ -31,6 +31,20 @@ const allCourierSchema = new mongoose.Schema({
         type: String,
         required: false,
     },
+    accessKey: {
+        // BigShip's login needs a third credential alongside email/password.
+        type: String,
+        required: false,
+    },
+    bigshipToken: {
+        // Cached bearer token so we don't re-login on every request.
+        type: String,
+        required: false,
+    },
+    bigshipTokenExpiringAt: {
+        type: Date,
+        required: false,
+    },
     date: {
         type: Date,
         default: Date.now,

@@ -41,6 +41,10 @@ const {
 const {
   checkPincodeServiceability: checkShadowfaxServiceability,
 } = require("../../AllCouriers/Shadowfax/Courier/couriers.controller.js");
+const {
+  checkServiceabilityBigShip,
+} = require("../../AllCouriers/BigShip/Courier/couriers.controller.js");
+const CourierService = require("../../models/CourierService.Schema");
 
 // ✅ Input Validation Schema
 const serviceabilitySchema = Joi.object({
@@ -73,6 +77,7 @@ const courierIds = {
   Proship: "10",
   Shiprocket: "11",
   Shadowfax: "12",
+  BigShip: "15",
 };
 
 const pincodeServiceability = async (req, res) => {
@@ -147,6 +152,30 @@ const pincodeServiceability = async (req, res) => {
     );
 
     const activeCourierNames = activeCouriers.map((c) => c.courierProvider);
+
+    // BigShip is an aggregator like Shiprocket — one live call returns every
+    // serviceable courier for the route; each rate card's specific BigShip
+    // courier name (CourierService.courier) is matched against it below.
+    // Cached per-request so multiple BigShip rate cards don't each trigger
+    // a separate live API call for the same route.
+    const bigshipServices = await CourierService.find({ provider: "BigShip" }).lean();
+    const bigshipServiceMap = new Map(
+      bigshipServices.map((s) => [s.name.toLowerCase().trim(), s.courier || s.name])
+    );
+    let bigshipRouteResult = null;
+    const getBigshipRouteResult = async () => {
+      if (!bigshipRouteResult) {
+        bigshipRouteResult = await checkServiceabilityBigShip({
+          segmentType: "domestic_b2c",
+          sourcePincode: pickUpPincode,
+          destPincode: deliveryPincode,
+          invoiceValue: declaredValue,
+          paymentMethod: paymentType,
+          boxes: [{ no_of_box: "1", box_length: length, box_width: width, box_height: height, box_dead_weight: actualWeight }],
+        });
+      }
+      return bigshipRouteResult;
+    };
 
     // ✅ Step 4: Courier serviceability checks
     const providers = [
@@ -263,6 +292,17 @@ const pincodeServiceability = async (req, res) => {
         name: "Shadowfax",
         check: async () =>
           checkShadowfaxServiceability(deliveryPincode),
+      },
+      {
+        name: "BigShip",
+        check: async (serviceName) => {
+          const routeResult = await getBigshipRouteResult();
+          if (!routeResult.success) return { success: false };
+          const mappedName = bigshipServiceMap.get(serviceName.toLowerCase().trim()) || serviceName;
+          const normalize = (s) => (s || "").toLowerCase().replace(/\s+/g, "");
+          const matched = routeResult.couriers.some((c) => normalize(c.courierName) === normalize(mappedName));
+          return { success: matched };
+        },
       },
     ].filter((p) =>
       activeCourierNames.some(

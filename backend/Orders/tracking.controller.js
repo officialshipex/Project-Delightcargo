@@ -52,6 +52,9 @@ const {
 const {
   trackEkartShipment,
 } = require("../AllCouriers/Ekart/Couriers/couriers.controller");
+const {
+  refreshBigShipOrderTracking,
+} = require("../AllCouriers/BigShip/Courier/couriers.controller");
 const Bottleneck = require("bottleneck");
 const {
   sendWhatsAppMessage,
@@ -106,6 +109,20 @@ const trackSingleOrder = async (order) => {
     //   console.warn(`Unknown provider: ${provider} for Order ID: ${order._id}`);
     //   return;
     // }
+
+    // BigShip is handled entirely separately — its response shape doesn't
+    // match mapTrackingResponse's per-provider branches below, so it does
+    // its own fetch + status-map + update and returns early, same reasoning
+    // as the B2B Shiprocket Cargo tracker.
+    if (partner === "BigShip") {
+      try {
+        await refreshBigShipOrderTracking(order);
+      } catch (err) {
+        console.error(`[BigShip Tracking] Failed for order ${order._id}:`, err.message);
+      }
+      return;
+    }
+
     let result;
     if (partner && partner === "ZipyPost") {
       result = await trackingFunctions["ZipyPost"](awb_number, shipment_id);

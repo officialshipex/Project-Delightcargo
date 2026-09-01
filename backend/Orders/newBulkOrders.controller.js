@@ -14,6 +14,9 @@ const {
 } = require("../Rate/calculateRateController");
 
 const {
+  createShipmentFunctionNimbusPost,
+} = require("../AllCouriers/NimbusPost/Courier/bulkShipment.controller");
+const {
   createShipmentFunctionDelhivery,
 } = require("../AllCouriers/Delhivery/Courier/bulkShipment.controller");
 const {
@@ -40,6 +43,7 @@ const { createOrderProship } = require("../AllCouriers/Proship/Courier/bulkShipm
 const { createShipmentFunctionShipRocket } = require("../AllCouriers/ShipRocket/Courier/bulkShipment.controller");
 const { createOrderShadowfax } = require("../AllCouriers/Shadowfax/Courier/bulkShipment.controller");
 const { createShipmentFunctionShipexIndia } = require("../AllCouriers/ShipxIndia/Courier/bulkShipment.controller");
+const { createShipmentFunctionBigShip } = require("../AllCouriers/BigShip/Courier/bulkShipment.controller");
 
 const updatePickup = async (req, res) => {
   try {
@@ -223,6 +227,16 @@ const callProviderWithRetry = async (
           break;
         case "ShipexIndia":
           result = await createShipmentFunctionShipexIndia(
+            serviceDetails,
+            order._id,
+            wh,
+            walletId,
+            charges,
+            priceBreakup
+          );
+          break;
+        case "BigShip":
+          result = await createShipmentFunctionBigShip(
             serviceDetails,
             order._id,
             wh,

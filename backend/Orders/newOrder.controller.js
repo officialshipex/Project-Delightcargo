@@ -68,6 +68,9 @@ const {
 const {
   cancelOrder: cancelShiprocketOrder,
 } = require("../AllCouriers/ShipRocket/Courier/couriers.controller");
+const {
+  cancelBigShipOrder,
+} = require("../AllCouriers/BigShip/Courier/couriers.controller");
 const { cancelShadowfaxOrder } = require("../AllCouriers/Shadowfax/Courier/couriers.controller");
 // const { cancelLosung360Order } = require("../AllCouriers/Losung360/Courier/couriers.controller");
 const { cancelShipment: cancelShipmentNimbusPost } = require("../AllCouriers/NimbusPost/Courier/couriers.controller");
@@ -1772,6 +1775,19 @@ const cancelOrdersAtBooked = async (req, res) => {
       if (result.error) {
         return res.status(400).send({ error: result.details?.message || result.error || "Failed to cancel order" });
       }
+    } else if (currentOrder.partner === "BigShip") {
+      // BigShip identifies orders by its own CustomGlobalOrderId, not the AWB.
+      if (!currentOrder.otherDetails?.bigshipOrderId) {
+        return res.status(400).send({ error: "No BigShip order reference found for this order." });
+      }
+      const result = await cancelBigShipOrder(currentOrder.otherDetails.bigshipOrderId);
+      if (result.error) {
+        return res.status(400).json({
+          error: result.error || "Failed to cancel shipment with BigShip",
+          details: result,
+          orderId: currentOrder._id,
+        });
+      }
     } else if (currentOrder.provider === "Delhivery") {
       // console.log("I am in it");
       const result = await cancelOrderDelhivery(currentOrder.awb_number);
@@ -2224,6 +2240,13 @@ const bulkCancelOrder = async (req, res) => {
               cancelResponse = await cancelShadowfaxOrder(currentOrder.awb_number, currentOrder.courierName);
             } else if (provider === "Losung360" || partner === "Losung360") {
               cancelResponse = await cancelLosung360Order(currentOrder.awb_number);
+            } else if (partner === "BigShip") {
+              // BigShip identifies orders by its own CustomGlobalOrderId, not the AWB.
+              if (!currentOrder.otherDetails?.bigshipOrderId) {
+                cancelResponse = { success: false, error: "No BigShip order reference found for this order." };
+              } else {
+                cancelResponse = await cancelBigShipOrder(currentOrder.otherDetails.bigshipOrderId);
+              }
             } else {
               cancelResponse = { success: false, error: `Unsupported courier provider: ${provider}` };
             }

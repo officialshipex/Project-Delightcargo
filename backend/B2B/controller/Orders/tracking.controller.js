@@ -3,6 +3,12 @@ const Order = require("../../../models/newOrder.model");
 const {
   trackShiprocketCargoShipmentInternal,
 } = require("../Couriers/AllCouriers/ShipRocket/Courier/couriers.controller");
+// BigShip serves both B2C and B2B off one account, so its tracking logic
+// (fetch + status-map + update) lives once in the shared B2C module and is
+// reused here rather than duplicated — it's already segment-agnostic.
+const {
+  refreshBigShipOrderTracking,
+} = require("../../../AllCouriers/BigShip/Courier/couriers.controller");
 
 // Maps Shiprocket Cargo's own status string to the internal status vocabulary
 // the frontend actually filters on (pulled from DelightcargoFrontend/src/B2B/Orders/*.jsx).
@@ -90,7 +96,7 @@ const refreshShiprocketCargoTracking = async (order) => {
 // holds the real underlying carrier, e.g. "delhivery", which varies per
 // shipment and isn't what identifies "this is a Shiprocket booking"). This is
 // the single entry point the tracking cron (and anything else) should call.
-// Currently only Shiprocket has a live B2B tracking integration; other
+// Currently Shiprocket and BigShip have live B2B tracking integrations; other
 // providers (e.g. Delhivery, which isn't booked through an aggregator) don't
 // have one yet, so this is a no-op for them.
 const refreshB2BOrderTracking = async (order) => {
@@ -98,6 +104,10 @@ const refreshB2BOrderTracking = async (order) => {
 
   if (partnerName === "shiprocket") {
     return refreshShiprocketCargoTracking(order);
+  }
+
+  if (partnerName === "bigship") {
+    return refreshBigShipOrderTracking(order);
   }
 
   // No B2B tracking integration yet for other providers.
@@ -115,14 +125,18 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const refreshAllB2BShiprocketTracking = async () => {
   try {
+    // Name kept for backward compatibility (already referenced elsewhere by
+    // this name) — covers every aggregator with a live B2B tracking
+    // integration, not just Shiprocket, since refreshB2BOrderTracking above
+    // dispatches by partner regardless of which one queried this order in.
     const orders = await Order.find({
       orderType: "B2B",
-      partner: "Shiprocket",
+      partner: { $in: ["Shiprocket", "BigShip"] },
       awb_number: { $exists: true, $ne: null },
       status: { $in: IN_FLIGHT_STATUSES },
     });
 
-    console.log(`[B2B Shiprocket Tracking] Checking ${orders.length} in-flight order(s).`);
+    console.log(`[B2B Tracking] Checking ${orders.length} in-flight order(s).`);
 
     for (const order of orders) {
       try {

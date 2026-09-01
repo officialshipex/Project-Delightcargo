@@ -41,6 +41,9 @@ const {
 const {
   checkServiceabilityShipRocket,
 } = require("../../AllCouriers/ShipRocket/Courier/couriers.controller.js");
+const {
+  checkServiceabilityBigShip,
+} = require("../../AllCouriers/BigShip/Courier/couriers.controller.js");
 
 // Define courier IDs for each provider
 const courierIds = {
@@ -56,6 +59,7 @@ const courierIds = {
   Proship: "10",
   Shiprocket: "11",
   ShipexIndia: "13",
+  BigShip: "15",
 };
 
 // Input Validation Schema
@@ -132,6 +136,15 @@ const availableCourierService = async (req, res) => {
     const shipexServiceMap = new Map(
       shipexServices.map(s => [s.name.toLowerCase().trim(), s.courier || s.name])
     );
+    // BigShip is an aggregator like Shiprocket/ShipexIndia — one live call
+    // returns every serviceable courier for the route, and each rate card's
+    // specific BigShip courier name (from its CourierService.courier field)
+    // is matched against that shared result below, rather than making one
+    // live call per rate card.
+    const bigshipServices = await CourierService.find({ provider: "BigShip" }).lean();
+    const bigshipServiceMap = new Map(
+      bigshipServices.map(s => [s.name.toLowerCase().trim(), s.courier || s.name])
+    );
 
     // Collect unique active providers
     const activeProviders = new Set();
@@ -143,6 +156,9 @@ const availableCourierService = async (req, res) => {
       if (provider === "Shiprocket") {
         shiprocketServiceNames.add(rc.courierServiceName);
       } else {
+        // BigShip's serviceability call already returns every courier for
+        // the route in one shot, so it's added once here (not per-service,
+        // unlike Shiprocket above) — see checkResults below.
         activeProviders.add(provider);
       }
     }
@@ -196,6 +212,21 @@ const availableCourierService = async (req, res) => {
               length: order.packageDetails?.volumetricWeight?.length || 10,
               width: order.packageDetails?.volumetricWeight?.width || 10,
               height: order.packageDetails?.volumetricWeight?.height || 10,
+            });
+          } else if (provider === "BigShip") {
+            result = await checkServiceabilityBigShip({
+              segmentType: "domestic_b2c",
+              sourcePincode: pickUpPincode,
+              destPincode: deliveryPincode,
+              invoiceValue: declaredValue,
+              paymentMethod: paymentType,
+              boxes: [{
+                no_of_box: "1",
+                box_length: order.packageDetails?.volumetricWeight?.length || 10,
+                box_width: order.packageDetails?.volumetricWeight?.width || 10,
+                box_height: order.packageDetails?.volumetricWeight?.height || 10,
+                box_dead_weight: applicableWeight || 0.5,
+              }],
             });
           }
         } catch (err) {
@@ -270,6 +301,17 @@ const availableCourierService = async (req, res) => {
           if (matchedCourier && matchedCourier.serviceable === true) {
             isCourierServiceable = true;
           }
+        }
+        isServiceable = isCourierServiceable;
+      }
+
+      if (provider === "BigShip" && isServiceable) {
+        let isCourierServiceable = false;
+        if (Array.isArray(serviceable.couriers)) {
+          const mappedName = bigshipServiceMap.get(rc.courierServiceName.toLowerCase().trim()) || rc.courierServiceName;
+          isCourierServiceable = serviceable.couriers.some(
+            (c) => c.courierName?.toLowerCase().replace(/\s+/g, "") === mappedName.toLowerCase().replace(/\s+/g, "")
+          );
         }
         isServiceable = isCourierServiceable;
       }

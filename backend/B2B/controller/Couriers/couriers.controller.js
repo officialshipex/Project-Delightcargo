@@ -8,6 +8,9 @@ const CourierPincodeB2B = require("../../models/serviceableCourierPincode.model"
 const {
   getCargoServiceableCouriers,
 } = require("./AllCouriers/ShipRocket/Courier/couriers.controller");
+const {
+  getBigShipServiceableCouriers,
+} = require("./AllCouriers/BigShip/Courier/couriers.controller");
 
 const getAllCouriers = async (req, res) => {
   try {
@@ -427,6 +430,44 @@ const getShiprocketCourierServices = async (req, res) => {
   }
 };
 
+// Same reasoning as getShiprocketCourierServices above: BigShip has no
+// "list everything my account can do" endpoint either — only the
+// route-specific Rate Calculator. Uses the same Delhi<->Mumbai reference
+// route so the "Courier" dropdown for BigShip isn't just empty.
+const getBigShipCourierServices = async (req, res) => {
+  try {
+    const referenceOrder = {
+      pickupAddress: { pinCode: "110001", city: "Delhi", state: "Delhi" },
+      receiverAddress: { pinCode: "400001", city: "Mumbai", state: "Maharashtra" },
+      paymentDetails: { amount: 5000, method: "Prepaid" },
+    };
+    const referencePackages = [
+      { noOfBox: 10, weightPerBox: 10, length: 10, width: 10, height: 10 },
+    ];
+
+    const services = await getBigShipServiceableCouriers({
+      order: referenceOrder,
+      packages: referencePackages,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: services.map((s) => ({ service: [s.key] })),
+      note: "Based on live BigShip serviceability for a Delhi<->Mumbai reference route — actual availability can vary by real pickup/delivery pincode.",
+    });
+  } catch (error) {
+    console.error(
+      "Error fetching live BigShip courier services:",
+      error?.response?.data || error.message
+    );
+    return res.status(500).json({
+      success: false,
+      message: "Could not fetch live BigShip courier services.",
+      data: [],
+    });
+  }
+};
+
 module.exports = {
   getAllCouriers,
   getAllCourierServices,
@@ -439,4 +480,5 @@ module.exports = {
   downloadPincode,
   loadCourierPincodes,
   getShiprocketCourierServices,
+  getBigShipCourierServices,
 };

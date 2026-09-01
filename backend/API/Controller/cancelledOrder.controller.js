@@ -40,6 +40,9 @@ const {
   cancelOrder: cancelShiprocketOrder,
 } = require("../../AllCouriers/ShipRocket/Courier/couriers.controller");
 const {
+  cancelBigShipOrder,
+} = require("../../AllCouriers/BigShip/Courier/couriers.controller");
+const {
   removeFromPickupManifest,
 } = require("../../Orders/scheduledPickup.controller");
 
@@ -109,6 +112,8 @@ const cancelOrdersAtBooked = async (req, res) => {
       provider = "Shadowfax";
     } else if (currentOrder.partner === "Shiprocket" || currentOrder.provider === "Shiprocket") {
       provider = "Shiprocket";
+    } else if (currentOrder.partner === "BigShip") {
+      provider = "BigShip";
     } else {
       provider = currentOrder.provider;
     }
@@ -150,6 +155,16 @@ const cancelOrdersAtBooked = async (req, res) => {
         break;
       case "Shiprocket":
         result = await cancelShiprocketOrder(currentOrder.awb_number);
+        break;
+      case "BigShip":
+        // BigShip identifies orders by its own CustomGlobalOrderId, not the AWB.
+        if (!currentOrder.otherDetails?.bigshipOrderId) {
+          return res.status(400).json({
+            success: false,
+            message: "No BigShip order reference found for this order.",
+          });
+        }
+        result = await cancelBigShipOrder(currentOrder.otherDetails.bigshipOrderId);
         break;
       default:
         return res.status(400).json({

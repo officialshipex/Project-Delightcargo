@@ -29,6 +29,10 @@ const pickupAddress = new mongoose.Schema({
     type: String,
     default: ""
   },
+  bigshipWarehouseId: {
+    type: String,
+    default: ""
+  },
   createdAt: {
     type: Date,
     default: Date.now,

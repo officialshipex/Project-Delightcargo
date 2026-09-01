@@ -19,6 +19,7 @@ const createShiprocketShipment = require("../Courier/shiprocketShipmentCreation.
 const createShadowfaxShipment = require("../Courier/shadowfaxShipmentCreation.controller");
 const createShipexIndiaShipment = require("../Courier/shipexIndiaShipmentCreation.controller");
 const createNimbuspostShipment = require("../Courier/nimbuspostShipmentCreation.controller");
+const createBigShipShipment = require("../Courier/bigshipShipmentCreation.controller");
 
 // Provider mapping
 const providerMap = {
@@ -36,6 +37,7 @@ const providerMap = {
   "12": "Shadowfax",
   "13": "ShipexIndia",
   "14": "NimbusPost",
+  "15": "BigShip",
 };
 
 // Validation schema
@@ -388,6 +390,22 @@ const bookOrder = async (req, res) => {
           provider,
           finalCharges,
           courierServiceName,
+          priceBreakup,
+          userId: userId,
+          walletId: user.Wallet,
+          walletBalance: wallet.balance,
+          walletHoldAmount: wallet.holdAmount || 0,
+          walletCreditLimit: wallet.creditLimit || 0,
+        });
+        break;
+
+      case "BigShip":
+        shipmentResult = await createBigShipShipment({
+          id: order._id,
+          provider,
+          finalCharges,
+          courierServiceName,
+          courier: courierService?.courier,
           priceBreakup,
           userId: userId,
           walletId: user.Wallet,

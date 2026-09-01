@@ -50,6 +50,9 @@ const {
 const {
   checkShipexIndiaServiceability,
 } = require("../AllCouriers/ShipxIndia/Courier/couriers.controller");
+const {
+  checkServiceabilityBigShip,
+} = require("../AllCouriers/BigShip/Courier/couriers.controller");
 const checkServiceabilityAll = async (service, id, pincode) => {
   try {
     const currentOrder = await Order.findById(id);
@@ -381,6 +384,30 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         return { ...res, success: false, message: "Service not available for this courier" };
       }
       return res;
+    }
+
+    // ----------------------- BigShip -----------------------
+    if (service.provider.toLowerCase() === "bigship") {
+      const result = await checkServiceabilityBigShip({
+        segmentType: "domestic_b2c",
+        sourcePincode: pickupPincode,
+        destPincode: deliveryPincode,
+        invoiceValue: currentOrder.paymentDetails?.amount || 0,
+        paymentMethod,
+        boxes: [
+          {
+            no_of_box: "1",
+            box_length: currentOrder.packageDetails.volumetricWeight?.length || 10,
+            box_width: currentOrder.packageDetails.volumetricWeight?.width || 10,
+            box_height: currentOrder.packageDetails.volumetricWeight?.height || 10,
+            box_dead_weight: currentOrder.packageDetails?.applicableWeight || 0.5,
+          },
+        ],
+      });
+      if (!result.success) return { success: false };
+      const normalize = (s) => (s || "").toLowerCase().replace(/\s+/g, "");
+      const matched = result.couriers.find((c) => normalize(c.courierName) === normalize(service.courier));
+      return { success: !!matched };
     }
 
     // Default

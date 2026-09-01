@@ -7,6 +7,9 @@ const {
   getCargoServiceableCouriers,
 } = require("../Couriers/AllCouriers/ShipRocket/Courier/couriers.controller");
 const {checkDelhiveryServiceability}=require("../Couriers/AllCouriers/Delhivery/Courier/couriers.controller")
+const {
+  getBigShipServiceableCouriers,
+} = require("../Couriers/AllCouriers/BigShip/Courier/couriers.controller");
 
 // Rate-calculation helpers live in a shared, dependency-free util so the
 // booking controllers (Shiprocket/Delhivery) can reuse them without creating
@@ -176,6 +179,18 @@ const checkB2BServiceability = async ({ provider, order, packages, courierServic
     return {
       type: "aggregator",
       couriers: couriers || [], // [{ key, id, modeId }]
+    };
+  }
+
+  // ===============================
+  // BIGSHIP (AGGREGATOR)
+  // ===============================
+  if (providerName === "bigship") {
+    const couriers = await getBigShipServiceableCouriers({ order, packages });
+
+    return {
+      type: "aggregator",
+      couriers: couriers || [], // [{ key, isODA, courierId }]
     };
   }
 

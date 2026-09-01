@@ -24,6 +24,7 @@ const customRateController = require("./routes/saveCustomRate.router");
 const EcomExpressController = require("./AllCouriersRoutes/ecom.router");
 const NimbusPostController = require("./AllCouriersRoutes/nimbuspost.router");
 const ShipRocketController = require("./AllCouriersRoutes/shiprocket.router");
+const BigShipController = require("./AllCouriersRoutes/bigship.router");
 const XpressbeesController = require("./AllCouriersRoutes/xpressbee.router");
 const shreeMarutiController = require("./AllCouriersRoutes/shreemaruti.router");
 const SmartShipController = require("./AllCouriersRoutes/smartShip.router");
@@ -140,6 +141,7 @@ router.use("/saveCustomRate", customRateController);
 
 router.use("/NimbusPost", NimbusPostController);
 router.use("/Shiprocket", ShipRocketController);
+router.use("/BigShip", BigShipController);
 router.use("/EcomExpress", EcomExpressController);
 router.use("/Xpressbees", XpressbeesController);
 router.use("/ShreeMaruti", shreeMarutiController);
