@@ -26,16 +26,21 @@ const createBoxdLogisticsShipment = async ({
 }) => {
     const session = await mongoose.startSession();
     session.startTransaction();
+    let currentOrder, zone, boxdOrderId, awb, balanceToBeDeducted;
 
     try {
         // Step 1: Atomically lock the order
-        const currentOrder = await Order.findOneAndUpdate(
+        currentOrder = await Order.findOneAndUpdate(
             { _id: id, status: "new" },
             { $set: { status: "processing" } },
             { new: true, session }
         );
 
         if (!currentOrder) {
+            // Must still abort/end the session — leaving it open would hold
+            // this transaction's locks until MongoDB force-aborts it (60s).
+            await session.abortTransaction();
+            session.endSession();
             return {
                 success: false,
                 message: "Shipment already created or order is being processed.",
@@ -43,7 +48,8 @@ const createBoxdLogisticsShipment = async ({
         }
 
         // Step 2: Fetch zone and warehouse ID in parallel
-        const [zone, warehouseId] = await Promise.all([
+        let warehouseId;
+        [zone, warehouseId] = await Promise.all([
             getZone(
                 currentOrder.pickupAddress.pinCode,
                 currentOrder.receiverAddress.pinCode
@@ -66,10 +72,10 @@ const createBoxdLogisticsShipment = async ({
             createRes = await createBoxdOrder(currentOrder, courierServiceName, warehouseId);
             console.log("BoxdLogistics API create response:", createRes);
         } catch (err) {
-            await Order.updateOne(
-                { _id: id, status: "processing" },
-                { $set: { status: "new" } }
-            );
+            // abortTransaction() alone reverts the uncommitted "processing"
+            // write — a separate non-transactional write to the same
+            // document here would block on this transaction's own lock
+            // until MongoDB force-aborts it (default 60s), not a real delay.
             await session.abortTransaction();
             session.endSession();
             console.error(
@@ -84,12 +90,12 @@ const createBoxdLogisticsShipment = async ({
             };
         }
 
-        const boxdOrderId = createRes?.id || createRes?.order_id;
+        boxdOrderId = createRes?.id || createRes?.order_id;
         if (!boxdOrderId) {
-            await Order.updateOne(
-                { _id: id, status: "processing" },
-                { $set: { status: "new" } }
-            );
+            // abortTransaction() alone reverts the uncommitted "processing"
+            // write — a separate non-transactional write to the same
+            // document here would block on this transaction's own lock
+            // until MongoDB force-aborts it (default 60s), not a real delay.
             await session.abortTransaction();
             session.endSession();
             return {
@@ -122,10 +128,10 @@ const createBoxdLogisticsShipment = async ({
             shipRes = await shipBoxdOrder(boxdOrderId, courierId);
             console.log("BoxdLogistics API ship response:", shipRes);
         } catch (err) {
-            await Order.updateOne(
-                { _id: id, status: "processing" },
-                { $set: { status: "new" } }
-            );
+            // abortTransaction() alone reverts the uncommitted "processing"
+            // write — a separate non-transactional write to the same
+            // document here would block on this transaction's own lock
+            // until MongoDB force-aborts it (default 60s), not a real delay.
             await session.abortTransaction();
             session.endSession();
             console.error(
@@ -140,17 +146,17 @@ const createBoxdLogisticsShipment = async ({
             };
         }
 
-        const awb =
+        awb =
             shipRes?.awb_number ||
             shipRes?.tracking_number ||
             shipRes?.shipment?.awb ||
             "";
 
         if (!awb) {
-            await Order.updateOne(
-                { _id: id, status: "processing" },
-                { $set: { status: "new" } }
-            );
+            // abortTransaction() alone reverts the uncommitted "processing"
+            // write — a separate non-transactional write to the same
+            // document here would block on this transaction's own lock
+            // until MongoDB force-aborts it (default 60s), not a real delay.
             await session.abortTransaction();
             session.endSession();
             return {
@@ -162,7 +168,7 @@ const createBoxdLogisticsShipment = async ({
         }
 
         // Step 7: Update order + wallet atomically
-        const balanceToBeDeducted = parseFloat(finalCharges) || 0;
+        balanceToBeDeducted = parseFloat(finalCharges) || 0;
 
         await Promise.all([
             Order.findByIdAndUpdate(
@@ -234,12 +240,68 @@ const createBoxdLogisticsShipment = async ({
             awb_number: awb,
         };
     } catch (error) {
-        await session.abortTransaction();
+        if (session.inTransaction()) await session.abortTransaction();
+        session.endSession();
+
+        if (awb) {
+            // BoxdLogistics already confirmed a real, irreversible shipment
+            // before this failure hit (e.g. a write conflict during the
+            // commit) — recover by persisting directly instead of resetting
+            // the order to "new" and losing the AWB.
+            console.error(`[BoxdLogistics] AWB ${awb} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`);
+            try {
+                await Promise.all([
+                    Order.findByIdAndUpdate(id, {
+                        $set: {
+                            status: "Booked",
+                            awb_number: awb,
+                            shipment_id: String(boxdOrderId),
+                            provider: "Bluedart",
+                            partner: "BoxdLogistics",
+                            shipmentCreatedAt: new Date(),
+                            totalFreightCharges: balanceToBeDeducted,
+                            courierServiceName,
+                            zone: zone?.zone,
+                            priceBreakup,
+                        },
+                        $push: {
+                            tracking: {
+                                status: "Booked",
+                                StatusLocation: currentOrder?.pickupAddress?.city || "N/A",
+                                StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                                Instructions: "Order booked successfully (recovered after a DB write conflict)",
+                            }
+                        }
+                    }),
+                    Wallet.updateOne({ _id: walletId }, { $inc: { balance: -balanceToBeDeducted } }),
+                    WalletTransaction.create([
+                        {
+                            walletId: walletId,
+                            channelOrderId: currentOrder?.orderId,
+                            category: "debit",
+                            amount: balanceToBeDeducted,
+                            balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+                            date: new Date(),
+                            awb_number: awb,
+                            description: "Freight Charges Applied",
+                            priceBreakup,
+                        },
+                    ]),
+                ]);
+            } catch (saveErr) {
+                console.error(`[BoxdLogistics] CRITICAL: could not save recovered AWB ${awb} for order ${id} — needs manual reconciliation:`, saveErr.message);
+            }
+            return {
+                success: true,
+                message: "Shipment Created Successfully",
+                awb_number: awb,
+            };
+        }
+
         await Order.updateOne(
             { _id: id, status: "processing" },
             { $set: { status: "new" } }
         ).catch(() => { });
-        session.endSession();
         console.error(
             "❌ BoxdLogistics API shipment error:",
             error?.response?.data || error.message

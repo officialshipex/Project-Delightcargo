@@ -251,16 +251,22 @@ const createOneClickShipment = async (req, res) => {
       labelUrl,
     });
   } catch (error) {
-    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
-    await session.abortTransaction();
+    // abortTransaction() alone reverts the uncommitted "processing" write —
+    // this one call had no session, so (unlike the ones above) it would
+    // compete for a lock this transaction still holds, self-deadlocking
+    // until MongoDB force-aborts the stale transaction (default 60s).
+    if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
     console.error(
       "❌ Error creating shipment:",
       error.response?.data || error.message,
     );
+    // Amazon's Selling Partner API returns errors as { errors: [{ message }] }
+    // — extract that instead of always showing the generic fallback text.
+    const amazonReason = error.response?.data?.errors?.[0]?.message;
     return res.status(500).json({
       success: false,
-      message: "Error creating shipment",
+      message: amazonReason || "Error creating shipment",
       details: error.response?.data || error.message,
     });
   }

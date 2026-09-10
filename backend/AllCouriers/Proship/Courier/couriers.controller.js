@@ -79,21 +79,21 @@ const checkProshipServiceability = async (payload) => {
 
 const createProshipOrder = async (req, res) => {
   const session = await mongoose.startSession();
+  const {
+    id,
+    finalCharges,
+    courierServiceName,
+    priceBreakup,
+    courier, // selected courier cp_id/name
+    estimatedDeliveryDate
+  } = req.body;
+  let currentOrder, currentWallet, zone, awb_number, resolvedShipmentId, resolvedProvider, walletBalanceSnapshot;
 
   try {
-    const {
-      id,
-      finalCharges,
-      courierServiceName,
-      priceBreakup,
-      courier, // selected courier cp_id/name
-      estimatedDeliveryDate
-    } = req.body;
-
     session.startTransaction();
 
     // 1. Atomically lock the order
-    const currentOrder = await Order.findOneAndUpdate(
+    currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
       { new: true, session }
@@ -112,8 +112,14 @@ const createProshipOrder = async (req, res) => {
     const user = await User.findById(currentOrder.userId).session(session);
     if (!user) throw new Error("User not found");
 
-    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
+    currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
     if (!currentWallet) throw new Error("Wallet not found");
+    // Snapshot the pre-deduction balance — currentWallet.balance is mutated
+    // in-memory below before the transactional save, so if a write conflict
+    // strikes after that mutation, the catch block's recovery path must use
+    // this snapshot (not the already-decremented in-memory value) to avoid
+    // double-subtracting in the audit record.
+    walletBalanceSnapshot = currentWallet.balance;
 
     // 3. Balance Check
     const effectiveBalance = currentWallet.balance - (currentWallet.holdAmount || 0);
@@ -127,7 +133,7 @@ const createProshipOrder = async (req, res) => {
     }
 
     // 4. Get Zone
-    const zone = await getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode);
+    zone = await getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode);
     if (!zone) {
       await session.abortTransaction();
       session.endSession();
@@ -229,15 +235,17 @@ const createProshipOrder = async (req, res) => {
       throw new Error(response.data?.meta?.message || "Proship order creation failed");
     }
 
-    const { awb_number } = response.data.result;
+    ({ awb_number } = response.data.result);
 
     // 8. Update Order inside transaction
     currentOrder.status = "Booked";
     currentOrder.awb_number = awb_number;
     const sNameForProv = courierServiceName?.toLowerCase() || "";
-    currentOrder.provider = sNameForProv.includes("dtdc") ? "Dtdc" : "Shadowfax";
+    resolvedProvider = sNameForProv.includes("dtdc") ? "Dtdc" : "Shadowfax";
+    resolvedShipmentId = response.data.result.id || String(currentOrder.orderId);
+    currentOrder.provider = resolvedProvider;
     currentOrder.partner = "Proship";
-    currentOrder.shipment_id = response.data.result.id || String(currentOrder.orderId);
+    currentOrder.shipment_id = resolvedShipmentId;
     currentOrder.totalFreightCharges = parseFloat(finalCharges) || 0;
     currentOrder.courierServiceName = courierServiceName;
     currentOrder.zone = zone.zone;
@@ -293,17 +301,77 @@ const createProshipOrder = async (req, res) => {
     }
     session.endSession();
 
-    if (req.body.id) {
+    if (awb_number) {
+      // Proship already confirmed a real, irreversible shipment before this
+      // failure hit (e.g. a write conflict during the commit) — recover by
+      // persisting directly instead of resetting the order to "new" and
+      // losing the AWB while Proship still has a live shipment on file.
+      console.error(`[Proship] AWB ${awb_number} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`);
+      try {
+        const deduction = parseFloat(finalCharges) || 0;
+        await Promise.all([
+          Order.findByIdAndUpdate(id, {
+            $set: {
+              status: "Booked",
+              awb_number: awb_number,
+              provider: resolvedProvider || "Shadowfax",
+              partner: "Proship",
+              shipment_id: resolvedShipmentId,
+              totalFreightCharges: deduction,
+              courierServiceName,
+              zone: zone?.zone,
+              estimatedDeliveryDate: estimatedDeliveryDate || "",
+              priceBreakup,
+              shipmentCreatedAt: new Date(),
+            },
+            $push: {
+              tracking: {
+                status: "Booked",
+                StatusLocation: currentOrder?.pickupAddress?.city || "N/A",
+                StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                Instructions: "Order booked successfully (recovered after a DB write conflict)",
+              },
+            },
+          }),
+          currentWallet ? Wallet.updateOne({ _id: currentWallet._id }, { $inc: { balance: -deduction } }) : Promise.resolve(),
+          WalletTransaction.create([{
+            walletId: currentWallet?._id,
+            channelOrderId: currentOrder?.orderId,
+            category: "debit",
+            amount: deduction,
+            balanceAfterTransaction: (walletBalanceSnapshot || 0) - deduction,
+            awb_number: awb_number,
+            description: "Freight Charges Applied",
+            priceBreakup,
+          }]),
+        ]);
+      } catch (saveErr) {
+        console.error(`[Proship] CRITICAL: could not save recovered AWB ${awb_number} for order ${id} — needs manual reconciliation:`, saveErr.message);
+      }
+      return res.status(200).json({
+        success: true,
+        message: "Shipment Created Successfully",
+        awb_number: awb_number,
+        orderId: currentOrder?.orderId,
+      });
+    }
+
+    if (id) {
       await Order.updateOne(
-        { _id: req.body.id, status: "processing" },
+        { _id: id, status: "processing" },
         { $set: { status: "new" } }
       );
     }
 
     console.error("Proship Creation Error:", error.response?.data || error.message);
+    // error.message already carries Proship's real reason (it's set when
+    // throwing above) — this only ever sent it under `error`, and the
+    // frontend reads `.message`, so the real reason never reached the UI.
+    const proshipReason = error.response?.data?.meta?.message || error.message;
     return res.status(500).json({
       success: false,
-      error: error.response?.data?.meta?.message || error.message,
+      error: proshipReason,
+      message: proshipReason,
     });
   }
 };

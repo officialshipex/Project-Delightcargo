@@ -147,22 +147,22 @@ const createClientWarehouse = async (payload, apiKey) => {
 
 const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
+  const {
+    id,
+    provider,
+    courierName,
+    finalCharges,
+    courierServiceName,
+    estimatedDeliveryDate,
+    priceBreakup
+  } = req.body;
+  let currentOrder, currentWallet, internalCourierName, zone, balanceToBeDeducted, result;
 
   try {
-    const {
-      id,
-      provider,
-      courierName,
-      finalCharges,
-      courierServiceName,
-      estimatedDeliveryDate,
-      priceBreakup
-    } = req.body;
-
     session.startTransaction();
 
     // Step 1️⃣ Fetch order and lock
-    const currentOrder = await Order.findOneAndUpdate(
+    currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
       { new: true, session },
@@ -188,7 +188,10 @@ const createOrder = async (req, res) => {
     ]);
 
     if (!users || !users.Wallet || !shipmentType) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -197,14 +200,15 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const currentWallet = users.Wallet;
-    const internalCourierName = shipmentType.courierName || provider;
+    currentWallet = users.Wallet;
+    internalCourierName = shipmentType.courierName || provider;
 
     // Fetch API key for the specific account
     const apiKey = await getDelhiveryApiKey(internalCourierName);
 
     // Step 3️⃣ Get waybills (from pool cache), zone & create warehouse in parallel
-    const [waybills, zone, warehouseCreationResult] = await Promise.all([
+    let waybills, warehouseCreationResult;
+    [waybills, zone, warehouseCreationResult] = await Promise.all([
       getWaybill(apiKey),
       getZone(
         currentOrder.pickupAddress.pinCode,
@@ -217,7 +221,10 @@ const createOrder = async (req, res) => {
     ]);
 
     if (!waybills || !waybills.length || !zone) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -229,7 +236,10 @@ const createOrder = async (req, res) => {
     }
 
     if (!warehouseCreationResult || !warehouseCreationResult.success) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -301,11 +311,14 @@ const createOrder = async (req, res) => {
     // Step 6️⃣ Wallet check
     const walletHoldAmount = currentWallet.holdAmount || 0;
     const effectiveBalance = currentWallet.balance - walletHoldAmount;
-    const balanceToBeDeducted =
+    balanceToBeDeducted =
       finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
     const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < balanceToBeDeducted) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return res
@@ -322,15 +335,20 @@ const createOrder = async (req, res) => {
       timeout: 8000,
     });
     // console.log("delhiver", response)
-    const result = response.data?.packages?.[0];
+    result = response.data?.packages?.[0];
     if (!response.data.success || !result) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
-      console.log("error delhivery", response.data.packages[0].remarks)
+      const delhiveryRemark = response.data?.packages?.[0]?.remarks;
+      const delhiveryReason = Array.isArray(delhiveryRemark) ? delhiveryRemark[0] : delhiveryRemark;
+      console.log("error delhivery", delhiveryRemark);
       return res.status(400).json({
         success: false,
-        message: "Failed to create shipment",
+        message: delhiveryReason || "Failed to create shipment",
         details: response.data,
       });
     }
@@ -406,14 +424,76 @@ const createOrder = async (req, res) => {
       awb_number: result.waybill,
     });
   } catch (error) {
-    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
-    await session.abortTransaction();
+    // abortTransaction() alone reverts the uncommitted "processing" write.
+    if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
-    console.error("Error in createOrder:", error.message);
+
+    if (result?.waybill) {
+      // Delhivery already confirmed a real, irreversible shipment before this
+      // failure hit (e.g. a write conflict during the commit) — recover by
+      // persisting directly instead of reporting failure and losing the AWB.
+      console.error(`[Delhivery] AWB ${result.waybill} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`);
+      try {
+        await Promise.all([
+          Order.findByIdAndUpdate(id, {
+            $set: {
+              status: "Booked",
+              cancelledAtStage: null,
+              awb_number: result.waybill,
+              shipment_id: result.refnum,
+              provider: provider,
+              courierName: internalCourierName || provider,
+              totalFreightCharges: balanceToBeDeducted,
+              courierServiceName,
+              shipmentCreatedAt: new Date(),
+              zone: zone?.zone,
+              estimatedDeliveryDate,
+              priceBreakup,
+            },
+            $push: {
+              tracking: {
+                status: "Booked",
+                StatusLocation: currentOrder?.pickupAddress?.city || "N/A",
+                StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                Instructions: "Order booked successfully (recovered after a DB write conflict)",
+              },
+            },
+          }),
+          currentWallet
+            ? currentWallet.updateOne({ $inc: { balance: -balanceToBeDeducted } })
+            : Promise.resolve(),
+          WalletTransaction.create([
+            {
+              walletId: currentWallet?._id,
+              channelOrderId: currentOrder?.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction: (currentWallet?.balance || 0) - balanceToBeDeducted,
+              date: new Date(),
+              awb_number: result.waybill || "",
+              description: "Freight Charges Applied",
+              priceBreakup,
+            },
+          ]),
+        ]);
+      } catch (saveErr) {
+        console.error(`[Delhivery] CRITICAL: could not save recovered AWB ${result.waybill} for order ${id} — needs manual reconciliation:`, saveErr.message);
+      }
+      return res.status(201).json({
+        success: true,
+        message: "Shipment Created Successfully",
+        orderId: currentOrder?.orderId,
+        provider,
+        awb_number: result.waybill,
+      });
+    }
+
+    console.error("Error in createOrder:", error.response?.data || error.message);
+    const delhiveryFailReason = error.response?.data?.message || error.message;
     return res.status(500).json({
       success: false,
-      message: "Failed to create order.",
-      error: error.message,
+      message: delhiveryFailReason || "Failed to create order.",
+      error: delhiveryFailReason || "Failed to create order.",
     });
   }
 };

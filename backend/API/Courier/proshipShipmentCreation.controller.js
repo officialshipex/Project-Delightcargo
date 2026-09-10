@@ -24,12 +24,13 @@ const createProshipShipment = async ({
   walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
+  let currentOrder, zone, estimateDate = null, balanceToBeDeducted, awb_number, resolvedShipmentId, resolvedProvider;
 
   try {
     session.startTransaction();
 
     // Step 1️⃣ Fetch order & mark as processing
-    const currentOrder = await Order.findOneAndUpdate(
+    currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
       { new: true, session }
@@ -47,7 +48,10 @@ const createProshipShipment = async ({
 
     // Step 2️⃣ Wallet check
     if (!walletId) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Wallet not found" };
@@ -55,24 +59,30 @@ const createProshipShipment = async ({
 
     // Step 3️⃣ Wallet Balance Check
     const effectiveBalance = walletBalance - (walletHoldAmount || 0);
-    const balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
+    balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
     const totalBalance = effectiveBalance + (walletCreditLimit || 0);
     
     if (totalBalance < balanceToBeDeducted) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Insufficient Wallet Balance" };
     }
 
     // Step 4️⃣ Get Zone
-    const zone = await getZone(
+    zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
     );
 
     if (!zone) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Pincode not serviceable" };
@@ -84,7 +94,6 @@ const createProshipShipment = async ({
       serviceName: courierServiceName.trim(),
     });
 
-    let estimateDate = null;
     if (eddData) {
       let deliveryDays = null;
       if (
@@ -105,7 +114,7 @@ const createProshipShipment = async ({
     const token = await getProshipAccessToken();
     // console.log("token",token)
     if (!token) {
-        await Order.findByIdAndUpdate(id, { status: "new" });
+        // See earlier comment — abortTransaction() alone reverts the status.
         await session.abortTransaction();
         session.endSession();
         return { success: false, message: "Proship authentication failed" };
@@ -193,7 +202,7 @@ const createProshipShipment = async ({
       !response.data.result ||
       !response.data.result.awb_number
     ) {
-        await Order.findByIdAndUpdate(id, { status: "new" });
+        // See earlier comment — abortTransaction() alone reverts the status.
         await session.abortTransaction();
         session.endSession();
         return {
@@ -203,7 +212,9 @@ const createProshipShipment = async ({
         };
     }
 
-    const { awb_number } = response.data.result;
+    ({ awb_number } = response.data.result);
+    resolvedShipmentId = response.data.result.id || String(currentOrder.orderId);
+    resolvedProvider = courierServiceName?.toLowerCase().includes("dtdc") ? "Dtdc" : "Shadowfax";
 
     // Step 9️⃣ Update Order & Wallet atomically
     await Promise.all([
@@ -214,8 +225,8 @@ const createProshipShipment = async ({
             status: "Booked",
             cancelledAtStage: null,
             awb_number: awb_number,
-            shipment_id: response.data.result.id || String(currentOrder.orderId),
-            provider: courierServiceName?.toLowerCase().includes("dtdc") ? "Dtdc" : "Shadowfax",
+            shipment_id: resolvedShipmentId,
+            provider: resolvedProvider,
             partner: "Proship",
             totalFreightCharges: balanceToBeDeducted,
             courierServiceName,
@@ -283,13 +294,72 @@ const createProshipShipment = async ({
     if (session.inTransaction()) {
         await session.abortTransaction();
     }
-    await Order.findByIdAndUpdate(id, { status: "new" });
     session.endSession();
+
+    if (awb_number) {
+      // Proship already confirmed a real, irreversible shipment before this
+      // failure hit (e.g. a write conflict during the commit) — recover by
+      // persisting directly instead of reporting failure and losing the AWB.
+      console.error(`[Proship] AWB ${awb_number} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`);
+      try {
+        await Promise.all([
+          Order.findByIdAndUpdate(id, {
+            $set: {
+              status: "Booked",
+              cancelledAtStage: null,
+              awb_number: awb_number,
+              shipment_id: resolvedShipmentId,
+              provider: resolvedProvider || "Shadowfax",
+              partner: "Proship",
+              totalFreightCharges: balanceToBeDeducted,
+              courierServiceName,
+              shipmentCreatedAt: new Date(),
+              zone: zone?.zone,
+              estimatedDeliveryDate: estimateDate,
+              priceBreakup,
+            },
+            $push: {
+              tracking: {
+                status: "Booked",
+                StatusLocation: currentOrder?.pickupAddress?.city || "N/A",
+                StatusDateTime: new Date(),
+                Instructions: "Order booked successfully (recovered after a DB write conflict)",
+              },
+            },
+          }),
+          Wallet.updateOne({ _id: walletId }, { $inc: { balance: -balanceToBeDeducted } }),
+          WalletTransaction.create([
+            {
+              walletId: walletId,
+              channelOrderId: currentOrder?.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+              date: new Date(),
+              awb_number: awb_number || "",
+              description: "Freight Charges Applied",
+              priceBreakup,
+            },
+          ]),
+        ]);
+      } catch (saveErr) {
+        console.error(`[Proship] CRITICAL: could not save recovered AWB ${awb_number} for order ${id} — needs manual reconciliation:`, saveErr.message);
+      }
+      return {
+        success: true,
+        message: "Shipment Created Successfully",
+        awb_number: awb_number,
+        orderId: currentOrder?.orderId,
+        estimatedDeliveryDate: estimateDate,
+      };
+    }
+
     console.error("Proship Creation Error:", error.response?.data || error.message);
+    const proshipFailReason = error.response?.data?.meta?.message || error.message;
     return {
       success: false,
-      message: "Error creating shipment",
-      error: error.response?.data?.meta?.message || error.message,
+      message: proshipFailReason || "Error creating shipment",
+      error: proshipFailReason || "Error creating shipment",
     };
   }
 };

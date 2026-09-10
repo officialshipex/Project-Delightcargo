@@ -4,7 +4,7 @@ const Order = require("../../../models/newOrder.model");
 const User = require("../../../models/User.model");
 const Wallet = require("../../../models/wallet");
 const PickupAddress = require("../../../models/pickupAddress.model");
-const { bigShipRequest, getOrCreateBigShipWarehouse, getBigShipToken } = require("../Authorize/bigship.controller");
+const { bigShipRequest, getOrCreateBigShipWarehouse, getBigShipToken, timedBigShipCall } = require("../Authorize/bigship.controller");
 
 const BASE_URL = process.env.BIGSHIP_URL || "https://api.bigship.direct";
 
@@ -179,7 +179,12 @@ const createOrReuseDraftOrder = async (order, segmentType) => {
     boxes.forEach((box) => {
       box.products = (order.productDetails || []).map((p) => ({
         productName: p.name,
-        hsn: p.hsn || "",
+        // HSN is free text in Delightcargo's product form, but a non-numeric
+        // value here makes BigShip's create-order throw an unhandled 500
+        // (confirmed live: "abc" -> 500, "1234" -> success) instead of a
+        // proper validation error — so strip to digits only, and omit
+        // entirely if nothing numeric is left (the doc marks it optional).
+        hsn: (p.hsn || "").replace(/\D/g, ""),
         qty: String(p.quantity || 1),
         amount: String(p.unitPrice || 0),
         totalAmount: (Number(p.unitPrice) || 0) * (Number(p.quantity) || 1),
@@ -199,6 +204,7 @@ const createOrReuseDraftOrder = async (order, segmentType) => {
   }
 
   const bigshipOrderId = String(res.data.data.CustomGlobalOrderId);
+  // console.log("Bigship order id",bigshipOrderId)
   await Order.updateOne(
     { _id: order._id },
     { $set: { "otherDetails.bigshipOrderId": bigshipOrderId } }
@@ -228,6 +234,11 @@ const placeBigShipOrder = async (order, bigshipOrderId, courierId, { invoiceFile
   let payload;
   let headers = {};
 
+  // riskTypeId is required by place-order for both B2B and B2C (confirmed
+  // live: "The risk type id field is required." when omitted) — it was only
+  // ever being appended in the file-upload branch below, so a plain B2C/
+  // sub-50k-B2B booking (the common case, no invoice/ewaybill file) never
+  // sent it at all.
   if (invoiceFile || ewaybillFile) {
     const form = new FormData();
     form.append("MasterCustomOrderId", bigshipOrderId);
@@ -236,19 +247,21 @@ const placeBigShipOrder = async (order, bigshipOrderId, courierId, { invoiceFile
     if (invoiceFile) form.append("InvoiceData", invoiceFile.buffer, invoiceFile.originalname);
     if (ewaybillNo) form.append("EwaybillNo", ewaybillNo);
     if (ewaybillFile) form.append("EwayBillData", ewaybillFile.buffer, ewaybillFile.originalname);
-    if (riskTypeId) form.append("riskTypeId", String(riskTypeId));
+    form.append("riskTypeId", String(riskTypeId));
     payload = form;
     headers = form.getHeaders();
   } else {
-    payload = { MasterCustomOrderId: bigshipOrderId, courierId: String(courierId) };
+    payload = { MasterCustomOrderId: bigshipOrderId, courierId: String(courierId), riskTypeId: String(riskTypeId) };
   }
 
   const token = await getBigShipToken();
 
-  const res = await axios.post(`${BASE_URL}/api/outbound/place-order`, payload, {
-    headers: { ...headers, Authorization: `Bearer ${token}` },
-    timeout: 20000,
-  });
+  const res = await timedBigShipCall("POST /api/outbound/place-order", () =>
+    axios.post(`${BASE_URL}/api/outbound/place-order`, payload, {
+      headers: { ...headers, Authorization: `Bearer ${token}` },
+      timeout: 20000,
+    })
+  );
 
   if (!res.data?.status) {
     throw new Error(res.data?.message || "BigShip order placement failed");
@@ -325,100 +338,145 @@ const createBigShipShipment = async ({
   const estimatedDeliveryDate = require("../../../models/EDDMap.model");
   const { assignPickupManifest } = require("../../../Orders/scheduledPickup.controller");
   const WalletTransaction = require("../../../models/WalletTransaction.model");
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const maxRetries = 3;
-  let attempt = 0;
+  // ── PHASE 1: lock the order + validate, in a short transaction ──────────
+  // No external calls in here at all — this used to wrap the entire flow,
+  // including BigShip's 3 sequential HTTP calls (5+ seconds just for
+  // courier-wise-shipment-cost). Holding a Mongo transaction open that long
+  // is exactly what made write conflicts routine rather than rare — this
+  // phase now commits in milliseconds, so the odds of colliding with any
+  // other write on the same documents drop back to what they should be.
+  let currentOrder, zone, estimateDate, balanceToBeDeducted;
+  {
+    const maxRetries = 3;
+    let attempt = 0;
+    let lockResult = null;
 
-  while (attempt < maxRetries) {
-    attempt++;
+    while (attempt < maxRetries && !lockResult) {
+      attempt++;
+      const session = await mongoose.startSession();
+      try {
+        session.startTransaction();
+
+        currentOrder = await Order.findOneAndUpdate(
+          { _id: id, status: "new" },
+          { $set: { status: "processing" } },
+          { new: true, session }
+        );
+
+        if (!currentOrder) {
+          await session.abortTransaction();
+          session.endSession();
+          return { success: false, message: "Shipment already created or order not in 'new' status." };
+        }
+
+        if (!walletId) {
+          await session.abortTransaction();
+          session.endSession();
+          return { success: false, message: "Wallet not found" };
+        }
+
+        const effectiveBalance = walletBalance - (walletHoldAmount || 0);
+        balanceToBeDeducted = parseFloat(finalCharges) || 0;
+        const totalBalance = effectiveBalance + (walletCreditLimit || 0);
+
+        if (totalBalance < balanceToBeDeducted) {
+          await session.abortTransaction();
+          session.endSession();
+          return { success: false, message: "Insufficient Wallet Balance" };
+        }
+
+        zone = await getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode);
+        if (!zone) {
+          await session.abortTransaction();
+          session.endSession();
+          return { success: false, message: "Pincode not serviceable" };
+        }
+
+        const eddData = await estimatedDeliveryDate.findOne({
+          courier: "BigShip",
+          serviceName: courierServiceName.trim(),
+        });
+        estimateDate = null;
+        if (eddData) {
+          const deliveryDays = eddData.zoneRates?.[zone.zone] || eddData[zone.zone];
+          if (typeof deliveryDays === "number") {
+            estimateDate = new Date();
+            estimateDate.setDate(estimateDate.getDate() + deliveryDays);
+          }
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+        lockResult = true;
+      } catch (error) {
+        if (session.inTransaction()) await session.abortTransaction();
+        session.endSession();
+
+        const isTransient =
+          error.errorLabels?.includes("TransientTransactionError") ||
+          error.code === 112 ||
+          error.message?.includes("WriteConflict");
+
+        if (isTransient && attempt < maxRetries) {
+          console.warn(`[BigShip createShipment] Write conflict locking order on attempt ${attempt}. Retrying in ${50 * attempt}ms...`);
+          await sleep(50 * attempt);
+          continue;
+        }
+
+        console.error("BigShip Creation Error (lock phase):", error.response?.data || error.message);
+        return { success: false, message: "Error creating shipment", error: error.response?.data?.message || error.message };
+      }
+    }
+  }
+
+  // ── PHASE 2: the slow external calls — no DB transaction held here ──────
+  // Nothing external has happened yet at this point, so on any failure it's
+  // always safe to just revert the order back to "new" (a plain, single-
+  // document update — no transaction needed for that).
+  const revertToNew = () => Order.updateOne({ _id: id }, { $set: { status: "new" } }).catch(() => {});
+
+  let bigshipOrderId, courierOptions, matchedCourier;
+  try {
+    ({ bigshipOrderId, couriers: courierOptions } = await getBigShipCourierOptions(currentOrder, "domestic_b2c"));
+  } catch (err) {
+    await revertToNew();
+    return { success: false, message: err.response?.data?.message || err.message || "BigShip order/rate fetch failed" };
+  }
+
+  matchedCourier = courierOptions.find((c) => c.courierName === courier);
+  if (!matchedCourier) {
+    await revertToNew();
+    return { success: false, message: `BigShip no longer has "${courier}" serviceable on this route.` };
+  }
+
+  let placeResult;
+  try {
+    // B2C has no rovType concept — defaults to Owner Risk, same as the
+    // fallback used everywhere else riskName isn't specified.
+    const riskTypeId = await getRiskTypeId("Owner Risk");
+    placeResult = await placeBigShipOrder(currentOrder, bigshipOrderId, matchedCourier.courierId, { riskTypeId });
+  } catch (err) {
+    await revertToNew();
+    return { success: false, message: err.response?.data?.message || err.message || "BigShip order placement failed" };
+  }
+
+  const awb_number = String(placeResult.awb_assigned || placeResult.reference_number || "");
+  if (!awb_number) {
+    await revertToNew();
+    return { success: false, message: "BigShip did not return an AWB number." };
+  }
+
+  // ── PHASE 3: point of no return reached — persist, never touch BigShip
+  // again regardless of what happens here. A short, pure-DB transaction, so
+  // conflicts are rare — and even if one occurs, retrying just this step is
+  // always safe (nothing external can be re-triggered by it).
+  let persisted = false;
+  for (let attempt = 1; attempt <= 3 && !persisted; attempt++) {
     const session = await mongoose.startSession();
-
     try {
       session.startTransaction();
-
-      const currentOrder = await Order.findOneAndUpdate(
-        { _id: id, status: "new" },
-        { $set: { status: "processing" } },
-        { new: true, session }
-      );
-
-      if (!currentOrder) {
-        await session.abortTransaction();
-        session.endSession();
-        return { success: false, message: "Shipment already created or order not in 'new' status." };
-      }
-
-      if (!walletId) {
-        await session.abortTransaction();
-        session.endSession();
-        return { success: false, message: "Wallet not found" };
-      }
-
-      const effectiveBalance = walletBalance - (walletHoldAmount || 0);
-      const balanceToBeDeducted = parseFloat(finalCharges) || 0;
-      const totalBalance = effectiveBalance + (walletCreditLimit || 0);
-
-      if (totalBalance < balanceToBeDeducted) {
-        await session.abortTransaction();
-        session.endSession();
-        return { success: false, message: "Insufficient Wallet Balance" };
-      }
-
-      const zone = await getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode);
-      if (!zone) {
-        await session.abortTransaction();
-        session.endSession();
-        return { success: false, message: "Pincode not serviceable" };
-      }
-
-      const eddData = await estimatedDeliveryDate.findOne({
-        courier: "BigShip",
-        serviceName: courierServiceName.trim(),
-      });
-      let estimateDate = null;
-      if (eddData) {
-        const deliveryDays = eddData.zoneRates?.[zone.zone] || eddData[zone.zone];
-        if (typeof deliveryDays === "number") {
-          estimateDate = new Date();
-          estimateDate.setDate(estimateDate.getDate() + deliveryDays);
-        }
-      }
-
-      // Draft order (cached/reused if already created) + serviceable courier
-      // list for it — need this to resolve the exact numeric courierId
-      // BigShip expects, since the rate card only stores the courier's name.
-      let bigshipOrderId, courierOptions;
-      try {
-        ({ bigshipOrderId, couriers: courierOptions } = await getBigShipCourierOptions(currentOrder, "domestic_b2c"));
-      } catch (err) {
-        await session.abortTransaction();
-        session.endSession();
-        return { success: false, message: err.message || "BigShip order/rate fetch failed" };
-      }
-
-      const matchedCourier = courierOptions.find((c) => c.courierName === courier);
-      if (!matchedCourier) {
-        await session.abortTransaction();
-        session.endSession();
-        return { success: false, message: `BigShip no longer has "${courier}" serviceable on this route.` };
-      }
-
-      let placeResult;
-      try {
-        placeResult = await placeBigShipOrder(currentOrder, bigshipOrderId, matchedCourier.courierId);
-      } catch (err) {
-        await session.abortTransaction();
-        session.endSession();
-        return { success: false, message: err.response?.data?.message || err.message || "BigShip order placement failed" };
-      }
-
-      const awb_number = String(placeResult.awb_assigned || placeResult.reference_number || "");
-      if (!awb_number) {
-        await session.abortTransaction();
-        session.endSession();
-        return { success: false, message: "BigShip did not return an AWB number." };
-      }
-
       await Promise.all([
         Order.findByIdAndUpdate(
           id,
@@ -465,46 +523,41 @@ const createBigShipShipment = async ({
           { session }
         ),
       ]);
-
       await session.commitTransaction();
       session.endSession();
-
-      process.nextTick(async () => {
-        try {
-          const fresh = await Order.findById(id);
-          if (fresh) await assignPickupManifest(fresh);
-        } catch (e) {}
-      });
-
-      return {
-        success: true,
-        message: "Shipment Created Successfully",
-        orderId: currentOrder.orderId,
-        awb_number,
-      };
+      persisted = true;
     } catch (error) {
       if (session.inTransaction()) await session.abortTransaction();
       session.endSession();
-
-      const isTransient =
-        error.errorLabels?.includes("TransientTransactionError") ||
-        error.code === 112 ||
-        error.message?.includes("WriteConflict");
-
-      if (isTransient && attempt < maxRetries) {
-        console.warn(`[BigShip createShipment] Write conflict on attempt ${attempt}. Retrying in ${50 * attempt}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
-        continue;
+      if (attempt === 3) {
+        console.error(
+          `[BigShip createShipment] CRITICAL: AWB ${awb_number} (BigShip order ${bigshipOrderId}) was placed but could not be saved after 3 attempts — needs manual reconciliation:`,
+          error.message
+        );
+      } else {
+        console.warn(`[BigShip createShipment] Write conflict persisting AWB ${awb_number} on attempt ${attempt}. Retrying in ${50 * attempt}ms...`);
+        await sleep(50 * attempt);
       }
-
-      console.error("BigShip Creation Error:", error.response?.data || error.message);
-      return {
-        success: false,
-        message: "Error creating shipment",
-        error: error.response?.data?.message || error.message,
-      };
     }
   }
+
+  process.nextTick(async () => {
+    try {
+      const fresh = await Order.findById(id);
+      if (fresh) await assignPickupManifest(fresh);
+    } catch (e) {}
+  });
+
+  // Success is reported based on BigShip's own confirmation, not on whether
+  // phase 3 fully persisted — the shipment is real either way, and a rare
+  // phase-3 failure after 3 retries is a logged reconciliation issue, not a
+  // reason to tell the customer their booking failed when it didn't.
+  return {
+    success: true,
+    message: "Shipment Created Successfully",
+    orderId: currentOrder.orderId,
+    awb_number,
+  };
 };
 
 // Express handler — matches Shiprocket's createCustomOrder(req,res) shape,

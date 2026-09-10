@@ -87,17 +87,17 @@ const createOrder = async (req, res) => {
   const MANIFEST_API = `${BASE_URL}/fulfillment/public/seller/order/create-manifest`;
   const token = await getToken();
   const session = await mongoose.startSession();
+  const {
+    courierServiceName,
+    id,
+    provider,
+    finalCharges,
+    estimatedDeliveryDate,
+    priceBreakup
+  } = req.body;
+  let currentOrder, currentWallet, zone, result, balanceToBeDeducted, walletBalanceSnapshot;
 
   try {
-    const {
-      courierServiceName,
-      id,
-      provider,
-      finalCharges,
-      estimatedDeliveryDate,
-      priceBreakup
-    } = req.body;
-
     session.startTransaction();
 
     const services = await Services.findOne({
@@ -105,7 +105,7 @@ const createOrder = async (req, res) => {
     }).session(session);
 
     // Atomically lock order in transaction
-    let currentOrder = await Order.findOneAndUpdate(
+    currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
       { new: true, session },
@@ -148,20 +148,26 @@ const createOrder = async (req, res) => {
     const users = await user
       .findById({ _id: currentOrder.userId })
       .session(session);
-    const currentWallet = await Wallet.findById({ _id: users.Wallet }).select("balance holdAmount creditLimit").session(
+    currentWallet = await Wallet.findById({ _id: users.Wallet }).select("balance holdAmount creditLimit").session(
       session,
     );
-    const zone = await getZone(
+    zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode,
     );
+    // Snapshot the pre-deduction balance — currentWallet.balance is mutated
+    // in-memory below before the transactional save, so if a write conflict
+    // strikes after that mutation, the catch block's recovery path must use
+    // this snapshot (not the already-decremented in-memory value) to avoid
+    // double-subtracting in the audit record.
+    walletBalanceSnapshot = currentWallet.balance;
     const effectiveBalance =
       currentWallet.balance - (currentWallet.holdAmount || 0);
     const balance = effectiveBalance + currentWallet.creditLimit;
     // Check wallet balance
     if (balance < finalCharges) {
+      // abortTransaction() alone reverts the uncommitted "processing" write.
       await session.abortTransaction();
-      await Order.findByIdAndUpdate(id, { status: "new" });
       session.endSession();
       return res
         .status(400)
@@ -279,21 +285,26 @@ const createOrder = async (req, res) => {
         },
       });
     } catch (shipmentErr) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate write here before the abort would self-deadlock on
+      // this transaction's own lock until MongoDB force-aborts it (60s).
       await session.abortTransaction();
       session.endSession();
       console.error(
         "Shipment API failed:",
         shipmentErr.response?.data || shipmentErr.message,
       );
+      const shreeMarutiReason = shipmentErr.response?.data?.message || shipmentErr.response?.data?.error;
       return res.status(500).json({
-        error: "Shipment creation failed",
+        error: shreeMarutiReason || "Shipment creation failed",
+        message: shreeMarutiReason || "Shipment creation failed",
         details: shipmentErr.response?.data || shipmentErr.message,
       });
     }
 
     if (response.status == 200) {
-      const result = response.data.data;
+      result = response.data.data;
+      balanceToBeDeducted = parseFloat(finalCharges);
 
       // Update order and wallet inside transaction
       currentOrder.status = "Booked";
@@ -316,7 +327,6 @@ const createOrder = async (req, res) => {
 
       await currentOrder.save({ session });
 
-      const balanceToBeDeducted = parseFloat(finalCharges);
       await currentWallet.updateOne(
         {
           $inc: { balance: -balanceToBeDeducted },
@@ -379,21 +389,87 @@ const createOrder = async (req, res) => {
           orderId: currentOrder.orderId,
         });
     } else {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate write here before the abort would self-deadlock on
+      // this transaction's own lock until MongoDB force-aborts it (60s).
       await session.abortTransaction();
       session.endSession();
+      const shreeMarutiFailReason = response.data?.message || response.data?.error;
       return res
         .status(400)
-        .json({ error: "Error creating shipment", details: response.data });
+        .json({
+          error: shreeMarutiFailReason || "Error creating shipment",
+          message: shreeMarutiFailReason || "Error creating shipment",
+          details: response.data,
+        });
     }
   } catch (error) {
-    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
-    await session.abortTransaction();
+    // abortTransaction() alone reverts the uncommitted "processing" write.
+    if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
+
+    if (result?.awbNumber) {
+      // Shree Maruti already confirmed a real, irreversible shipment before
+      // this failure hit (e.g. a write conflict during the commit) —
+      // recover by persisting directly instead of reporting failure and
+      // losing the AWB.
+      console.error(`[ShreeMaruti] AWB ${result.awbNumber} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`);
+      try {
+        await Promise.all([
+          Order.findByIdAndUpdate(id, {
+            $set: {
+              status: "Booked",
+              cancelledAtStage: null,
+              awb_number: result.awbNumber,
+              shipment_id: `${result.shipperOrderId}`,
+              provider: provider,
+              totalFreightCharges: parseFloat(finalCharges),
+              shipmentCreatedAt: new Date(),
+              courierServiceName,
+              estimatedDeliveryDate,
+              zone: zone?.zone,
+              priceBreakup,
+            },
+            $push: {
+              tracking: {
+                status: "Booked",
+                StatusLocation: currentOrder?.pickupAddress?.city || "N/A",
+                StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                Instructions: "Order booked successfully (recovered after a DB write conflict)",
+              },
+            },
+          }),
+          currentWallet ? Wallet.updateOne({ _id: currentWallet._id }, { $inc: { balance: -balanceToBeDeducted } }) : Promise.resolve(),
+          WalletTransaction.create([
+            {
+              walletId: currentWallet?._id,
+              channelOrderId: currentOrder?.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction: (walletBalanceSnapshot || 0) - balanceToBeDeducted,
+              date: new Date(),
+              awb_number: result.awbNumber || "",
+              description: "Freight Charges Applied",
+              priceBreakup,
+            },
+          ]),
+        ]);
+      } catch (saveErr) {
+        console.error(`[ShreeMaruti] CRITICAL: could not save recovered AWB ${result.awbNumber} for order ${id} — needs manual reconciliation:`, saveErr.message);
+      }
+      return res.status(201).json({
+        success: true,
+        message: "Shipment Created Successfully",
+        awb_number: result.awbNumber,
+        orderId: currentOrder?.orderId,
+      });
+    }
+
     console.error("Error:", error.response?.data || error.message);
+    const shreeMarutiCatchReason = error.response?.data?.message || error.message;
     return res
       .status(500)
-      .json({ error: "Internal Server Error", message: error.message });
+      .json({ error: shreeMarutiCatchReason || "Internal Server Error", message: shreeMarutiCatchReason || "Internal Server Error" });
   }
 };
 

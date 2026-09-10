@@ -58,12 +58,18 @@ const createNimbuspostShipment = async ({
   walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
+  // Hoisted so the catch block can tell whether NimbusPost already placed a
+  // real, irreversible shipment before whatever failed — if so, the wallet
+  // must still be charged and the AWB saved, never reported as a failure
+  // (the shipment is real either way — this mirrors the same recovery
+  // pattern already built and verified for BigShip).
+  let awb_number, balanceToBeDeducted, currentOrder, zone, estimateDate, resolvedProvider, shipment_id, label;
 
   try {
     session.startTransaction();
 
     // Step 1️⃣ Fetch order & mark as processing
-    const currentOrder = await Order.findOneAndUpdate(
+    currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
       { new: true, session }
@@ -77,7 +83,11 @@ const createNimbuspostShipment = async ({
 
     // Step 2️⃣ Wallet check
     if (!walletId) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // session.abortTransaction() alone reverts the "processing" write below
+      // (it was never committed) — a separate non-transactional update here
+      // would try to write the same document while this transaction still
+      // holds its lock, blocking until MongoDB force-aborts the stale
+      // transaction (default 60s) — a self-deadlock, not a network delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Wallet not found" };
@@ -85,20 +95,28 @@ const createNimbuspostShipment = async ({
 
     // Step 3️⃣ Wallet Balance Check
     const effectiveBalance = walletBalance - (walletHoldAmount || 0);
-    const balanceToBeDeducted = parseFloat(finalCharges) || 0;
+    balanceToBeDeducted = parseFloat(finalCharges) || 0;
     const totalBalance = effectiveBalance + (walletCreditLimit || 0);
 
     if (totalBalance < balanceToBeDeducted) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // session.abortTransaction() alone reverts the "processing" write below
+      // (it was never committed) — a separate non-transactional update here
+      // would try to write the same document while this transaction still
+      // holds its lock, blocking until MongoDB force-aborts the stale
+      // transaction (default 60s) — a self-deadlock, not a network delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Insufficient Wallet Balance" };
     }
 
     // Step 4️⃣ Get Zone
-    const zone = await getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode);
+    zone = await getZone(currentOrder.pickupAddress.pinCode, currentOrder.receiverAddress.pinCode);
     if (!zone) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // session.abortTransaction() alone reverts the "processing" write below
+      // (it was never committed) — a separate non-transactional update here
+      // would try to write the same document while this transaction still
+      // holds its lock, blocking until MongoDB force-aborts the stale
+      // transaction (default 60s) — a self-deadlock, not a network delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Pincode not serviceable" };
@@ -110,7 +128,7 @@ const createNimbuspostShipment = async ({
       serviceName: courierServiceName.trim(),
     });
 
-    let estimateDate = null;
+    estimateDate = null;
     if (eddData) {
       const deliveryDays = eddData.zoneRates?.[zone.zone] || eddData[zone.zone];
       if (typeof deliveryDays === "number") {
@@ -207,22 +225,29 @@ const createNimbuspostShipment = async ({
     console.log("NimbusPost Create Shipment Payload:", JSON.stringify(nimbusPayload, null, 2));
 
     // Step 9️⃣ Call Create Shipment API — new endpoint is POST /shipments (not /shipments/create)
+    const _createStart = Date.now();
     const createResponse = await axios.post(`${BASE_URL}/shipments`, nimbusPayload, {
       headers: postHeaders,
       timeout: 20000,
     });
+    console.log(`[NimbusPost timing] POST /shipments: ${Date.now() - _createStart}ms`);
 
     console.log("NimbusPost Create Response:", createResponse.data);
 
     if (!createResponse.data?.status || !createResponse.data.data?.awb_number) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // session.abortTransaction() alone reverts the "processing" write below
+      // (it was never committed) — a separate non-transactional update here
+      // would try to write the same document while this transaction still
+      // holds its lock, blocking until MongoDB force-aborts the stale
+      // transaction (default 60s) — a self-deadlock, not a network delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: createResponse.data?.message || "NimbusPost order creation failed" };
     }
 
-    const { awb_number, shipment_id, courier_name, label } = createResponse.data.data;
-    const resolvedProvider = identifyProviderFromService(courier_name || finalProvider);
+    let courier_name;
+    ({ awb_number, shipment_id, courier_name, label } = createResponse.data.data);
+    resolvedProvider = identifyProviderFromService(courier_name || finalProvider);
 
     // Step 1️⃣1️⃣ Update Order and Wallet details
     await Promise.all([
@@ -299,14 +324,82 @@ const createNimbuspostShipment = async ({
       labelUrl: label || null,
     };
   } catch (error) {
+    // abortTransaction() alone reverts the "processing" write — it was
+    // never committed — so no separate revert write is needed here either.
     if (session.inTransaction()) await session.abortTransaction();
-    await Order.findByIdAndUpdate(id, { status: "new" });
     session.endSession();
+
+    // NimbusPost already placed a real, irreversible shipment before
+    // whatever failed just now (e.g. a Mongo write conflict on the final
+    // Promise.all) — the abort above rolled back OUR OWN writes, but
+    // NimbusPost's side is real. Recover by saving the AWB and charging the
+    // wallet directly instead of reporting a failure that isn't true (same
+    // pattern already built and verified for BigShip).
+    if (awb_number) {
+      console.error(
+        `[NimbusPost] AWB ${awb_number} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`
+      );
+      try {
+        await Promise.all([
+          Order.findByIdAndUpdate(id, {
+            $set: {
+              status: "Booked",
+              awb_number,
+              shipment_id: shipment_id ? String(shipment_id) : undefined,
+              provider: resolvedProvider || "NimbusPost",
+              partner: "NimbusPost",
+              totalFreightCharges: balanceToBeDeducted,
+              courierServiceName,
+              shipmentCreatedAt: new Date(),
+              zone: zone?.zone,
+              estimatedDeliveryDate: estimateDate,
+              priceBreakup,
+              label: label || "",
+            },
+            $push: {
+              tracking: {
+                status: "Booked",
+                StatusLocation: currentOrder?.pickupAddress?.city || "N/A",
+                StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                Instructions: "Order booked successfully (recovered after a DB write conflict)",
+              },
+            },
+          }),
+          Wallet.updateOne({ _id: walletId }, { $inc: { balance: -balanceToBeDeducted } }),
+          WalletTransaction.create([
+            {
+              walletId,
+              channelOrderId: currentOrder?.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+              date: new Date(),
+              awb_number,
+              description: "Freight Charges Applied",
+              priceBreakup,
+            },
+          ]),
+        ]);
+      } catch (saveErr) {
+        console.error(
+          `[NimbusPost] CRITICAL: could not save recovered AWB ${awb_number} for order ${id} — needs manual reconciliation:`,
+          saveErr.message
+        );
+      }
+      return {
+        success: true,
+        message: "Shipment Created Successfully",
+        awb_number,
+        labelUrl: label || null,
+      };
+    }
+
     console.error("NimbusPost Shipment Creation Error:", error.response?.data || error.message);
+    const nimbusFailReason = error.response?.data?.message || error.message;
     return {
       success: false,
-      message: "Error creating shipment",
-      error: error.response?.data?.message || error.message,
+      message: nimbusFailReason || "Error creating shipment",
+      error: nimbusFailReason || "Error creating shipment",
     };
   }
 };

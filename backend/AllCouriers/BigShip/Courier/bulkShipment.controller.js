@@ -7,6 +7,7 @@ const { assignPickupManifest } = require("../../../Orders/scheduledPickup.contro
 const {
   getBigShipCourierOptions,
   placeBigShipOrder,
+  getRiskTypeId,
 } = require("./couriers.controller");
 
 // Bulk booking entry point — matches every other provider's bulk signature
@@ -53,7 +54,7 @@ const createShipmentFunctionBigShip = async (
     try {
       ({ bigshipOrderId, couriers: courierOptions } = await getBigShipCourierOptions(currentOrder, "domestic_b2c"));
     } catch (err) {
-      return { status: 400, error: err.message || "BigShip order/rate fetch failed" };
+      return { status: 400, error: err.response?.data?.message || err.message || "BigShip order/rate fetch failed" };
     }
 
     const matchedCourier = courierOptions.find((c) => c.courierName === courierServiceDoc.courier);
@@ -63,7 +64,12 @@ const createShipmentFunctionBigShip = async (
 
     let placeResult;
     try {
-      placeResult = await placeBigShipOrder(currentOrder, bigshipOrderId, matchedCourier.courierId);
+      // B2C has no rovType concept — defaults to Owner Risk, same as the
+      // single-order flow. This was previously omitted entirely, which (after
+      // placeBigShipOrder was fixed to always require riskTypeId) meant every
+      // bulk BigShip booking sent the literal string "undefined" and failed.
+      const riskTypeId = await getRiskTypeId("Owner Risk");
+      placeResult = await placeBigShipOrder(currentOrder, bigshipOrderId, matchedCourier.courierId, { riskTypeId });
     } catch (err) {
       return { status: 400, error: err.response?.data?.message || err.message || "BigShip order placement failed" };
     }
@@ -71,50 +77,77 @@ const createShipmentFunctionBigShip = async (
     const awb_number = String(placeResult.awb_assigned || placeResult.reference_number || "");
     if (!awb_number) return { status: 400, error: "BigShip did not return an AWB number." };
 
-    currentOrder.status = "Booked";
-    currentOrder.awb_number = awb_number;
-    currentOrder.provider = matchedCourier.courierName || "BigShip";
-    currentOrder.partner = "BigShip";
-    currentOrder.totalFreightCharges = charges;
-    currentOrder.courierServiceName = serviceDetails.name;
-    currentOrder.zone = zone.zone;
-    currentOrder.estimatedDeliveryDate = estimatedDeliveryDate || null;
-    currentOrder.priceBreakup = priceBreakup;
-    currentOrder.shipmentCreatedAt = new Date();
-    if (!currentOrder.otherDetails) currentOrder.otherDetails = {};
-    currentOrder.otherDetails.bigshipOrderId = bigshipOrderId;
-    currentOrder.tracking.push({
-      status: "Booked",
-      StatusLocation: currentOrder.pickupAddress.city || "N/A",
-      StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-      Instructions: "Order booked successfully",
-    });
+    // Point of no return: BigShip already placed a real, irreversible
+    // shipment above. From here, retry the persistence a few times on
+    // failure, but never touch BigShip again regardless of the outcome —
+    // same reasoning as the single-order flow's write-conflict fix.
+    let persisted = false;
+    for (let attempt = 1; attempt <= 3 && !persisted; attempt++) {
+      try {
+        await Order.findByIdAndUpdate(orderId, {
+          $set: {
+            status: "Booked",
+            awb_number,
+            provider: matchedCourier.courierName || "BigShip",
+            partner: "BigShip",
+            totalFreightCharges: charges,
+            courierServiceName: serviceDetails.name,
+            zone: zone.zone,
+            estimatedDeliveryDate: estimatedDeliveryDate || null,
+            priceBreakup,
+            shipmentCreatedAt: new Date(),
+            "otherDetails.bigshipOrderId": bigshipOrderId,
+          },
+          $push: {
+            tracking: {
+              status: "Booked",
+              StatusLocation: currentOrder.pickupAddress.city || "N/A",
+              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+              Instructions: "Order booked successfully",
+            },
+          },
+        });
 
-    await currentOrder.save();
-    process.nextTick(async () => {
-      try { await assignPickupManifest(currentOrder); } catch (e) {}
-    });
-
-    const updatedWallet = await Wallet.findOneAndUpdate(
-      { _id: walletId },
-      { $inc: { balance: -charges } },
-      { new: true }
-    );
-
-    if (updatedWallet) {
-      await WalletTransaction.create({
-        walletId: updatedWallet._id,
-        channelOrderId: currentOrder.orderId,
-        category: "debit",
-        amount: charges,
-        balanceAfterTransaction: updatedWallet.balance,
-        date: new Date(),
-        awb_number,
-        description: "Freight Charges Applied",
-        priceBreakup,
-      });
+        const updatedWallet = await Wallet.findOneAndUpdate(
+          { _id: walletId },
+          { $inc: { balance: -charges } },
+          { new: true }
+        );
+        if (updatedWallet) {
+          await WalletTransaction.create({
+            walletId: updatedWallet._id,
+            channelOrderId: currentOrder.orderId,
+            category: "debit",
+            amount: charges,
+            balanceAfterTransaction: updatedWallet.balance,
+            date: new Date(),
+            awb_number,
+            description: "Freight Charges Applied",
+            priceBreakup,
+          });
+        }
+        persisted = true;
+      } catch (saveErr) {
+        if (attempt === 3) {
+          console.error(
+            `[BigShip Bulk] CRITICAL: AWB ${awb_number} (BigShip order ${bigshipOrderId}, order ${orderId}) was placed but could not be saved after 3 attempts — needs manual reconciliation:`,
+            saveErr.message
+          );
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+        }
+      }
     }
 
+    process.nextTick(async () => {
+      try {
+        const fresh = await Order.findById(orderId);
+        if (fresh) await assignPickupManifest(fresh);
+      } catch (e) {}
+    });
+
+    // Success is reported based on BigShip's own confirmation, not on
+    // whether persistence fully succeeded — the shipment is real either way.
     return { status: 201, message: "Shipment Created Successfully", waybill: awb_number, orderId: currentOrder.orderId };
   } catch (error) {
     console.error("BigShip Bulk Shipment Error:", error.response?.data || error.message);

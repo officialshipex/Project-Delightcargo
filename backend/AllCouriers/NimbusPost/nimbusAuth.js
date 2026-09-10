@@ -46,11 +46,17 @@ const getNimbusToken = async () => {
 
     const { email, password } = await getNimbusCredentials();
 
+    // Temporary diagnostic — this cache is in-memory only (unlike BigShip's
+    // DB-backed one), so it's wiped on every server/nodemon restart. Timing
+    // this separately from the actual shipment call shows whether a slow
+    // response is re-login overhead or NimbusPost's own API being slow.
+    const _loginStart = Date.now();
     const response = await axios.post(
         `${BASE_URL}/users/login`,
         { email, password },
         { headers: { 'content-type': 'application/json' } }
     );
+    console.log(`[NimbusPost timing] POST /users/login: ${Date.now() - _loginStart}ms`);
 
     if (!response.data?.status) {
         throw new Error(`NimbusPost login failed: ${response.data?.message || 'Unknown error'}`);
@@ -99,11 +105,16 @@ const nimbusAxios = axios.create();
 
 nimbusAxios.interceptors.response.use(
     async (response) => {
-        // If NimbusPost returns status: false with an invalid/missing token message, retry the request
-        if (response.data && response.data.status === false && 
-            (response.data.message === 'Missing or invalid Token in request' || 
-             response.data.message === 'invalid token' ||
-             String(response.data.message).toLowerCase().includes('token'))) {
+        // If NimbusPost returns status: false with an invalid/missing token message, retry the request.
+        // Matches only the exact, observed auth-invalidation strings — a
+        // broader `.includes('token')` fallback used to sit here, which
+        // would silently trigger a full clear-cache + re-login + retry
+        // cycle (roughly doubling response time) for ANY business-logic
+        // error that happened to mention "token" anywhere in its message,
+        // not just genuine auth failures.
+        if (response.data && response.data.status === false &&
+            (response.data.message === 'Missing or invalid Token in request' ||
+             response.data.message === 'invalid token')) {
             
             console.warn('[NimbusPost] Invalid token detected in response. Clearing cache and retrying...');
             clearNimbusToken();

@@ -168,7 +168,13 @@ const createShipment = async (req, res) => {
         if (result.success) {
             return res.status(201).json({ message: "Shipment Created Successfully", data: result });
         } else {
-            return res.status(400).json({ error: result.message || "Error creating shipment", details: result });
+            // Send under both `error` (existing field, kept for anything
+            // already reading it) and `message` — the frontend's catch block
+            // reads error.response.data.message, which this response never
+            // had, so it always fell back to the generic "Something went
+            // wrong" instead of showing NimbusPost's real reason.
+            const failureMessage = result.message || "Error creating shipment";
+            return res.status(400).json({ error: failureMessage, message: failureMessage, details: result });
         }
     } catch (error) {
         console.error("Error in createShipment handler:", error);

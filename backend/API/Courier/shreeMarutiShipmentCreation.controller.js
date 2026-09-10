@@ -29,6 +29,7 @@ const createShreeMarutiShipment = async ({
   const MANIFEST_API = `${BASE_URL}/fulfillment/public/seller/order/create-manifest`;
   const token = await getToken();
   const session = await mongoose.startSession();
+  let currentOrder, zone, estimateDate = null, result, balanceToBeDeducted;
 
   try {
     session.startTransaction();
@@ -38,7 +39,7 @@ const createShreeMarutiShipment = async ({
     }).session(session);
 
     // Atomically lock the order
-    let currentOrder = await Order.findOneAndUpdate(
+    currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
       { new: true, session }
@@ -53,7 +54,7 @@ const createShreeMarutiShipment = async ({
       };
     }
 
-    const zone = await getZone(
+    zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
     );
@@ -64,7 +65,6 @@ const createShreeMarutiShipment = async ({
       serviceName: courierServiceName.trim(),
     });
 
-    let estimateDate = null;
     if (eddData) {
       let deliveryDays = null;
       if (
@@ -85,8 +85,8 @@ const createShreeMarutiShipment = async ({
     const effectiveBalance = walletBalance - walletHoldAmount;
     const balance = effectiveBalance + walletCreditLimit;
     if (balance < finalCharges) {
+      // abortTransaction() alone reverts the uncommitted "processing" write.
       await session.abortTransaction();
-      await Order.findByIdAndUpdate(id, { status: "new" });
       session.endSession();
       return { success: false, message: "Insufficient Wallet Balance" };
     }
@@ -177,7 +177,9 @@ const createShreeMarutiShipment = async ({
         },
       });
     } catch (shipmentErr) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate write here before the abort would self-deadlock on
+      // this transaction's own lock until MongoDB force-aborts it (60s).
       await session.abortTransaction();
       session.endSession();
       console.error(
@@ -192,9 +194,9 @@ const createShreeMarutiShipment = async ({
     }
 
     if (response.status === 200) {
-      const result = response.data.data;
+      result = response.data.data;
 
-      const balanceToBeDeducted = parseFloat(finalCharges);
+      balanceToBeDeducted = parseFloat(finalCharges);
 
       currentOrder.status = "Booked";
       currentOrder.cancelledAtStage = null;
@@ -280,7 +282,7 @@ const createShreeMarutiShipment = async ({
         awb_number: result.awbNumber,
       };
     } else {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // See earlier comment — abortTransaction() alone reverts the status.
       await session.abortTransaction();
       session.endSession();
       return {
@@ -290,14 +292,72 @@ const createShreeMarutiShipment = async ({
       };
     }
   } catch (error) {
-    await Order.findByIdAndUpdate(id, { status: "new" });
-    await session.abortTransaction();
+    // See earlier comment — abortTransaction() alone reverts the status.
+    if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
+
+    if (result?.awbNumber) {
+      // Shree Maruti already confirmed a real, irreversible shipment before
+      // this failure hit (e.g. a write conflict during the commit) —
+      // recover by persisting directly instead of reporting failure and
+      // losing the AWB.
+      console.error(`[ShreeMaruti] AWB ${result.awbNumber} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`);
+      try {
+        await Promise.all([
+          Order.findByIdAndUpdate(id, {
+            $set: {
+              status: "Booked",
+              cancelledAtStage: null,
+              awb_number: result.awbNumber,
+              shipment_id: result.shipperOrderId,
+              provider: provider,
+              totalFreightCharges: finalCharges,
+              shipmentCreatedAt: new Date(),
+              courierServiceName,
+              estimatedDeliveryDate: estimateDate,
+              zone: zone?.zone,
+              priceBreakup,
+            },
+            $push: {
+              tracking: {
+                status: "Booked",
+                StatusLocation: currentOrder?.pickupAddress?.city || "N/A",
+                StatusDateTime: new Date(),
+                Instructions: "Order booked successfully (recovered after a DB write conflict)",
+              },
+            },
+          }),
+          Wallet.updateOne({ _id: walletId }, { $inc: { balance: -balanceToBeDeducted } }),
+          WalletTransaction.create([
+            {
+              walletId: walletId,
+              channelOrderId: currentOrder?.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+              date: new Date(),
+              awb_number: result.awbNumber || "",
+              description: `Freight Charges Applied`,
+              priceBreakup,
+            },
+          ]),
+        ]);
+      } catch (saveErr) {
+        console.error(`[ShreeMaruti] CRITICAL: could not save recovered AWB ${result.awbNumber} for order ${id} — needs manual reconciliation:`, saveErr.message);
+      }
+      return {
+        success: true,
+        message: "Shipment Created Successfully",
+        awb_number: result.awbNumber,
+      };
+    }
+
     console.error("Error:", error.response?.data || error.message);
+    const shreeMarutiReason = error.response?.data?.message || error.message;
     return {
       success: false,
-      message: "Internal Server Error",
-      error: error.message,
+      message: shreeMarutiReason || "Internal Server Error",
+      error: shreeMarutiReason || "Internal Server Error",
     };
   }
 };

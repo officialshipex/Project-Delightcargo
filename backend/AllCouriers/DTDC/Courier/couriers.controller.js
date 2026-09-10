@@ -24,18 +24,18 @@ const X_ACCESS_TOKEN = process.env.DTDC_X_ACCESS_TOKEN;
 // Create a new shipment
 const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
+  const {
+    id,
+    provider,
+    finalCharges,
+    courierServiceName,
+    courier,
+    estimatedDeliveryDate,
+    priceBreakup
+  } = req.body;
+  let currentOrder, currentWallet, zone, result, balanceToBeDeducted;
 
   try {
-    const {
-      id,
-      provider,
-      finalCharges,
-      courierServiceName,
-      courier,
-      estimatedDeliveryDate,
-      priceBreakup
-    } = req.body;
-
     if (!courier) {
       return res.status(400).json({
         success: false,
@@ -46,7 +46,7 @@ const createOrder = async (req, res) => {
     session.startTransaction();
 
     // --- Fetch & lock Order atomically ---
-    const currentOrder = await Order.findOneAndUpdate(
+    currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
       { new: true, session }
@@ -62,7 +62,8 @@ const createOrder = async (req, res) => {
     }
 
     // --- Parallel fetch zone and user ---
-    const [zone, user] = await Promise.all([
+    let user;
+    [zone, user] = await Promise.all([
       getZone(
         currentOrder.pickupAddress.pinCode,
         currentOrder.receiverAddress.pinCode
@@ -71,14 +72,20 @@ const createOrder = async (req, res) => {
     ]);
 
     if (!zone) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ message: "Pincode not serviceable" });
     }
 
     if (!user) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return res
@@ -86,9 +93,12 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
-    const currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
+    currentWallet = await Wallet.findById(user.Wallet).select("balance holdAmount creditLimit").session(session);
     if (!currentWallet) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return res
@@ -101,7 +111,10 @@ const createOrder = async (req, res) => {
       currentWallet.balance - (currentWallet.holdAmount || 0);
     const balance = effectiveBalance + currentWallet.creditLimit;
     if (balance < finalCharges) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return res
@@ -203,7 +216,10 @@ const createOrder = async (req, res) => {
         }
       );
     } catch (shipmentErr) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       console.error(
@@ -217,10 +233,13 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const result = response?.data?.data?.[0];
+    result = response?.data?.data?.[0];
     console.log("reslt", result)
     if (!result?.success) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -229,36 +248,62 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // --- Update Order inside transaction ---
-    const balanceToBeDeducted = parseFloat(finalCharges) || 0;
+    // --- Update Order + Wallet atomically ---
+    // (previously the wallet debit ran via process.nextTick AFTER commit,
+    // only logging on failure — so a wallet-update failure left the order
+    // committed as "Booked" with the wallet never charged, a real balance
+    // mismatch. Now both land in the same transaction so they always
+    // succeed or fail together.)
+    balanceToBeDeducted = parseFloat(finalCharges) || 0;
 
-    await Order.findByIdAndUpdate(
-      id,
-      {
-        $set: {
-          status: "Booked",
-          cancelledAtStage: null,
-          awb_number: result.reference_number,
-          shipment_id: result.customer_reference_number,
-          provider,
-          totalFreightCharges: balanceToBeDeducted,
-          courierServiceName,
-          shipmentCreatedAt: new Date(),
-          zone: zone.zone,
-          estimatedDeliveryDate: estimatedDeliveryDate || "",
-          priceBreakup
-        },
-        $push: {
-          tracking: {
+    await Promise.all([
+      Order.findByIdAndUpdate(
+        id,
+        {
+          $set: {
             status: "Booked",
-            StatusLocation: currentOrder.pickupAddress?.city || "N/A",
-            StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
-            Instructions: "Order booked successfully",
+            cancelledAtStage: null,
+            awb_number: result.reference_number,
+            shipment_id: result.customer_reference_number,
+            provider,
+            totalFreightCharges: balanceToBeDeducted,
+            courierServiceName,
+            shipmentCreatedAt: new Date(),
+            zone: zone.zone,
+            estimatedDeliveryDate: estimatedDeliveryDate || "",
+            priceBreakup
+          },
+          $push: {
+            tracking: {
+              status: "Booked",
+              StatusLocation: currentOrder.pickupAddress?.city || "N/A",
+              StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+              Instructions: "Order booked successfully",
+            },
           },
         },
-      },
-      { session, new: true }
-    );
+        { session, new: true }
+      ),
+      Wallet.updateOne(
+        { _id: currentWallet._id },
+        { $inc: { balance: -balanceToBeDeducted } },
+        { session }
+      ),
+      WalletTransaction.create(
+        [{
+          walletId: currentWallet._id,
+          channelOrderId: currentOrder.orderId || null,
+          category: "debit",
+          amount: balanceToBeDeducted,
+          balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
+          date: new Date(),
+          awb_number: result.reference_number || "",
+          description: "Freight Charges Applied",
+          priceBreakup
+        }],
+        { session }
+      ),
+    ]);
 
     await session.commitTransaction();
     session.endSession();
@@ -271,43 +316,74 @@ const createOrder = async (req, res) => {
       console.error("[Pickup] assignPickupManifest failed:", pErr.message);
     }
 
-    // --- Early response ---
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Shipment Created Successfully",
       awb_number: result.reference_number,
       orderId: currentOrder.orderId
     });
-
-    // --- Wallet update (background, safe) ---
-    process.nextTick(async () => {
-      try {
-        await Wallet.findOneAndUpdate(
-          { _id: user.Wallet },
-          {
-            $inc: { balance: -balanceToBeDeducted },
-          }
-        );
-        // 🔁 Dual-write: mirror to WalletTransaction for future migration
-        await WalletTransaction.create({
-          walletId: user.Wallet,
-          channelOrderId: currentOrder.orderId || null,
-          category: "debit",
-          amount: balanceToBeDeducted,
-          balanceAfterTransaction: currentWallet.balance - balanceToBeDeducted,
-          date: new Date(),
-          awb_number: result.reference_number || "",
-          description: "Freight Charges Applied",
-          priceBreakup
-        });
-      } catch (err) {
-        console.error("Wallet update error:", err.message);
-      }
-    });
   } catch (error) {
-    await Order.findByIdAndUpdate(req.body.id, { status: "new" });
-    await session.abortTransaction();
+    // abortTransaction() alone reverts the uncommitted "processing" write.
+    if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
+
+    if (result?.success && result?.reference_number) {
+      // DTDC already confirmed a real, irreversible shipment before this
+      // failure hit (e.g. a write conflict during the commit) — recover by
+      // persisting directly instead of reporting failure and losing the AWB.
+      console.error(`[DTDC] AWB ${result.reference_number} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`);
+      try {
+        const deduction = balanceToBeDeducted != null ? balanceToBeDeducted : (parseFloat(finalCharges) || 0);
+        await Promise.all([
+          Order.findByIdAndUpdate(id, {
+            $set: {
+              status: "Booked",
+              cancelledAtStage: null,
+              awb_number: result.reference_number,
+              shipment_id: result.customer_reference_number,
+              provider,
+              totalFreightCharges: deduction,
+              courierServiceName,
+              shipmentCreatedAt: new Date(),
+              zone: zone?.zone,
+              estimatedDeliveryDate: estimatedDeliveryDate || "",
+              priceBreakup,
+            },
+            $push: {
+              tracking: {
+                status: "Booked",
+                StatusLocation: currentOrder?.pickupAddress?.city || "N/A",
+                StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+                Instructions: "Order booked successfully (recovered after a DB write conflict)",
+              },
+            },
+          }),
+          currentWallet ? Wallet.updateOne({ _id: currentWallet._id }, { $inc: { balance: -deduction } }) : Promise.resolve(),
+          WalletTransaction.create([
+            {
+              walletId: currentWallet?._id,
+              channelOrderId: currentOrder?.orderId || null,
+              category: "debit",
+              amount: deduction,
+              balanceAfterTransaction: (currentWallet?.balance || 0) - deduction,
+              date: new Date(),
+              awb_number: result.reference_number || "",
+              description: "Freight Charges Applied",
+              priceBreakup,
+            },
+          ]),
+        ]);
+      } catch (saveErr) {
+        console.error(`[DTDC] CRITICAL: could not save recovered AWB ${result.reference_number} for order ${id} — needs manual reconciliation:`, saveErr.message);
+      }
+      return res.status(200).json({
+        success: true,
+        message: "Shipment Created Successfully",
+        awb_number: result.reference_number,
+        orderId: currentOrder?.orderId,
+      });
+    }
+
     console.error(
       "❌ Error creating shipment:",
       error.response?.data || error.message

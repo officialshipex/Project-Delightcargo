@@ -65,6 +65,19 @@ const checkPincodeServiceability = async (pincode, courierName) => {
 const createOrder = async (req, res) => {
   const MAX_RETRIES = 1;
   let attempt = 0;
+  const {
+    id,
+    provider,
+    courierName,
+    finalCharges,
+    courierServiceName,
+    estimatedDeliveryDate,
+    priceBreakup
+  } = req.body;
+  // Hoisted across retry iterations: once sfxData carries a real AWB, Shadowfax
+  // has already booked an irreversible shipment — the retry loop below must
+  // never call Shadowfax again after that, only recover the local DB state.
+  let currentOrder, currentWallet, balanceToBeDeducted, sfxData, sender, walletBalanceSnapshot;
 
   while (attempt < MAX_RETRIES) {
     const session = await mongoose.startSession();
@@ -72,18 +85,9 @@ const createOrder = async (req, res) => {
 
     try {
       attempt++;
-      const {
-        id,
-        provider,
-        courierName,
-        finalCharges,
-        courierServiceName,
-        estimatedDeliveryDate,
-        priceBreakup
-      } = req.body;
 
       // ── Fetch order & Lock ────────────────────────────────────────────────
-      const currentOrder = await Order.findOneAndUpdate(
+      currentOrder = await Order.findOneAndUpdate(
         { _id: id, status: "new" },
         { $set: { status: "processing" } },
         { new: true, session }
@@ -104,10 +108,14 @@ const createOrder = async (req, res) => {
       const userDoc = await User.findById(currentOrder.userId).session(session);
       if (!userDoc) throw new Error("User linked with order not found.");
 
-      const currentWallet = await Wallet.findById(userDoc.Wallet).select("balance holdAmount creditLimit").session(session);
+      currentWallet = await Wallet.findById(userDoc.Wallet).select("balance holdAmount creditLimit").session(session);
       if (!currentWallet) throw new Error("Wallet linked with user not found.");
+      // Snapshot the pre-deduction balance for the recovery path's audit
+      // record — currentWallet.balance itself is never mutated in-memory
+      // here (only via $inc on the DB side), so this is purely defensive.
+      walletBalanceSnapshot = currentWallet.balance || 0;
 
-      const balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
+      balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
 
       const totalBalance = (currentWallet.balance || 0) + (currentWallet.creditLimit || 0);
       const effectiveBalance = totalBalance - (currentWallet.holdAmount || 0);
@@ -122,7 +130,7 @@ const createOrder = async (req, res) => {
       }
 
       // ── Build Shadowfax payload ───────────────────────────────────────────
-      const sender = currentOrder.pickupAddress || {};
+      sender = currentOrder.pickupAddress || {};
       const receiver = currentOrder.receiverAddress || {};
       const product = currentOrder.productDetails?.[0] || {};
 
@@ -192,7 +200,7 @@ const createOrder = async (req, res) => {
         { headers, timeout: 30000 }
       );
 
-      const sfxData = sfxResponse.data;
+      sfxData = sfxResponse.data;
 
       if (sfxData.message !== "Success" || !sfxData.data?.awb_number) {
         const errorMsg =
@@ -265,8 +273,67 @@ const createOrder = async (req, res) => {
         order: sfxData.data,
       });
     } catch (error) {
-      await session.abortTransaction();
+      if (session.inTransaction()) await session.abortTransaction();
       session.endSession();
+
+      const recoveredAwb = sfxData?.data?.awb_number;
+      if (recoveredAwb) {
+        // Shadowfax already confirmed a real, irreversible shipment before
+        // this failure hit — never retry (that would book a second,
+        // duplicate shipment with Shadowfax). Recover by persisting
+        // directly instead of reporting failure and losing the AWB.
+        console.error(`[Shadowfax] AWB ${recoveredAwb} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`);
+        try {
+          const writes = [
+            Order.findByIdAndUpdate(id, {
+              $set: {
+                status: "Booked",
+                awb_number: recoveredAwb,
+                provider: "Shadowfax",
+                courierName: courierName || provider || "Shadowfax",
+                totalFreightCharges: balanceToBeDeducted,
+                courierServiceName,
+                estimatedDeliveryDate,
+                priceBreakup,
+                shipmentCreatedAt: new Date(),
+              },
+              $push: {
+                tracking: {
+                  status: "Booked",
+                  StatusLocation: sender?.city || "",
+                  Instructions: "Order booked successfully (recovered after a DB write conflict)",
+                  StatusDateTime: new Date(),
+                },
+              },
+            }),
+          ];
+          if (balanceToBeDeducted > 0 && currentWallet) {
+            writes.push(
+              Wallet.updateOne({ _id: currentWallet._id }, { $inc: { balance: -balanceToBeDeducted } }),
+              WalletTransaction.create([{
+                walletId: currentWallet._id,
+                channelOrderId: currentOrder?.orderId || null,
+                category: "debit",
+                amount: balanceToBeDeducted,
+                balanceAfterTransaction: (walletBalanceSnapshot || 0) - balanceToBeDeducted,
+                date: new Date(),
+                awb_number: recoveredAwb,
+                description: "Freight Charges Applied",
+                priceBreakup,
+              }])
+            );
+          }
+          await Promise.all(writes);
+        } catch (saveErr) {
+          console.error(`[Shadowfax] CRITICAL: could not save recovered AWB ${recoveredAwb} for order ${id} — needs manual reconciliation:`, saveErr.message);
+        }
+        return res.status(200).json({
+          success: true,
+          message: "Order created successfully",
+          awb_number: recoveredAwb,
+          order: sfxData.data,
+        });
+      }
 
       if (
         error.errorLabels?.includes("TransientTransactionError") &&

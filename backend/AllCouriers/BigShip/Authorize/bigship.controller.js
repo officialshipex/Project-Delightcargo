@@ -8,6 +8,21 @@ const PickupAddress = require("../../../models/pickupAddress.model");
 const BASE_URL = process.env.BIGSHIP_URL || "https://api.bigship.direct";
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before expiry
 
+// Temporary diagnostic — BigShip's 3-step booking flow makes several
+// mandatory sequential HTTP calls that can't be parallelized (each needs the
+// previous step's output), and their own response times have been slow
+// during testing. This logs exactly where the time goes on the next real
+// booking, instead of guessing. Safe to remove once the real bottleneck is
+// identified from a live run.
+const timedBigShipCall = async (label, fn) => {
+  const start = Date.now();
+  try {
+    return await fn();
+  } finally {
+    console.log(`[BigShip timing] ${label}: ${Date.now() - start}ms`);
+  }
+};
+
 const getBigShipCredentials = async () => {
   const courier =
     (await AllCourier.findOne({ courierProvider: "BigShip", status: "Enable" })) ||
@@ -54,7 +69,7 @@ const getBigShipToken = async () => {
     return cachedToken;
   }
 
-  const data = await loginBigShip({ username, password, accessKey });
+  const data = await timedBigShipCall("login (token refresh)", () => loginBigShip({ username, password, accessKey }));
 
   if (courier) {
     await AllCourier.updateOne(
@@ -111,17 +126,19 @@ const saveBigShip = async (req, res) => {
 
 const bigShipRequest = async (method, path, { data, params } = {}) => {
   const token = await getBigShipToken();
-  return axios({
-    method,
-    url: `${BASE_URL}${path}`,
-    data,
-    params,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    timeout: 15000,
-  });
+  return timedBigShipCall(`${method.toUpperCase()} ${path}`, () =>
+    axios({
+      method,
+      url: `${BASE_URL}${path}`,
+      data,
+      params,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      timeout: 15000,
+    })
+  );
 };
 
 // Delightcargo pickup addresses aren't pre-registered anywhere else (Shiprocket
@@ -163,22 +180,48 @@ const getOrCreateBigShipWarehouse = async (pickupAddressDoc) => {
     console.error("BigShip: warehouse list lookup failed, will attempt create:", error.response?.data || error.message);
   }
 
-  const createRes = await bigShipRequest("post", "/api/outbound/save-warehouse-data", {
-    data: {
-      segment_type: "local",
-      warehouseContactPerson: addr.contactName,
-      warehouseAddressPhone: addr.phoneNumber,
-      warehouseCountry: "India",
-      warehouseState: addr.state,
-      warehouseCity: addr.city,
-      warehousePinCode: addr.pinCode,
-      warehouseAddressLine1: addr.address,
-      // BigShip requires the landmark field to be 3+ words — Delightcargo's
-      // address model has no dedicated landmark field, so build one that
-      // reliably clears that minimum instead of passing a single city name.
-      warehouseAddressLandMark: `Near ${addr.city}, ${addr.state}`,
-    },
-  });
+  let createRes;
+  try {
+    createRes = await bigShipRequest("post", "/api/outbound/save-warehouse-data", {
+      data: {
+        segment_type: "local",
+        // Not in the doc's documented field list for Save Warehouse, but the
+        // live API rejects the request without it ("The warehouse name field
+        // is required.") — confirmed via a live 422 response, not guessed.
+        // A second live 422 then confirmed it must be letters/spaces only (no
+        // digits/underscores), so it can't be made unique with a timestamp —
+        // just the sanitized contact name, matching what a human would type.
+        warehouseName: (addr.contactName || "Warehouse").replace(/[^a-zA-Z\s]/g, "").trim() || "Warehouse",
+        warehouseContactPerson: addr.contactName,
+        warehouseAddressPhone: addr.phoneNumber,
+        warehouseCountry: "India",
+        warehouseState: addr.state,
+        warehouseCity: addr.city,
+        warehousePinCode: addr.pinCode,
+        warehouseAddressLine1: addr.address,
+        // BigShip requires the landmark field to be 3+ words — Delightcargo's
+        // address model has no dedicated landmark field, so build one that
+        // reliably clears that minimum instead of passing a single city name.
+        warehouseAddressLandMark: `Near ${addr.city}, ${addr.state}`,
+      },
+    });
+  } catch (err) {
+    // BigShip's warehouseCity validates against district-level names, not
+    // town/post-office names (confirmed live: "Baliapal" rejected, the
+    // district "Balasore" accepted, for the same pincode) — our pincode data
+    // is town-level, so this can legitimately happen for any pickup address
+    // outside a district headquarters. Only a handful of addresses are ever
+    // used as pickup points, so surface exactly which field to fix rather
+    // than a generic "invalid city" message.
+    if (err.response?.data?.errors?.warehouseCity) {
+      throw new Error(
+        `BigShip rejected the pickup address city "${addr.city}" (PIN ${addr.pinCode}, ${addr.state}). ` +
+        `BigShip expects the district name here, not the town/village name — edit this pickup address's ` +
+        `city field to its district (e.g. lookup "${addr.pinCode} district" if unsure) and try again.`
+      );
+    }
+    throw new Error(err.response?.data?.message || err.message || "Failed to register BigShip warehouse");
+  }
 
   if (!createRes.data?.status || !createRes.data?.data?.warehouseId) {
     throw new Error(createRes.data?.message || "Failed to register BigShip warehouse");
@@ -198,4 +241,5 @@ module.exports = {
   getBigShipCredentials,
   bigShipRequest,
   getOrCreateBigShipWarehouse,
+  timedBigShipCall,
 };

@@ -26,12 +26,13 @@ const createShadowfaxShipment = async ({
   walletCreditLimit,
 }) => {
   const session = await mongoose.startSession();
+  let currentOrder, zone, estimateDate = null, balanceToBeDeducted, sfxData, sender;
 
   try {
     session.startTransaction();
 
     // Step 1️⃣ Fetch order & mark as processing
-    const currentOrder = await Order.findOneAndUpdate(
+    currentOrder = await Order.findOneAndUpdate(
       { _id: id, status: "new" },
       { $set: { status: "processing" } },
       { new: true, session }
@@ -48,7 +49,10 @@ const createShadowfaxShipment = async ({
 
     // Step 2️⃣ Wallet check
     if (!walletId) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Wallet not found" };
@@ -57,20 +61,26 @@ const createShadowfaxShipment = async ({
     // Fetch API Key
     const apiKey = await getShadowfaxToken(courierName || provider);
     if (!apiKey) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Shadowfax API Token not found" };
     }
 
     // Step 3️⃣ Get Zone
-    const zone = await getZone(
+    zone = await getZone(
       currentOrder.pickupAddress.pinCode,
       currentOrder.receiverAddress.pinCode
     );
 
     if (!zone) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Pincode not serviceable (Zone not found)" };
@@ -82,7 +92,6 @@ const createShadowfaxShipment = async ({
       serviceName: courierServiceName.trim(),
     });
 
-    let estimateDate = null;
     if (eddData) {
       let deliveryDays = null;
       if (eddData.zoneRates && typeof eddData.zoneRates[zone.zone] === "number") {
@@ -99,18 +108,21 @@ const createShadowfaxShipment = async ({
     // Step 5️⃣ Wallet check
     const holdAmount = walletHoldAmount || 0;
     const effectiveBalance = walletBalance - holdAmount;
-    const balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
+    balanceToBeDeducted = finalCharges === "N/A" ? 0 : parseFloat(finalCharges);
     const balance = effectiveBalance + (walletCreditLimit || 0);
 
     if (balance < balanceToBeDeducted) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return { success: false, message: "Insufficient Wallet Balance" };
     }
 
     // Step 6️⃣ Prepare Shadowfax Payload
-    const sender = currentOrder.pickupAddress || {};
+    sender = currentOrder.pickupAddress || {};
     const receiver = currentOrder.receiverAddress || {};
     const product = currentOrder.productDetails?.[0] || {}; // Simplified for unified API
 
@@ -173,10 +185,13 @@ const createShadowfaxShipment = async ({
       timeout: 30000,
     });
 
-    const sfxData = response.data;
+    sfxData = response.data;
 
     if (sfxData.message !== "Success" || !sfxData.data?.awb_number) {
-      await Order.findByIdAndUpdate(id, { status: "new" });
+      // abortTransaction() alone reverts the uncommitted "processing" write
+      // — a separate non-transactional write to the same document here
+      // would block on this transaction's own lock until MongoDB
+      // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
       return {
@@ -257,13 +272,73 @@ const createShadowfaxShipment = async ({
       orderId: currentOrder.orderId,
     };
   } catch (error) {
-    await Order.findByIdAndUpdate(id, { status: "new" });
+    // abortTransaction() alone reverts the uncommitted "processing" write.
     if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
+
+    const recoveredAwb = sfxData?.data?.awb_number;
+    if (recoveredAwb) {
+      // Shadowfax already confirmed a real, irreversible shipment before
+      // this failure hit (e.g. a write conflict during the commit) —
+      // recover by persisting directly instead of reporting failure and
+      // losing the AWB.
+      console.error(`[Shadowfax] AWB ${recoveredAwb} was already placed when this failed (${error.message}). Recovering instead of reporting failure.`);
+      try {
+        await Promise.all([
+          Order.findByIdAndUpdate(id, {
+            $set: {
+              status: "Booked",
+              awb_number: recoveredAwb,
+              provider: "Shadowfax",
+              courierName: courierName || "Shadowfax",
+              totalFreightCharges: balanceToBeDeducted,
+              courierServiceName,
+              shipmentCreatedAt: new Date(),
+              zone: zone?.zone,
+              estimatedDeliveryDate: estimateDate,
+              priceBreakup,
+            },
+            $push: {
+              tracking: {
+                status: "Booked",
+                StatusLocation: sender?.city || "N/A",
+                StatusDateTime: new Date(),
+                Instructions: "Order booked successfully (recovered after a DB write conflict)",
+              },
+            },
+          }),
+          Wallet.updateOne({ _id: walletId }, { $inc: { balance: -balanceToBeDeducted } }),
+          WalletTransaction.create([
+            {
+              walletId: walletId,
+              channelOrderId: currentOrder?.orderId || null,
+              category: "debit",
+              amount: balanceToBeDeducted,
+              balanceAfterTransaction: walletBalance - balanceToBeDeducted,
+              date: new Date(),
+              awb_number: recoveredAwb,
+              description: "Freight Charges Applied",
+              priceBreakup,
+            },
+          ]),
+        ]);
+      } catch (saveErr) {
+        console.error(`[Shadowfax] CRITICAL: could not save recovered AWB ${recoveredAwb} for order ${id} — needs manual reconciliation:`, saveErr.message);
+      }
+      return {
+        success: true,
+        message: "Shipment Created Successfully",
+        awb_number: recoveredAwb,
+        orderId: currentOrder?.orderId,
+      };
+    }
+
+    console.error("Shadowfax Shipment Creation Error:", error.response?.data || error.message);
+    const shadowfaxFailReason = error.response?.data?.message || error.message;
     return {
       success: false,
-      message: "Error creating Shadowfax shipment",
-      error: error.message,
+      message: shadowfaxFailReason || "Error creating Shadowfax shipment",
+      error: shadowfaxFailReason || "Error creating Shadowfax shipment",
     };
   }
 };
