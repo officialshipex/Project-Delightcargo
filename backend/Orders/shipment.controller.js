@@ -99,7 +99,10 @@ const checkServiceabilityAll = async (service, id, pincode) => {
         height: currentOrder.packageDetails.volumetricWeight?.height || 0,
       };
       // console.log("payload",payload)
-      return await getServiceablePincodesData(service.courier, payload);
+      return await getServiceablePincodesData(
+        { courierId: service.courier_id, courierName: service.courier },
+        payload
+      );
     }
 
     // ----------------------- XpressBees -----------------------

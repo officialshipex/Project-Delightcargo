@@ -109,10 +109,97 @@ const getServiceablePincodes = async (req, res) => {
     });
 };
 
-// NimbusPost is a courier aggregator/partner — always serviceable
+// A single "Ship Now" click checks serviceability once per enabled NimbusPost
+// courier variant (24 at last count) — all of them share the same
+// origin/destination/weight/dims, so without this cache each click would
+// fire ~24 duplicate calls to NimbusPost's serviceability endpoint for the
+// exact same route. Short TTL: just long enough to cover one checkout
+// request's fan-out, not so long it serves a stale route list across
+// genuinely different orders.
+const _serviceabilityCache = new Map();
+const SERVICEABILITY_CACHE_TTL_MS = 20 * 1000;
+
+const fetchNimbusServiceability = async (payload) => {
+    const cacheKey = JSON.stringify({
+        origin: String(payload.origin),
+        destination: String(payload.destination),
+        payment_type: payload.payment_type,
+        order_amount: payload.order_amount,
+        weight: payload.weight,
+        length: payload.length,
+        breadth: payload.breadth,
+        height: payload.height,
+    });
+
+    const cached = _serviceabilityCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+        return cached.couriers;
+    }
+
+    const headers = await getNimbusJsonHeaders();
+    const response = await axios.post(`${BASE_URL}/courier/serviceability`, {
+        origin: String(payload.origin),
+        destination: String(payload.destination),
+        payment_type: payload.payment_type,
+        order_amount: payload.order_amount,
+        weight: payload.weight,
+        length: payload.length,
+        breadth: payload.breadth,
+        height: payload.height,
+    }, { headers });
+// console.log("serviceabilty",response.data)
+    if (!response.data?.status || !Array.isArray(response.data.data)) {
+        throw new Error(response.data?.message || "NimbusPost serviceability check failed");
+    }
+
+    const couriers = response.data.data;
+    _serviceabilityCache.set(cacheKey, { couriers, expiresAt: Date.now() + SERVICEABILITY_CACHE_TTL_MS });
+    return couriers;
+};
+
+// Real serviceability check — calls NimbusPost's /courier/serviceability
+// endpoint (returns the list of couriers NimbusPost actually offers for this
+// specific route/weight/payment combination) and checks whether the courier
+// this rate-card entry represents is in that list. `service` identifies
+// which courier: prefer matching by courier_id (exact), fall back to
+// matching by the courier name string (for the couple of legacy records
+// that never got a courier_id backfilled).
 const getServiceablePincodesData = async (service, payload) => {
-    // console.log("Serviceable")
-    return { success: true, cod: true, prepaid: true };
+    const courierId = typeof service === "object" ? service.courierId : null;
+    const courierName = typeof service === "object" ? service.courierName : service;
+
+    try {
+        const couriers = await fetchNimbusServiceability(payload);
+
+        const match = couriers.find((c) => {
+            if (courierId && String(c.id) === String(courierId)) return true;
+            if (courierName && c.name && c.name.toLowerCase() === String(courierName).toLowerCase()) return true;
+            return false;
+        });
+
+        if (!match) {
+            return {
+                success: false,
+                message: `${courierName || "This courier"} is not serviceable for the selected pincode`,
+            };
+        }
+
+        return {
+            success: true,
+            cod: true,
+            prepaid: true,
+            freight_charges: match.freight_charges,
+            cod_charges: match.cod_charges,
+            total_charges: match.total_charges,
+        };
+    } catch (error) {
+        if (error.response?.status === 401) clearNimbusToken();
+        console.error('NimbusPost serviceability check failed:', error.response?.data || error.message);
+        return {
+            success: false,
+            message: error.response?.data?.message || error.message || "Serviceability check failed",
+        };
+    }
 };
 
 // ─── Shipment Operations ──────────────────────────────────────────────────────
