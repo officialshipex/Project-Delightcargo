@@ -146,7 +146,11 @@ const createAmazonShipment = async ({
     );
 
     const result = response.data?.payload;
-    if (!result) throw new Error("Error creating shipment");
+    if (!result) {
+      const amazonErrors = response.data?.errors;
+      const amazonReason = Array.isArray(amazonErrors) ? amazonErrors.map((e) => e.message).join("; ") : null;
+      throw new Error(amazonReason || "Error creating shipment");
+    }
 
     // ✅ Upload label to S3
     const base64Label =
@@ -250,10 +254,12 @@ const createAmazonShipment = async ({
     await session.abortTransaction();
     session.endSession();
 
-    console.error("❌ Amazon Shipment Error:", error.message);
+    console.error("❌ Amazon Shipment Error:", error.response?.data || error.message);
+    const amazonErrors = error.response?.data?.errors;
+    const amazonReason = Array.isArray(amazonErrors) ? amazonErrors.map((e) => e.message).join("; ") : null;
     return {
       success: false,
-      message: error.message,
+      message: amazonReason || error.message,
     };
   }
 };

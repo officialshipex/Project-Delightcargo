@@ -354,11 +354,10 @@ const createDTDCShipment = async ({
       };
     }
 
-    console.error("❌ Error creating DTDC shipment:", error.message);
+    console.error("❌ Error creating DTDC shipment:", error.response?.data || error.message);
     return {
       success: false,
-      message: "Failed to create shipment",
-      error: error.message,
+      message: error.response?.data?.message || error.message || "Failed to create shipment",
     };
   }
 };

@@ -188,8 +188,7 @@ const createShreeMarutiShipment = async ({
       );
       return {
         success: false,
-        message: "Shipment creation failed",
-        details: shipmentErr.response?.data || shipmentErr.message,
+        message: shipmentErr.response?.data?.message || shipmentErr.message || "Shipment creation failed",
       };
     }
 
@@ -287,8 +286,7 @@ const createShreeMarutiShipment = async ({
       session.endSession();
       return {
         success: false,
-        message: "Error creating shipment",
-        details: response.data,
+        message: response.data?.message || "Error creating shipment",
       };
     }
   } catch (error) {

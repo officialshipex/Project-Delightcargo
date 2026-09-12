@@ -421,6 +421,7 @@ const createZipypostOrder = async (req, res) => {
       success: false,
       message:
         error?.response?.data?.error?.booking_process_error ||
+        error.message ||
         "Failed to create shipment",
     });
   }

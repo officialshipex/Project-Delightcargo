@@ -390,8 +390,7 @@ const createOrder = async (req, res) => {
     );
     return res.status(500).json({
       success: false,
-      message: "Failed to create shipment",
-      error: error.response?.data || error.message,
+      message: error.response?.data?.message || error.message || "Failed to create shipment",
     });
   }
 };

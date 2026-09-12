@@ -147,8 +147,7 @@ const createEkartShipment = async ({
         session.endSession();
         return {
           success: false,
-          message: "Failed to register pickup address with Ekart",
-          error: addResult?.error,
+          message: addResult?.error || "Failed to register pickup address with Ekart",
         };
       }
 
@@ -298,8 +297,9 @@ const createEkartShipment = async ({
           session.endSession();
           return {
             success: false,
-            message: "Ekart address not registered. Re-registration also failed.",
-            error: reRegResult.error,
+            message: reRegResult.error
+              ? `Ekart address not registered. Re-registration also failed: ${reRegResult.error}`
+              : "Ekart address not registered. Re-registration also failed.",
           };
         }
 
@@ -436,10 +436,10 @@ const createEkartShipment = async ({
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+    console.error("Ekart Shipment Creation Error:", error.response?.data || error.message);
     return {
       success: false,
-      message: "Failed to create shipment",
-      error: error.message,
+      message: error.response?.data?.message || error.message || "Failed to create shipment",
     };
   }
 };

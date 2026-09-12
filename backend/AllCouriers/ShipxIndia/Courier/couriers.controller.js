@@ -197,7 +197,7 @@ const createShipexIndiaShipment = async (req, res) => {
       const serviceDoc = await CourierService.findOne({ name: courierServiceName, provider: "ShipexIndia" });
       if (serviceDoc) {
         shipexCourierName = serviceDoc.courier || serviceDoc.name;
-        shipexCourierId = serviceDoc.courier_id;
+        // shipexCourierId = serviceDoc.courier_id;
       }
     } catch (dbErr) {
       console.error("Error fetching CourierService details from DB:", dbErr.message);
@@ -327,7 +327,7 @@ const createShipexIndiaShipment = async (req, res) => {
     console.error("ShipexIndia Order Creation/Booking Error:", error.response?.data || error.message);
     return res.status(500).json({
       success: false,
-      error: error.response?.data?.message || error.message,
+      message: error.response?.data?.message || error.message,
     });
   }
 };

@@ -228,9 +228,12 @@ const createShipmentAmazon = async (
       "❌ Error creating Amazon shipment:",
       error.response?.data || error.message
     );
+    // Amazon's Selling Partner API returns errors as { errors: [{ message }] }
+    // — extract that instead of always showing the generic fallback text.
+    const amazonReason = error.response?.data?.errors?.[0]?.message;
     return {
       success: false,
-      error: error.response?.data || error.message,
+      message: amazonReason || error.message || "Error creating shipment",
     };
   }
 };

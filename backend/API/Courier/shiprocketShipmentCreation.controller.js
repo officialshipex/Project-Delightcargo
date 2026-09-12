@@ -394,8 +394,7 @@ const createShiprocketShipment = async ({
       console.error("Shiprocket Creation Error:", error.response?.data || error.message);
       return {
         success: false,
-        message: "Error creating shipment",
-        error: error.response?.data?.message || error.message,
+        message: error.response?.data?.message || error.message || "Error creating shipment",
       };
     }
   }

@@ -167,7 +167,7 @@ const createShipexIndiaShipment = async ({
       const serviceDoc = await CourierService.findOne({ name: courierServiceName, provider: "ShipexIndia" });
       if (serviceDoc) {
         shipexCourierName = serviceDoc.courier || serviceDoc.name;
-        shipexCourierId = serviceDoc.courier_id;
+        // shipexCourierId = serviceDoc.courier_id;
       }
     } catch (dbErr) {
       console.error("Error fetching CourierService details from DB:", dbErr.message);
@@ -179,7 +179,7 @@ const createShipexIndiaShipment = async ({
       else if (nameLower.includes("dtdc")) shipexCourierId = "03";
       else if (nameLower.includes("bluedart")) shipexCourierId = "13";
       else if (nameLower.includes("amazon")) shipexCourierId = "05";
-      else if (nameLower.includes("maruti")) shipexCourierId = "08";
+      else if (nameLower.includes("maruti")) shipexCourierId = "06";
       else if (nameLower.includes("ekart")) shipexCourierId = "08";
       else if (nameLower.includes("xpressbees")) shipexCourierId = "09";
       else if (nameLower.includes("shadowfax")) shipexCourierId = "12";

@@ -226,10 +226,11 @@ const createDelhiveryShipment = async ({
       // force-aborts it (default 60s) — a self-deadlock, not a real delay.
       await session.abortTransaction();
       session.endSession();
+      const delhiveryRemark = response.data?.packages?.[0]?.remarks;
+      const delhiveryReason = Array.isArray(delhiveryRemark) ? delhiveryRemark[0] : delhiveryRemark;
       return {
         success: false,
-        message: "Failed to create shipment",
-        details: response.data,
+        message: delhiveryReason || "Failed to create shipment",
       };
     }
 

@@ -150,10 +150,12 @@ const createVamashipShipment = async (req, res) => {
 
     // Check both main success and quote success
     if (!respData.success || !firstQuote?.success) {
+      const vamashipReason = Array.isArray(firstQuote?.messages)
+        ? firstQuote.messages.join("; ")
+        : firstQuote?.messages;
       return res.status(400).json({
         success: false,
-        message: "Failed to create shipment",
-        details: firstQuote?.messages || respData,
+        message: vamashipReason || "Failed to create shipment",
       });
     }
     // Extract shipment details
@@ -205,8 +207,7 @@ const createVamashipShipment = async (req, res) => {
     );
     return res.status(500).json({
       success: false,
-      message: "Failed to create shipment",
-      error: error?.response?.data || error.message,
+      message: error?.response?.data?.message || error.message || "Failed to create shipment",
     });
   }
 };

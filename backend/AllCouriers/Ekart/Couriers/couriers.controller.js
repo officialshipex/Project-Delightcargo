@@ -522,8 +522,7 @@ const orderCreationEkart = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to create shipment",
-      error: err.message,
+      message: err.response?.data?.message || err.message || "Failed to create shipment",
     });
   }
 };

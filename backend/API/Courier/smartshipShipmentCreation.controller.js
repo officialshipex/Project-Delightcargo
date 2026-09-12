@@ -286,8 +286,7 @@ const createSmartshipShipment = async ({
 
     return {
       success: false,
-      message: "Failed to register Smartship order",
-      error: error?.response?.data || error.message,
+      message: error?.response?.data?.message || error.message || "Failed to register Smartship order",
     };
   }
 };

@@ -281,7 +281,7 @@ const createManifest = async (req, res) => {
     );
     return res.status(500).json({
       success: false,
-      error: error.response ? error.response.data : error.message,
+      message: error.response?.data?.message || error.message || "Error creating shipment",
     });
   }
 };

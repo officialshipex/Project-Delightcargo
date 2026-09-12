@@ -255,7 +255,12 @@ const orderRegistrationOneStep = async (req, res) => {
     const respData = response.data?.data;
     console.log("Smartship Response:", respData);
 
-    if (respData?.errors) throw new Error("Smartship returned errors");
+    if (respData?.errors) {
+      const smartshipReason = Array.isArray(respData.errors)
+        ? respData.errors.join("; ")
+        : (typeof respData.errors === "string" ? respData.errors : JSON.stringify(respData.errors));
+      throw new Error(smartshipReason || "Smartship returned errors");
+    }
 
     if (
       !respData?.success_order_details?.orders?.length &&
@@ -350,8 +355,7 @@ const orderRegistrationOneStep = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to register order",
-      error: error?.response?.data || error.message,
+      message: error?.response?.data?.message || error.message || "Failed to register order",
     });
   }
 };

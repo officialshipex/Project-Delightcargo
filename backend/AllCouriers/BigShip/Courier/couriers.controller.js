@@ -426,7 +426,7 @@ const createBigShipShipment = async ({
         }
 
         console.error("BigShip Creation Error (lock phase):", error.response?.data || error.message);
-        return { success: false, message: "Error creating shipment", error: error.response?.data?.message || error.message };
+        return { success: false, message: error.response?.data?.message || error.message || "Error creating shipment" };
       }
     }
   }
