@@ -12,6 +12,74 @@ const {
   createWooCommerceWebhook,
 } = require("./WooCommerce/woocommerce.controller");
 
+// Shopify's Client Credentials grant (POST /admin/oauth/access_token with
+// the store's Client ID + Client Secret) is how a Custom App gets its
+// access token — and that token is short-lived (observed expires_in
+// ~86399s, i.e. under 24h), not a one-time/permanent credential. There's no
+// separate "refresh token" step; getting a new one is the exact same call.
+const generateShopifyAccessToken = async (storeURL, storeClientId, storeClientSecret) => {
+  const response = await axios.post(
+    `https://${storeURL}/admin/oauth/access_token`,
+    {
+      grant_type: "client_credentials",
+      client_id: storeClientId,
+      client_secret: storeClientSecret,
+    },
+    { headers: { "Content-Type": "application/json" } }
+  );
+  const { access_token, expires_in } = response.data || {};
+  if (!access_token) throw new Error("Shopify did not return an access_token");
+  return {
+    accessToken: access_token,
+    // Shave a safety buffer off Shopify's own expiry — see
+    // SHOPIFY_TOKEN_REFRESH_BUFFER_MS below for why.
+    expiresAt: new Date(Date.now() + (expires_in || 86399) * 1000),
+  };
+};
+
+const SHOPIFY_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before actual expiry
+
+// Returns a valid Shopify access token for this specific store, refreshing
+// it first if it's missing or within SHOPIFY_TOKEN_REFRESH_BUFFER_MS of
+// expiring. Every Shopify API call site should call this immediately
+// before making its request rather than reading store.storeAccessToken
+// directly — that's what keeps this self-healing instead of requiring a
+// seller to notice and re-paste a token roughly once a day. Operates only
+// on the single `store` document passed in (keyed by its own _id), so
+// having multiple Shopify channels connected refreshes each independently
+// with no cross-contamination.
+const getValidShopifyAccessToken = async (store) => {
+  const hasValidToken =
+    store.storeAccessToken &&
+    store.storeAccessTokenExpiresAt &&
+    new Date(store.storeAccessTokenExpiresAt).getTime() - Date.now() > SHOPIFY_TOKEN_REFRESH_BUFFER_MS;
+
+  if (hasValidToken) return store.storeAccessToken;
+
+  if (!store.storeClientId || !store.storeClientSecret) {
+    throw new Error(`Store ${store.storeURL} has no Client ID/Secret on file — cannot refresh its Shopify access token.`);
+  }
+
+  console.log(`🔄 Refreshing Shopify access token for store ${store.storeURL}...`);
+  const { accessToken, expiresAt } = await generateShopifyAccessToken(
+    store.storeURL,
+    store.storeClientId,
+    store.storeClientSecret
+  );
+
+  await AllChannel.findByIdAndUpdate(store._id, {
+    $set: { storeAccessToken: accessToken, storeAccessTokenExpiresAt: expiresAt },
+  });
+  console.log(`✅ Shopify access token refreshed for store ${store.storeURL}, expires at ${expiresAt.toISOString()}`);
+
+  // Keep the in-memory doc consistent in case the caller keeps using
+  // `store` afterward instead of re-fetching it.
+  store.storeAccessToken = accessToken;
+  store.storeAccessTokenExpiresAt = expiresAt;
+
+  return accessToken;
+};
+
 const createWebhook = async (storeURL, storeAccessToken) => {
   const webhookURL = "https://api.delightcargo.in/v1/channel/webhook/orders";
   const webhookTopic = "orders/create";
@@ -139,7 +207,7 @@ const fetchExistingOrders = async (req, res) => {
         .json({ success: false, message: "Shopify channel not connected." });
     }
 
-    const accessToken = channel.storeAccessToken;
+    const accessToken = await getValidShopifyAccessToken(channel);
     const storeURL = channel.storeURL;
 
     let allOrders = [];
@@ -368,7 +436,6 @@ const webhookhandler = async (req, res) => {
 
     const storeURL = user.myshopifyDomain || user.storeURL;
     const compositeOrderId = `${storeURL}-${shopifyOrder.id}`;
-    const firstLineItemId = shopifyOrder.line_items?.[0]?.id;
 
     // Check for existing order using compositeOrderId
     const existingOrder = await Order.findOne({ compositeOrderId });
@@ -383,6 +450,14 @@ const webhookhandler = async (req, res) => {
       isPrimary: true,
     }).lean();
 
+    let webhookAccessToken;
+    try {
+      webhookAccessToken = await getValidShopifyAccessToken(user);
+    } catch (tokenErr) {
+      console.error("Failed to obtain Shopify access token for webhook order:", tokenErr.response?.data || tokenErr.message);
+      return res.status(500).json({ error: "Failed to authenticate with Shopify" });
+    }
+
     // Fetch store location details safely if fallback needed
     let locations;
     try {
@@ -390,7 +465,7 @@ const webhookhandler = async (req, res) => {
         `https://${storeURL}/admin/api/2024-01/locations.json`,
         {
           headers: {
-            "X-Shopify-Access-Token": user.storeAccessToken,
+            "X-Shopify-Access-Token": webhookAccessToken,
             "Content-Type": "application/json",
           },
           timeout: 10000,
@@ -426,7 +501,7 @@ const webhookhandler = async (req, res) => {
       const productInfo = await getProductDetails(
         item.product_id,
         storeURL,
-        user.storeAccessToken
+        webhookAccessToken
       );
 
       totalWeight += productInfo.weight || 0;
@@ -463,7 +538,7 @@ const webhookhandler = async (req, res) => {
       userId: user.userId,
       orderId: internalOrderId,
       compositeOrderId,
-      channelId: firstLineItemId || shopifyOrder.id,
+      channelId: shopifyOrder.id,
       channel: "Shopify",
       storeUrl: storeURL,
       pickupAddress: pickupAddressObj,
@@ -552,17 +627,35 @@ const storeAllChannelDetails = async (req, res) => {
       return res.status(400).json({ message: "Store URL already exists" });
     }
 
+    // ✅ Generate the Shopify access token ourselves from the Client
+    // ID/Secret the seller provides — a Custom App's token is a Client
+    // Credentials grant we can request directly, so there's no reason to
+    // ask the seller to separately generate and paste one in (and it's
+    // short-lived anyway, see getValidShopifyAccessToken).
+    let shopifyAccessToken;
+    let shopifyAccessTokenExpiresAt;
+    if (channel === "Shopify") {
+      try {
+        const tokenResult = await generateShopifyAccessToken(cleanStoreURL, storeClientId, storeClientSecret);
+        shopifyAccessToken = tokenResult.accessToken;
+        shopifyAccessTokenExpiresAt = tokenResult.expiresAt;
+      } catch (tokenErr) {
+        console.error("❌ Failed to generate Shopify access token:", tokenErr.response?.data || tokenErr.message);
+        return res.status(400).json({
+          success: false,
+          message: "Failed to authenticate with Shopify using the provided Store URL, Client ID, and Client Secret. Please verify these are correct.",
+          error: tokenErr.response?.data || tokenErr.message,
+        });
+      }
+    }
+
     // ✅ Register Webhook
     let webHook;
     let webhookId = null;
     let myshopifyDomain = "";
 
     if (channel === "Shopify") {
-      if (!storeAccessToken) {
-        return res.status(400).json({ success: false, message: "Access Token is required for Shopify." });
-      }
-
-      webHook = await createWebhook(cleanStoreURL, storeAccessToken);
+      webHook = await createWebhook(cleanStoreURL, shopifyAccessToken);
       console.log("✅ Webhook creation response:", webHook);
 
       if (webHook.error) {
@@ -571,7 +664,7 @@ const storeAllChannelDetails = async (req, res) => {
           : webHook.error;
         return res.status(400).json({
           success: false,
-          message: `Failed to create webhook on Shopify: ${errorDetail}. Please check Store URL and Access Token.`,
+          message: `Failed to create webhook on Shopify: ${errorDetail}. Please check Store URL, Client ID, and Client Secret.`,
         });
       }
 
@@ -603,7 +696,11 @@ const storeAllChannelDetails = async (req, res) => {
       storeURL: cleanStoreURL,
       storeClientId,
       storeClientSecret,
-      storeAccessToken,
+      // WooCommerce still uses whatever the seller pasted in (its Consumer
+      // Key/Secret double as the credential directly, no token-exchange
+      // step); Shopify always uses the token we just generated ourselves.
+      storeAccessToken: channel === "Shopify" ? shopifyAccessToken : storeAccessToken,
+      storeAccessTokenExpiresAt: channel === "Shopify" ? shopifyAccessTokenExpiresAt : undefined,
       orderSyncFrequency,
       paymentStatus: {
         COD: paymentStatusCOD || "",
@@ -707,8 +804,14 @@ const fulfillOrder = async (req, res) => {
         .json({ message: "Shopify channel not found for this user" });
     }
 
-    const shopifyStore = channel.storeURL;
-    const accessToken = channel.storeAccessToken;
+    const shopifyStore = channel.myshopifyDomain || channel.storeURL;
+    let accessToken;
+    try {
+      accessToken = await getValidShopifyAccessToken(channel);
+    } catch (tokenErr) {
+      console.error("Error obtaining Shopify access token:", tokenErr.response?.data || tokenErr.message);
+      return res.status(500).json({ message: "Failed to authenticate with Shopify" });
+    }
 
     // Fetch order details
     let orderDetails;
@@ -747,43 +850,47 @@ const fulfillOrder = async (req, res) => {
       });
     }
 
-    // Fetch store locations
-    let locationId;
+    // Shopify deprecated POST /orders/{id}/fulfillments.json (it now
+    // returns 406 under current API versions) in favor of the
+    // FulfillmentOrder-based flow — see fulfillShopifyOrderHelper above for
+    // the same fix applied to the automatic push-back path.
+    let fulfillmentOrderId;
     try {
-      const shopData = await axios.get(
-        `https://${shopifyStore}/admin/api/2024-04/locations.json`,
-        {
-          headers: { "X-Shopify-Access-Token": accessToken },
-        }
+      const foRes = await axios.get(
+        `https://${shopifyStore}/admin/api/2024-04/orders/${id}/fulfillment_orders.json`,
+        { headers: { "X-Shopify-Access-Token": accessToken } }
       );
-      locationId = shopData.data.locations?.[0]?.id;
-      console.log("location", locationId);
+      const fulfillmentOrders = foRes.data?.fulfillment_orders || [];
+      const openFulfillmentOrder = fulfillmentOrders.find((fo) => fo.status === "open") || fulfillmentOrders[0];
+      fulfillmentOrderId = openFulfillmentOrder?.id;
     } catch (error) {
-      console.error("Error fetching locations:", error.response?.data || error);
+      console.error("Error fetching fulfillment orders:", error.response?.data || error.message);
       return res
         .status(500)
-        .json({ message: "Error fetching locations from Shopify" });
+        .json({ message: "Error fetching fulfillment orders from Shopify" });
     }
 
-    if (!locationId) {
+    if (!fulfillmentOrderId) {
       return res
         .status(400)
-        .json({ message: "No location ID found for the store" });
+        .json({ message: "No fulfillment order found for this Shopify order" });
     }
 
     // Fulfill the order
     try {
       const fulfillmentResponse = await axios.post(
-        `https://${shopifyStore}/admin/api/2024-04/orders/${id}/fulfillments.json`,
+        `https://${shopifyStore}/admin/api/2024-04/fulfillments.json`,
         {
           fulfillment: {
             notify_customer: true, // Notify customer via email
-            location_id: locationId,
             tracking_info: {
               number: awb_number,
               company: provider,
               url: `https://www.delightcargo.com/track/${awb_number}`, // Adjust based on courier tracking link
             },
+            line_items_by_fulfillment_order: [
+              { fulfillment_order_id: fulfillmentOrderId },
+            ],
           },
         },
         {
@@ -858,6 +965,15 @@ const updateChannel = async (req, res) => {
     updatedData.syncFromDate = new Date(req.body.syncDate);
   }
 
+  // Same normalization as storeAllChannelDetails — an edited storeURL must
+  // stay in the bare canonical domain form or inbound webhook lookups break.
+  if (typeof updatedData.storeURL === "string") {
+    updatedData.storeURL = updatedData.storeURL
+      .trim()
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/+$/, "");
+  }
+
   try {
     // Check if the channel exists
     const existingChannel = await AllChannel.findById(id);
@@ -866,15 +982,93 @@ const updateChannel = async (req, res) => {
     }
 
     // Update the channel details
-    const updatedChannel = await AllChannel.findByIdAndUpdate(
+    let updatedChannel = await AllChannel.findByIdAndUpdate(
       id,
       { $set: updatedData }, // Ensure syncDate is properly formatted
       { new: true } // Return the updated document
     );
 
+    // (Re-)register the webhook using whatever credentials are now on the
+    // document — previously this just patched the DB with no attempt to
+    // actually verify/register anything with Shopify/WooCommerce, so a
+    // corrected credential could be saved while webhookId silently stayed
+    // empty and orders kept not syncing.
+    let webhookStatus = "skipped";
+    let webhookError = null;
+
+    if (updatedChannel.channel === "Shopify") {
+      let freshToken;
+      try {
+        // Reuses the still-valid stored token, or regenerates it from
+        // whatever Client ID/Secret now sit on the document (e.g. the
+        // seller just corrected them) — the seller never needs to supply
+        // an access token here either.
+        freshToken = await getValidShopifyAccessToken(updatedChannel);
+      } catch (tokenErr) {
+        webhookStatus = "failed";
+        webhookError = tokenErr.response?.data || tokenErr.message;
+        console.error(`❌ Failed to obtain Shopify access token for channel ${id}:`, webhookError);
+      }
+
+      if (freshToken) {
+        const webHook = await createWebhook(updatedChannel.storeURL, freshToken);
+        if (webHook?.error) {
+          webhookStatus = "failed";
+          webhookError = webHook.error;
+          console.error(`❌ Shopify webhook (re-)registration failed for channel ${id}:`, webHook.error);
+        } else {
+          const webhookId = webHook?.webhook?.id || webHook?.id;
+          if (webhookId) {
+            updatedChannel = await AllChannel.findByIdAndUpdate(
+              id,
+              {
+                $set: {
+                  webhookId: String(webhookId),
+                  ...(webHook.resolvedDomain ? { myshopifyDomain: webHook.resolvedDomain } : {}),
+                },
+              },
+              { new: true }
+            );
+            webhookStatus = "ok";
+          } else {
+            webhookStatus = "failed";
+            webhookError = "Shopify returned no webhook id.";
+            console.error(`❌ Shopify webhook call for channel ${id} returned no id:`, webHook);
+          }
+        }
+      }
+    } else if (updatedChannel.channel === "WooCommerce") {
+      try {
+        const webHook = await createWooCommerceWebhook(
+          updatedChannel.storeURL,
+          updatedChannel.storeClientId,
+          updatedChannel.storeClientSecret
+        );
+        const webhookId = webHook?.id || webHook?.webhook?.id;
+        if (webhookId) {
+          updatedChannel = await AllChannel.findByIdAndUpdate(
+            id,
+            { $set: { webhookId: String(webhookId) } },
+            { new: true }
+          );
+          webhookStatus = "ok";
+        } else {
+          webhookStatus = "failed";
+          webhookError = "WooCommerce returned no webhook id.";
+          console.error(`❌ WooCommerce webhook call for channel ${id} returned no id:`, webHook);
+        }
+      } catch (wcErr) {
+        webhookStatus = "failed";
+        webhookError = wcErr.message;
+        console.error(`❌ WooCommerce webhook (re-)registration failed for channel ${id}:`, wcErr.message);
+      }
+    }
+
     res.status(200).json({
       message: "Channel updated successfully",
       channel: updatedChannel,
+      webhookStatus, // "ok" | "failed" | "skipped" (skipped = not Shopify/WooCommerce)
+      webhookError,
     });
   } catch (error) {
     console.error("Error updating channel:", error);
@@ -900,7 +1094,39 @@ const deleteChannel = async (req, res) => {
   }
 };
 
-const fulfillShopifyOrderHelper = async (order) => {
+// Shopify fulfillment events only accept this fixed vocabulary — there's no
+// native "RTO" concept, so RTO/undelivered/lost map to "failure" with the
+// real Shiproxx status preserved in the order's tracking history (not lost,
+// just not representable as a distinct Shopify fulfillment event).
+const shiproxxToShopifyFulfillmentEvent = (shiproxxStatus) => {
+  const map = {
+    "In-transit": "in_transit",
+    "Out for Delivery": "out_for_delivery",
+    "Delivered": "delivered",
+    "Undelivered": "failure",
+    "Lost": "failure",
+    "RTO": "failure",
+    "RTO In-transit": "failure",
+    "RTO Delivered": "failure",
+  };
+  return map[shiproxxStatus] || null;
+};
+
+// Auto-triggered Shopify status/tracking push-back — wired into
+// newOrder.model.js's post-save/post-findOneAndUpdate hooks so it fires on
+// every status change regardless of which courier booked/updated the
+// shipment. Shopify's model is: create one Fulfillment on first shipment
+// scan, then post Fulfillment Events for subsequent status changes — there
+// is no single call that both fulfills an order AND sets an arbitrary
+// tracking status, so an order that's already progressed past "just
+// booked" (e.g. a backfill call for an already-Delivered order) gets its
+// fulfillment created AND immediately advanced with the matching event in
+// the same pass, rather than getting stuck at a generic "fulfilled" state.
+//
+// notifyCustomer defaults to true for normal live traffic; pass false from
+// a one-off backfill script so Shopify doesn't email customers a surprise
+// "shipped" notice for orders that may already be delivered.
+const fulfillShopifyOrderHelper = async (order, notifyCustomer = true) => {
   try {
     if (!order || order.channel !== "Shopify" || !order.awb_number) return;
 
@@ -912,97 +1138,137 @@ const fulfillShopifyOrderHelper = async (order) => {
     if (!channel) return;
 
     const shopifyStore = channel.myshopifyDomain || channel.storeURL;
-    const accessToken = channel.storeAccessToken;
     const shopifyOrderId = order.compositeOrderId
       ? order.compositeOrderId.split("-").pop()
       : order.channelId;
 
     if (!shopifyOrderId) return;
 
-    console.log(`🚚 Syncing Fulfillment to Shopify for Order ${shopifyOrderId} | AWB: ${order.awb_number} | Courier: ${order.provider || order.courierName}`);
-
-    // Try fulfillment_orders API first (modern Shopify standard)
+    let accessToken;
     try {
-      const foRes = await axios.get(
-        `https://${shopifyStore}/admin/api/2025-01/orders/${shopifyOrderId}/fulfillment_orders.json`,
-        {
-          headers: { "X-Shopify-Access-Token": accessToken },
-          timeout: 10000,
-        }
-      );
-
-      const openFo = (foRes.data?.fulfillment_orders || []).find(
-        (f) => f.status === "open" || f.status === "in_progress"
-      );
-
-      if (openFo) {
-        await axios.post(
-          `https://${shopifyStore}/admin/api/2025-01/fulfillments.json`,
-          {
-            fulfillment: {
-              line_items_by_fulfillment_order: [
-                { fulfillment_order_id: openFo.id }
-              ],
-              tracking_info: {
-                number: order.awb_number,
-                company: order.provider || order.courierName || "Custom Carrier",
-                url: `https://api.delightcargo.in/track/${order.awb_number}`,
-              },
-              notify_customer: true,
-            },
-          },
-          {
-            headers: {
-              "X-Shopify-Access-Token": accessToken,
-              "Content-Type": "application/json",
-            },
-            timeout: 15000,
-          }
-        );
-        console.log(`✅ Shopify Order ${shopifyOrderId} fulfilled successfully via fulfillment_orders API!`);
-        return;
-      }
-    } catch (foErr) {
-      console.warn(`fulfillment_orders API warning for Shopify Order ${shopifyOrderId}:`, foErr.response?.data || foErr.message);
+      accessToken = await getValidShopifyAccessToken(channel);
+    } catch (tokenErr) {
+      console.error(`❌ Failed to obtain Shopify access token for order ${shopifyOrderId}:`, tokenErr.response?.data || tokenErr.message);
+      return;
     }
 
-    // Fallback: Legacy fulfillment API
-    try {
-      const shopData = await axios.get(
-        `https://${shopifyStore}/admin/api/2024-04/locations.json`,
-        {
-          headers: { "X-Shopify-Access-Token": accessToken },
-          timeout: 10000,
-        }
-      );
-      const locationId = shopData.data?.locations?.[0]?.id;
+    const baseUrl = `https://${shopifyStore}/admin/api/2025-01`;
+    const authHeaders = { headers: { "X-Shopify-Access-Token": accessToken, "Content-Type": "application/json" } };
 
-      if (locationId) {
-        await axios.post(
-          `https://${shopifyStore}/admin/api/2024-04/orders/${shopifyOrderId}/fulfillments.json`,
+    console.log(`🚚 Syncing Fulfillment to Shopify for Order ${shopifyOrderId} | AWB: ${order.awb_number} | Status: ${order.status} | Courier: ${order.provider || order.courierName}`);
+
+    let shopifyOrderData;
+    try {
+      const orderRes = await axios.get(`${baseUrl}/orders/${shopifyOrderId}.json`, { ...authHeaders, timeout: 10000 });
+      shopifyOrderData = orderRes.data?.order;
+    } catch (err) {
+      console.error(`❌ Error fetching Shopify order ${shopifyOrderId}:`, err.response?.data || err.message);
+      return;
+    }
+    if (!shopifyOrderData) return;
+
+    const existingFulfillment = shopifyOrderData.fulfillments?.[0];
+
+    // --- First shipment scan: create the fulfillment ---
+    if (!existingFulfillment) {
+      // Anything before booking, or a cancelled order, has nothing to
+      // fulfill. Every other status — including one that's already well
+      // past "Booked" — should still get a fulfillment created now rather
+      // than silently doing nothing.
+      const NON_FULFILLABLE_STATUSES = ["new", "processing", "Cancelled"];
+      if (NON_FULFILLABLE_STATUSES.includes(order.status)) {
+        console.log(`ℹ️ Shiproxx status "${order.status}" doesn't warrant creating a Shopify fulfillment yet — skipping.`);
+        return;
+      }
+      if (shopifyOrderData.fulfillment_status === "fulfilled") return; // already fulfilled elsewhere
+
+      let fulfillmentOrderId;
+      try {
+        const foRes = await axios.get(`${baseUrl}/orders/${shopifyOrderId}/fulfillment_orders.json`, { ...authHeaders, timeout: 10000 });
+        const fulfillmentOrders = foRes.data?.fulfillment_orders || [];
+        const openFulfillmentOrder = fulfillmentOrders.find((fo) => fo.status === "open") || fulfillmentOrders[0];
+        fulfillmentOrderId = openFulfillmentOrder?.id;
+      } catch (err) {
+        console.error(`❌ Error fetching fulfillment orders for ${shopifyOrderId}:`, err.response?.data || err.message);
+        return;
+      }
+      if (!fulfillmentOrderId) {
+        console.error(`❌ No fulfillment order found for Shopify order ${shopifyOrderId}.`);
+        return;
+      }
+
+      let newFulfillmentId;
+      try {
+        const fulfillRes = await axios.post(
+          `${baseUrl}/fulfillments.json`,
           {
             fulfillment: {
-              notify_customer: true,
-              location_id: locationId,
+              notify_customer: notifyCustomer,
               tracking_info: {
                 number: order.awb_number,
                 company: order.provider || order.courierName || "Custom Carrier",
                 url: `https://api.delightcargo.in/track/${order.awb_number}`,
               },
+              line_items_by_fulfillment_order: [
+                { fulfillment_order_id: fulfillmentOrderId },
+              ],
             },
           },
-          {
-            headers: {
-              "X-Shopify-Access-Token": accessToken,
-              "Content-Type": "application/json",
-            },
-            timeout: 15000,
-          }
+          authHeaders
         );
-        console.log(`✅ Shopify Order ${shopifyOrderId} fulfilled successfully via legacy API!`);
+        newFulfillmentId = fulfillRes.data?.fulfillment?.id;
+        console.log(`✅ Shopify order ${shopifyOrderId} fulfilled (${order.status}).`);
+      } catch (err) {
+        console.error(`❌ Error creating fulfillment for Shopify order ${shopifyOrderId}:`, err.response?.data || err.message);
+        return;
       }
-    } catch (legacyErr) {
-      console.warn(`Legacy fulfillment warning for Shopify Order ${shopifyOrderId}:`, legacyErr.response?.data || legacyErr.message);
+
+      // If the order has already progressed past "just booked", immediately
+      // post the matching fulfillment event too — otherwise Shopify stays
+      // parked at the initial "fulfilled" state forever, since there's no
+      // future status change left to trigger the update.
+      const initialEventStatus = shiproxxToShopifyFulfillmentEvent(order.status);
+      if (newFulfillmentId && initialEventStatus) {
+        try {
+          await axios.post(
+            `${baseUrl}/fulfillments/${newFulfillmentId}/events.json`,
+            { event: { status: initialEventStatus } },
+            authHeaders
+          );
+          console.log(`✅ Shopify fulfillment ${newFulfillmentId} event posted: ${order.status} → ${initialEventStatus}`);
+        } catch (err) {
+          console.error(`❌ Error posting initial fulfillment event for Shopify order ${shopifyOrderId}:`, err.response?.data || err.message);
+        }
+      }
+      return;
+    }
+
+    // --- Fulfillment already exists: cancel or post a status event ---
+    if (order.status === "Cancelled") {
+      try {
+        await axios.post(`${baseUrl}/fulfillments/${existingFulfillment.id}/cancel.json`, {}, authHeaders);
+        console.log(`✅ Shopify fulfillment ${existingFulfillment.id} cancelled.`);
+      } catch (err) {
+        console.error(`❌ Error cancelling Shopify fulfillment ${existingFulfillment.id}:`, err.response?.data || err.message);
+      }
+      return;
+    }
+
+    const eventStatus = shiproxxToShopifyFulfillmentEvent(order.status);
+    if (!eventStatus) {
+      console.log(`ℹ️ No Shopify fulfillment-event mapping for status "${order.status}" — skipping.`);
+      return;
+    }
+
+    try {
+      await axios.post(
+        `${baseUrl}/fulfillments/${existingFulfillment.id}/events.json`,
+        { event: { status: eventStatus } },
+        authHeaders
+      );
+      console.log(`✅ Shopify fulfillment ${existingFulfillment.id} event posted: ${order.status} → ${eventStatus}`);
+    } catch (err) {
+      console.error(`❌ Error posting fulfillment event for Shopify order ${shopifyOrderId}:`, err.response?.data || err.message);
     }
   } catch (error) {
     console.error(`❌ Error in fulfillShopifyOrderHelper:`, error.message);

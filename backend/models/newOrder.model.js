@@ -256,6 +256,22 @@ orderSchema.post("save", async function (doc) {
     } catch (err) {
       console.error("Status Notification/RTO Hook error:", err);
     }
+
+    // 🛍️ Push booking/tracking status back to Shopify. Every courier's
+    // shipment-creation code just does order.save()/findByIdAndUpdate()
+    // with no awareness of the sales channel, so this hook — which already
+    // reliably fires on every status change regardless of which courier
+    // booked it — is the one central place to wire this in, instead of
+    // touching every courier file individually. Fire-and-forget: a Shopify
+    // API hiccup must never block or fail the order save itself.
+    if (doc.channel === "Shopify") {
+      try {
+        const { fulfillShopifyOrderHelper } = require("../Channels/allChannel.controller");
+        fulfillShopifyOrderHelper(doc).catch((err) => console.error("Shopify push-back (save hook) error:", err.message));
+      } catch (err) {
+        console.error("Shopify push-back (save hook) require error:", err.message);
+      }
+    }
   }
 
   // 🔔 Dispatch track_update webhook when tracking is modified
@@ -297,6 +313,18 @@ orderSchema.post("findOneAndUpdate", async function (doc) {
           rtoCharges(notificationDoc._id);
         } catch (err) {
           console.error("Real-time RTO Charge processing error:", err);
+        }
+      }
+
+      // 🛍️ Push booking/tracking status back to Shopify (same rationale as
+      // the post("save") hook above — this covers findByIdAndUpdate/
+      // findOneAndUpdate call sites instead).
+      if (notificationDoc.channel === "Shopify") {
+        try {
+          const { fulfillShopifyOrderHelper } = require("../Channels/allChannel.controller");
+          fulfillShopifyOrderHelper(notificationDoc).catch((err) => console.error("Shopify push-back (findOneAndUpdate hook) error:", err.message));
+        } catch (err) {
+          console.error("Shopify push-back (findOneAndUpdate hook) require error:", err.message);
         }
       }
 
