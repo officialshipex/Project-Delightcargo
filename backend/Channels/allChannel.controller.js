@@ -12,12 +12,47 @@ const {
   createWooCommerceWebhook,
 } = require("./WooCommerce/woocommerce.controller");
 
+// The "Store URL" field is free text, and merchants increasingly paste what
+// their browser shows them — Shopify's newer admin UI lives at
+// admin.shopify.com/store/<handle>, not <handle>.myshopify.com. admin.shopify.com
+// is the interactive merchant UI and sits behind a Cloudflare bot/JS
+// challenge for anything that isn't a real browser session, so pointing
+// server-to-server calls (OAuth token exchange, webhook registration) at it
+// returns an HTML "Verifying your connection..." page instead of JSON —
+// that's the "Failed to generate Shopify access token" error with HTML in
+// it. Always resolve to the canonical <handle>.myshopify.com API host before
+// using a Shopify storeURL for anything.
+const normalizeShopifyStoreURL = (rawURL) => {
+  let cleaned = String(rawURL || "")
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+
+  // e.g. "admin.shopify.com/store/kwvcb0-hh" or
+  // "admin.shopify.com/store/kwvcb0-hh/settings/whatever"
+  const adminMatch = cleaned.match(/^admin\.shopify\.com\/store\/([^/]+)/i);
+  if (adminMatch) {
+    return `${adminMatch[1]}.myshopify.com`;
+  }
+
+  // Drop any trailing path, keep just the host
+  cleaned = cleaned.split("/")[0];
+
+  // Bare shop handle with no dots, e.g. "kwvcb0-hh"
+  if (cleaned && !cleaned.includes(".")) {
+    return `${cleaned}.myshopify.com`;
+  }
+
+  return cleaned;
+};
+
 // Shopify's Client Credentials grant (POST /admin/oauth/access_token with
 // the store's Client ID + Client Secret) is how a Custom App gets its
 // access token — and that token is short-lived (observed expires_in
 // ~86399s, i.e. under 24h), not a one-time/permanent credential. There's no
 // separate "refresh token" step; getting a new one is the exact same call.
 const generateShopifyAccessToken = async (storeURL, storeClientId, storeClientSecret) => {
+  console.log("generate token",storeURL,storeClientId,storeClientSecret)
   const response = await axios.post(
     `https://${storeURL}/admin/oauth/access_token`,
     {
@@ -618,7 +653,9 @@ const storeAllChannelDetails = async (req, res) => {
         .json({ success: false, message: "Missing required fields" });
     }
 
-    const cleanStoreURL = storeURL.replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim();
+    let cleanStoreURL = channel === "Shopify"
+      ? normalizeShopifyStoreURL(storeURL)
+      : storeURL.replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim();
 
     const existingStore = await AllChannel.findOne({
       $or: [{ storeURL }, { storeURL: cleanStoreURL }],
@@ -635,11 +672,32 @@ const storeAllChannelDetails = async (req, res) => {
     let shopifyAccessToken;
     let shopifyAccessTokenExpiresAt;
     if (channel === "Shopify") {
-      try {
-        const tokenResult = await generateShopifyAccessToken(cleanStoreURL, storeClientId, storeClientSecret);
-        shopifyAccessToken = tokenResult.accessToken;
-        shopifyAccessTokenExpiresAt = tokenResult.expiresAt;
-      } catch (tokenErr) {
+      // Sellers mix up which field holds the actual shop handle — some paste
+      // it into Store Name and leave an unrelated/stale value in Store URL.
+      // Try the Store URL-derived domain first, and if Shopify rejects it,
+      // fall back to treating Store Name as the handle before giving up, so
+      // a mislabeled field doesn't block the connection.
+      const candidateDomains = [cleanStoreURL];
+      const storeNameDomain = normalizeShopifyStoreURL(storeName);
+      if (storeNameDomain && storeNameDomain !== cleanStoreURL) {
+        candidateDomains.push(storeNameDomain);
+      }
+
+      let tokenErr;
+      for (const domain of candidateDomains) {
+        try {
+          const tokenResult = await generateShopifyAccessToken(domain, storeClientId, storeClientSecret);
+          shopifyAccessToken = tokenResult.accessToken;
+          shopifyAccessTokenExpiresAt = tokenResult.expiresAt;
+          cleanStoreURL = domain;
+          tokenErr = null;
+          break;
+        } catch (err) {
+          tokenErr = err;
+        }
+      }
+
+      if (tokenErr) {
         console.error("❌ Failed to generate Shopify access token:", tokenErr.response?.data || tokenErr.message);
         return res.status(400).json({
           success: false,
@@ -965,20 +1023,20 @@ const updateChannel = async (req, res) => {
     updatedData.syncFromDate = new Date(req.body.syncDate);
   }
 
-  // Same normalization as storeAllChannelDetails — an edited storeURL must
-  // stay in the bare canonical domain form or inbound webhook lookups break.
-  if (typeof updatedData.storeURL === "string") {
-    updatedData.storeURL = updatedData.storeURL
-      .trim()
-      .replace(/^https?:\/\//i, "")
-      .replace(/\/+$/, "");
-  }
-
   try {
     // Check if the channel exists
     const existingChannel = await AllChannel.findById(id);
     if (!existingChannel) {
       return res.status(404).json({ message: "Channel not found" });
+    }
+
+    // Same normalization as storeAllChannelDetails — an edited storeURL must
+    // stay in the bare canonical domain form or inbound webhook lookups break.
+    if (typeof updatedData.storeURL === "string") {
+      const channelType = updatedData.channel || existingChannel.channel;
+      updatedData.storeURL = channelType === "Shopify"
+        ? normalizeShopifyStoreURL(updatedData.storeURL)
+        : updatedData.storeURL.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
     }
 
     // Update the channel details
