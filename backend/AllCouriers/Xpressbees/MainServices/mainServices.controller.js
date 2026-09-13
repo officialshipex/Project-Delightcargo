@@ -126,7 +126,11 @@ const createShipment = async (req, res) => {
       currentOrder.status = "Ready To Ship";
       currentOrder.cancelledAtStage = null;
       currentOrder.awb_number = result.awb_number;
-      currentOrder.label = result.label;
+      // Only Amazon-fulfilled shipments need the provider's own label stored
+      // — that's the one carrier whose barcode our own generated label
+      // can't replace. For everything else, leave label empty so the
+      // standard label-generation flow is what serves the label.
+      currentOrder.label = /amazon/i.test(courierServiceName || "") ? result.label : "";
       currentOrder.provider = provider;
       currentOrder.shipment_id = `${result.awb_number}`;
       currentOrder.totalFreightCharges = finalCharges;

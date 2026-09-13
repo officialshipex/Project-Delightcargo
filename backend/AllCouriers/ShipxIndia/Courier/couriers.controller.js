@@ -247,7 +247,15 @@ const createShipexIndiaShipment = async (req, res) => {
       throw new Error(bookingResponse.data?.message || "ShipexIndia order booking failed");
     }
 
-    const { awb_number, labelUrl } = bookingResponse.data.data;
+    const { awb_number, labelUrl: rawLabelUrl } = bookingResponse.data.data;
+
+    // Only Amazon-fulfilled shipments need the provider's own label stored —
+    // that's the one carrier whose barcode our own generated label can't
+    // replace. For everything else, leave label empty so the standard
+    // /printlabel/generate-pdf flow (with the seller's label customization
+    // settings) is what serves the label, same as every other courier.
+    const isAmazonService = /amazon/i.test(courierServiceName || "") || /amazon/i.test(shipexCourierName || "");
+    const labelUrl = isAmazonService ? rawLabelUrl : "";
 
     // 10. Update Order in DB
     currentOrder.status = "Booked";

@@ -249,6 +249,16 @@ const createNimbuspostShipment = async ({
     ({ awb_number, shipment_id, courier_name, label } = createResponse.data.data);
     resolvedProvider = identifyProviderFromService(courier_name || finalProvider);
 
+    // Only Amazon-fulfilled shipments need the provider's own label stored —
+    // that's the one carrier whose barcode our own generated label can't
+    // replace. For everything else, leave label empty so the standard
+    // /printlabel/generate-pdf flow (with the seller's label customization
+    // settings) is what serves the label, same as every other courier.
+    const isAmazonService = /amazon/i.test(courierServiceName || "") || /amazon/i.test(resolvedProvider || "");
+    if (!isAmazonService) {
+      label = "";
+    }
+
     // Step 1️⃣1️⃣ Update Order and Wallet details
     await Promise.all([
       Order.findByIdAndUpdate(

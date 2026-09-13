@@ -24,6 +24,20 @@ const generateLabel = async (req, res) => {
       });
     }
 
+    // Amazon-fulfilled shipments (any aggregator — direct Amazon, NimbusPost,
+    // ShipexIndia, BigShip, etc.) must use Amazon's own original label — a
+    // barcode we generate ourselves won't scan in Amazon's delivery network.
+    // Refuse rather than fabricating one and saving it as orderData.label
+    // below, which would permanently poison this order's label field.
+    const isAmazonService =
+      /amazon/i.test(orderData.provider || "") ||
+      /amazon/i.test(orderData.courierServiceName || "");
+    if (isAmazonService) {
+      return res.status(409).json({
+        error: "Original Amazon label not available for this order yet.",
+      });
+    }
+
     const labelSettings = await LabelSettings.findOne({
       userId: orderData?.userId,
     });

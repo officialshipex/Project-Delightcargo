@@ -11,6 +11,7 @@ const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api.nimbuspost.com/v1';
 
 let _cachedToken = null;
 let _tokenExpiry = null;
+let _loginPromise = null;
 
 /**
  * Resolves NimbusPost credentials from DB first, then falls back to .env
@@ -44,31 +45,49 @@ const getNimbusToken = async () => {
         return _cachedToken;
     }
 
-    const { email, password } = await getNimbusCredentials();
-
-    // Temporary diagnostic — this cache is in-memory only (unlike BigShip's
-    // DB-backed one), so it's wiped on every server/nodemon restart. Timing
-    // this separately from the actual shipment call shows whether a slow
-    // response is re-login overhead or NimbusPost's own API being slow.
-    const _loginStart = Date.now();
-    const response = await axios.post(
-        `${BASE_URL}/users/login`,
-        { email, password },
-        { headers: { 'content-type': 'application/json' } }
-    );
-    console.log(`[NimbusPost timing] POST /users/login: ${Date.now() - _loginStart}ms`);
-
-    if (!response.data?.status) {
-        throw new Error(`NimbusPost login failed: ${response.data?.message || 'Unknown error'}`);
+    // Concurrent callers that arrive while a login is already in flight
+    // share that same request instead of each firing their own — without
+    // this, every caller that raced in before the first login resolved saw
+    // a null cache and started its own /users/login call, piling concurrent
+    // requests onto NimbusPost's login endpoint (observed: response times
+    // climbing well past 60s as more piled up on top of each other).
+    if (_loginPromise) {
+        return _loginPromise;
     }
 
-    // Token is in response.data.data
-    _cachedToken = response.data.data;
-    // Cache for 23 hours (tokens are typically valid for 24h)
-    _tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
+    _loginPromise = (async () => {
+        const { email, password } = await getNimbusCredentials();
 
-    console.log('[NimbusPost] New auth token fetched and cached.');
-    return _cachedToken;
+        // Temporary diagnostic — this cache is in-memory only (unlike BigShip's
+        // DB-backed one), so it's wiped on every server/nodemon restart. Timing
+        // this separately from the actual shipment call shows whether a slow
+        // response is re-login overhead or NimbusPost's own API being slow.
+        const _loginStart = Date.now();
+        const response = await axios.post(
+            `${BASE_URL}/users/login`,
+            { email, password },
+            { headers: { 'content-type': 'application/json' } }
+        );
+        console.log(`[NimbusPost timing] POST /users/login: ${Date.now() - _loginStart}ms`);
+
+        if (!response.data?.status) {
+            throw new Error(`NimbusPost login failed: ${response.data?.message || 'Unknown error'}`);
+        }
+
+        // Token is in response.data.data
+        _cachedToken = response.data.data;
+        // Cache for 23 hours (tokens are typically valid for 24h)
+        _tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
+
+        console.log('[NimbusPost] New auth token fetched and cached.');
+        return _cachedToken;
+    })();
+
+    try {
+        return await _loginPromise;
+    } finally {
+        _loginPromise = null;
+    }
 };
 
 /**

@@ -291,6 +291,29 @@ const trackBigShipOrder = async (bigshipOrderId) => {
   return res.data.data;
 };
 
+// BigShip doesn't return a label in the place-order response — it's a
+// separate document fetch. Only called for Amazon bookings (see
+// createBigShipShipment) since that's the one courier whose barcode our own
+// generated label can't replace; every other BigShip courier keeps using our
+// own label template via /printlabel/generate-pdf. Best-effort: the shipment
+// is already real by the time this runs, so a failure here just leaves
+// label empty rather than failing the booking.
+const downloadBigShipLabel = async (bigshipOrderId) => {
+  try {
+    const res = await bigShipRequest("get", "/api/outbound/download-shipment-documents", {
+      data: { CustomGlobalOrderId: bigshipOrderId, document_type: "label" },
+    });
+    if (res.data?.status && res.data?.data?.AttachmentData) {
+      return res.data.data.AttachmentData;
+    }
+    console.warn(`[BigShip] No label document available for order ${bigshipOrderId}:`, res.data?.message);
+    return "";
+  } catch (error) {
+    console.error(`[BigShip] Failed to fetch label document for order ${bigshipOrderId}:`, error.response?.data || error.message);
+    return "";
+  }
+};
+
 // Admin "Add Courier Service" dropdown — BigShip has no "list everything my
 // account can do" endpoint, only the route-specific Rate Calculator, so this
 // uses a fixed Delhi<->Mumbai reference route as a representative check
@@ -468,6 +491,14 @@ const createBigShipShipment = async ({
     return { success: false, message: "BigShip did not return an AWB number." };
   }
 
+  // Only Amazon-fulfilled shipments need the provider's own label stored —
+  // that's the one carrier whose barcode our own generated label can't
+  // replace. For everything else, leave label empty so the standard
+  // /printlabel/generate-pdf flow is what serves the label, same as every
+  // other courier.
+  const isAmazonService = /amazon/i.test(courierServiceName || "") || /amazon/i.test(matchedCourier.courierName || "");
+  const bigshipLabelUrl = isAmazonService ? await downloadBigShipLabel(bigshipOrderId) : "";
+
   // ── PHASE 3: point of no return reached — persist, never touch BigShip
   // again regardless of what happens here. A short, pure-DB transaction, so
   // conflicts are rare — and even if one occurs, retrying just this step is
@@ -492,6 +523,7 @@ const createBigShipShipment = async ({
               zone: zone.zone,
               estimatedDeliveryDate: estimateDate,
               priceBreakup,
+              label: bigshipLabelUrl || "",
               "otherDetails.bigshipOrderId": bigshipOrderId,
             },
             $push: {
@@ -557,6 +589,7 @@ const createBigShipShipment = async ({
     message: "Shipment Created Successfully",
     orderId: currentOrder.orderId,
     awb_number,
+    labelUrl: bigshipLabelUrl || null,
   };
 };
 
@@ -590,7 +623,7 @@ const createCustomOrderBigShip = async (req, res) => {
 
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -675,6 +708,7 @@ module.exports = {
   placeBigShipOrder,
   cancelBigShipOrder,
   trackBigShipOrder,
+  downloadBigShipLabel,
   createBigShipShipment,
   refreshBigShipOrderTracking,
   createCustomOrderBigShip,

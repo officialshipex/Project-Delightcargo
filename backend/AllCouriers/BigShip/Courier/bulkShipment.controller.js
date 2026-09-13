@@ -8,6 +8,7 @@ const {
   getBigShipCourierOptions,
   placeBigShipOrder,
   getRiskTypeId,
+  downloadBigShipLabel,
 } = require("./couriers.controller");
 
 // Bulk booking entry point — matches every other provider's bulk signature
@@ -77,6 +78,13 @@ const createShipmentFunctionBigShip = async (
     const awb_number = String(placeResult.awb_assigned || placeResult.reference_number || "");
     if (!awb_number) return { status: 400, error: "BigShip did not return an AWB number." };
 
+    // Only Amazon-fulfilled shipments need the provider's own label stored —
+    // that's the one carrier whose barcode our own generated label can't
+    // replace. For everything else, leave label empty so the standard
+    // /printlabel/generate-pdf flow is what serves the label.
+    const isAmazonService = /amazon/i.test(serviceDetails.name || "") || /amazon/i.test(matchedCourier.courierName || "");
+    const bigshipLabelUrl = isAmazonService ? await downloadBigShipLabel(bigshipOrderId) : "";
+
     // Point of no return: BigShip already placed a real, irreversible
     // shipment above. From here, retry the persistence a few times on
     // failure, but never touch BigShip again regardless of the outcome —
@@ -96,6 +104,7 @@ const createShipmentFunctionBigShip = async (
             estimatedDeliveryDate: estimatedDeliveryDate || null,
             priceBreakup,
             shipmentCreatedAt: new Date(),
+            label: bigshipLabelUrl || "",
             "otherDetails.bigshipOrderId": bigshipOrderId,
           },
           $push: {

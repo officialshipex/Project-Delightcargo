@@ -18,6 +18,26 @@ router.get("/generate-pdf/:id", async (req, res) => {
       return res.status(404).send("Order not found");
     }
 
+    // Amazon-fulfilled shipments (any aggregator — direct Amazon, NimbusPost,
+    // ShipexIndia, BigShip, etc. all phrase the provider/service name
+    // differently, e.g. "Amazon Shipping" vs "Amazon 0.5KG") must use
+    // Amazon's own original label — a barcode we generate ourselves won't
+    // scan in Amazon's delivery network. If the original wasn't captured at
+    // booking time, refuse rather than silently handing out a fake one.
+    const isAmazonService =
+      /amazon/i.test(orderData.provider || "") ||
+      /amazon/i.test(orderData.courierServiceName || "");
+    if (isAmazonService) {
+      if (orderData.label) {
+        return res.redirect(
+          `${req.baseUrl}/proxy-label?url=${encodeURIComponent(orderData.label)}`
+        );
+      }
+      return res.status(409).json({
+        error: "Original Amazon label not available for this order yet.",
+      });
+    }
+
     // Barcodes
     const barcodeBuffer1 = await bwipjs.toBuffer({
       bcid: "code128",

@@ -413,12 +413,21 @@ const getShiprocketCargoShipmentDetailsInternal = async (shipmentId, attempt = 0
     /* ================================
        ✅ SUCCESS → SAVE AWB + CHILD AWBs
     ================================= */
+    // Only Amazon-fulfilled shipments need the provider's own label stored —
+    // that's the one carrier whose barcode our own generated label can't
+    // replace. For everything else, leave label empty so the standard
+    // label-generation flow is what serves the label, same as every other
+    // courier.
+    const isAmazonService =
+      /amazon/i.test(order.courierServiceName || "") ||
+      /amazon/i.test(data.delivery_partner?.name || data.delivery_partner?.common_name || "");
+
     await Order.findByIdAndUpdate(order._id, {
       $set: {
         awb_number: data.waybill_no,
         lrn: data.lrn,
         oid: data.order_id,
-        label: data.label_url,
+        label: isAmazonService ? data.label_url : "",
         // Refresh provider with the more authoritative real carrier name from
         // get_shipment (order_creation's value was already correct, this is
         // just confirmation/update) — partner stays "Shiprocket", set once at
