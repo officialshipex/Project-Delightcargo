@@ -493,7 +493,7 @@ const checkAmazonServiceability = async (provider, payload) => {
       taxDetails: [
         {
           taxType: "GST",
-          taxRegistrationNumber: payload?.gstin || "06FKCPS6109D3Z7",
+          taxRegistrationNumber: payload?.gstin || "07AAMCD7994F1Z2",
         },
       ],
       channelDetails: {
@@ -688,7 +688,7 @@ const checkAmazonServiceabilityWithoutOrder = async (
       taxDetails: [
         {
           taxType: "GST",
-          taxRegistrationNumber: "06FKCPS6109D3Z7", // demo GST
+          taxRegistrationNumber: "07AAMCD7994F1Z2",
         },
       ],
 

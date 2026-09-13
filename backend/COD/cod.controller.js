@@ -3650,7 +3650,7 @@ const exportBankTemplate = async (req, res) => {
       userIdToRemittanceIds[uid].push(String(rec.remitanceId));
     }
 
-    const DEBIT_ACCOUNT = "258800258800"; // Quickpost360 Services Pvt Ltd — IndusInd Bank INDB0000673
+    const DEBIT_ACCOUNT = "401405002933"; // Delight Cargo Private Limited — ICICI Bank ICIC0004014
     const allTemplateRows = [];
     const internalBatchRows = [];
     let totalHeldCount = 0;

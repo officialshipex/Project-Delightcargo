@@ -21,6 +21,27 @@ const billing = require("../models/billingInfo.model");
 const { generateInvoiceNumber } = require("./invoiceNumber.controller");
 const GST_RATE = 0.18;
 
+// The issuing entity printed on every generated invoice PDF — single source
+// of truth so it can't drift between the initial-generation and
+// regeneration paths (it used to be redefined inline per-invoice, keyed off
+// invoice date, and both variants ended up wrong — one was a copy-pasted
+// competitor's registration details entirely).
+const COMPANY_DETAILS = {
+  name: "DELIGHT CARGO PRIVATE LIMITED",
+  address:
+    "JAHANGIRPUR DELHI KH NO.149 GROUND FLOOR SIRASPUR NORTH WEST DELHI-110042 DELHI",
+  phone: "9582834535",
+  email: "support@delightcargo.com",
+  pan: "AAMCD7994F",
+  gstin: "07AAMCD7994F1Z2",
+  bank: {
+    accountName: "DELIGHT CARGO PRIVATE LIMITED",
+    accountNumber: "401405002933",
+    bankName: "ICICI BANK",
+    ifsc: "ICIC0004014",
+  },
+};
+
 // Prefer transaction.awb_number, fallback to regex on description
 function extractAwbFromTransaction(txn) {
   if (!txn) return null;
@@ -128,7 +149,17 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
         doc.font("Helvetica").text(` ${company.gstin}`);
       }
 
+      if (company.pan) {
+        doc.font("Helvetica-Bold").text("PAN:", { continued: true });
+        doc.font("Helvetica").text(` ${company.pan}`);
+      }
+
       doc.lineGap(0);
+      // The right column below is drawn at fixed offsets from contentStartY
+      // regardless of how many lines the left column above just used — save
+      // where the left column actually ended so the separator/Bill-To below
+      // can clear whichever column is taller instead of overlapping it.
+      const leftColumnEndY = doc.y;
 
       /* -------- INVOICE META (RIGHT) -------- */
 
@@ -147,10 +178,20 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
 
       doc.fillColor("black");
 
+      // periodEnd/invoiceDate are stored as 23:59:59.999 on the LAST calendar
+      // day of the billing month (UTC) — they mark a calendar boundary, not
+      // a real-world instant, so formatting them in the server's local
+      // timezone (IST, UTC+5:30) rolls them into the 1st of the next month.
+      // Every date field here must be read with the UTC getters/timeZone
+      // option, never the local-timezone toLocale*/getMonth()/getDate().
       const invoiceDate = new Date(invoice.periodEnd);
       const invoicePeriod = invoiceDate.toLocaleString("en-IN", {
         month: "long",
         year: "numeric",
+        timeZone: "UTC",
+      });
+      const invoiceDateStr = invoiceDate.toLocaleDateString("en-IN", {
+        timeZone: "UTC",
       });
 
       doc
@@ -159,7 +200,7 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
           align: "right",
         })
         .text(
-          `Invoice Date: ${invoiceDate.toLocaleDateString()}`,
+          `Invoice Date: ${invoiceDateStr}`,
           400,
           contentStartY + 55,
           { align: "right" },
@@ -170,7 +211,7 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
 
       /* ================= HEADER SEPARATOR ================= */
 
-      const headerEndY = doc.y + 15;
+      const headerEndY = Math.max(doc.y, leftColumnEndY) + 15;
       doc.moveTo(40, headerEndY).lineTo(550, headerEndY).stroke();
       doc.y = headerEndY + 5;
 
@@ -208,6 +249,12 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
         .text("Pincode:", leftX, doc.y, { continued: true });
       doc.font("Helvetica").text(` ${customer.pincode || "N/A"}`);
 
+      // A long customer address can wrap to several lines, making this left
+      // column taller than the fixed 3-line right column — save where it
+      // actually ended so the table below can clear it instead of
+      // overlapping (same fix as the header/company-details block above).
+      const leftColEndY = doc.y;
+
       /* ---------- RIGHT COLUMN ---------- */
 
       doc.y = billStartY;
@@ -228,7 +275,7 @@ async function generateInvoicePDF(invoice, company = {}, customer = {}) {
       doc.font("Helvetica").text(" No");
 
       /* ---------- MOVE BELOW BILL TO ---------- */
-      doc.y = Math.max(doc.y, billStartY) + 12;
+      doc.y = Math.max(doc.y, leftColEndY) + 12;
       doc.lineGap(0);
 
       doc.moveDown(2);
@@ -756,42 +803,8 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
     pan: PAN?.pan || "N/A",
   };
 
-  // Determine Company Details based on date (April 2026 onwards)
-  const isNewBranding = new Date(periodEnd) >= new Date(2026, 3, 1);
-  const companyDetails = isNewBranding
-    ? {
-        name: "Quickpost360 Services Private Limited",
-        address:
-          "House No 87 Singhal Panna, Gali No2 Near Shiv Mandir, Badesera, Bhiwani, Bhiwani, Haryana, India, 127031",
-        phone: "+91- 9813981344",
-        email: "support@delightcargo.com",
-        gstin: "06AABCQ1885H1ZC",
-        cin: "U53200HR2025PTC138342",
-        bank: {
-          accountName: "Quickpost360 Services Private Limited",
-          accountNumber: "258800258800",
-          bankName: "Indusind Bank Limited",
-          ifsc: "INDB0000673",
-        },
-      }
-    : {
-        name: "Delight Cargo",
-        address:
-          "01, Basement, Biju Tower, Baba Nagar, Bhiwani, Haryana - 127021",
-        phone: "+91- 9813981344",
-        email: "support@delightcargo.com",
-        pan: "XXXAAABBB",
-        gstin: "06FKCPS6109D3Z7",
-        bank: {
-          accountName: "Delight Cargo",
-          accountNumber: "2258120020000251",
-          bankName: "Ujjivan Small Finance Bank",
-          ifsc: "UJVN0002258",
-        },
-      };
-
   // ---------------- FINAL INVOICE PDF ----------------
-  const pdfPath = await generateInvoicePDF(invoice, companyDetails, customerInfo);
+  const pdfPath = await generateInvoicePDF(invoice, COMPANY_DETAILS, customerInfo);
 
   const s3Key = `invoices/${userId}/${invoice.invoiceNumber}.pdf`;
   const s3Url = await uploadToS3(pdfPath, s3Key);
@@ -807,6 +820,55 @@ async function generateInvoiceForUserMonth(userId, periodStart, periodEnd) {
   }
 
   return { saved: true, invoice, s3Url };
+}
+
+/* -------------------------
+   Regenerate the PDF(s) for an already-created invoice — reuses every
+   stored financial field (invoiceNumber, periodStart/End, invoiceDate,
+   amounts, transactions) untouched and only re-renders the PDFs, e.g. after
+   a fix to COMPANY_DETAILS. Re-uploads to the exact same S3 key, so the
+   invoice's existing s3Url/itemizedUrl keep working with corrected content.
+------------------------- */
+async function regenerateInvoicePdf(invoiceId) {
+  const invoice = await Invoice.findById(invoiceId);
+  if (!invoice) throw new Error(`Invoice ${invoiceId} not found`);
+
+  const userId = invoice.userId;
+  const user = await User.findById(userId).select("fullname email company Wallet");
+
+  const [gstin, BillingInfo, PAN] = await Promise.all([
+    GSTIN.findOne({ user: userId }),
+    billing.findOne({ user: userId }),
+    Pan.findOne({ user: userId }),
+  ]);
+
+  const customerInfo = {
+    name: gstin?.nameOfBusiness || gstin?.legalNameOfBusiness || user?.fullname || "N/A",
+    address: gstin?.address || BillingInfo?.address || "N/A",
+    gstin: gstin?.gstin || "N/A",
+    state: gstin?.state || BillingInfo?.state || "N/A",
+    pincode: gstin?.pincode || BillingInfo?.postalCode || "N/A",
+    pan: PAN?.pan || "N/A",
+  };
+
+  const itemizedPath = await generateItemizedAwbPDF(invoice);
+  const itemizedS3Url = await uploadToS3(
+    itemizedPath,
+    `invoices/${userId}/${invoice.invoiceNumber}-itemized.pdf`,
+  );
+  try { fs.unlinkSync(itemizedPath); } catch (e) {}
+
+  const pdfPath = await generateInvoicePDF(invoice, COMPANY_DETAILS, customerInfo);
+  const s3Key = `invoices/${userId}/${invoice.invoiceNumber}.pdf`;
+  const s3Url = await uploadToS3(pdfPath, s3Key);
+  try { fs.unlinkSync(pdfPath); } catch (e) {}
+
+  invoice.itemizedUrl = itemizedS3Url;
+  invoice.s3Url = s3Url;
+  invoice.isFinalized = true;
+  await invoice.save();
+
+  return { saved: true, invoice, s3Url, itemizedS3Url };
 }
 
 /* -------------------------
@@ -1346,6 +1408,7 @@ const exportInvoiceToExcel = async (req, res) => {
 module.exports = {
   buildChargesFromWalletTransactions,
   generateInvoiceForUserMonth,
+  regenerateInvoicePdf,
   generateInvoicesForPeriod,
   scheduleMonthlyInvoiceCron,
   adminGetInvoices,
