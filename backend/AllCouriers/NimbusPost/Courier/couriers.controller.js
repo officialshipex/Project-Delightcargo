@@ -165,7 +165,7 @@ const fetchNimbusServiceability = async (payload) => {
             breadth: payload.breadth,
             height: payload.height,
         }, { headers });
-console.log("nimbus service",response.data)
+// console.log("nimbus service",response.data)
         if (!response.data?.status || !Array.isArray(response.data.data)) {
             throw new Error(response.data?.message || "NimbusPost serviceability check failed");
         }
