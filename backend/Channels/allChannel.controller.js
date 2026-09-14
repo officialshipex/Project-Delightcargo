@@ -199,32 +199,27 @@ const createWebhook = async (storeURL, storeAccessToken) => {
   }
 };
 
-const getProductDetails = async (productId, storeURL, accessToken) => {
-  try {
-    const response = await axios.get(
-      `https://${storeURL}/admin/api/2024-01/products/${productId}.json`,
-      {
-        headers: {
-          "X-Shopify-Access-Token": accessToken,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+// Shopify's payment_gateway_names holds human-readable gateway labels (e.g.
+// "Cash on Delivery (COD)", "UPI", "Manual") — never the snake_case
+// "cash_on_delivery" this used to look for, so it never matched a real COD
+// gateway. That silently misclassified genuine COD orders (whose
+// financial_status legitimately stays "pending" until delivery) as unpaid
+// prepaid orders and skipped fulfilling them.
+const isShopifyCodOrder = (paymentGatewayNames) =>
+  (paymentGatewayNames || []).some((name) => /cash.?on.?delivery|\bcod\b/i.test(name));
 
-    // console.log("Product Response:", response.data);
-
-    const product = response.data.product;
-
-    // Extract weight from the first variant (assuming single variant per product)
-    const weight = product.variants?.[0]?.weight || 1; // Default 0 if not found
-
-    // console.log("variants", product.variants);
-
-    return { length: 10, width: 10, height: 10, weight };
-  } catch (error) {
-    console.error("Error fetching product details:", error);
-    return { length: 10, width: 10, height: 10, weight: 0 }; // Default values
-  }
+// Shopify's `order.total_weight` is the sum of every line item's weight
+// (already multiplied by quantity) in grams, regardless of the shop's
+// configured weight unit — unlike a product variant's own `weight` field,
+// which is in whatever unit that variant's `weight_unit` says (g/kg/oz/lb)
+// and was previously being stored as-is into a field couriers treat as
+// kilograms, turning e.g. a 300g bottle into a "300kg" shipment. Converting
+// from grams here sidesteps unit ambiguity entirely and needs no extra
+// per-line-item Shopify API calls.
+const getOrderWeightKg = (shopifyOrder) => {
+  const totalGrams = Number(shopifyOrder.total_weight);
+  if (!totalGrams || totalGrams <= 0) return 0.5; // Shopify gave us nothing usable — sane default, not 0
+  return totalGrams / 1000;
 };
 
 const fetchExistingOrders = async (req, res) => {
@@ -305,30 +300,12 @@ const fetchExistingOrders = async (req, res) => {
         };
       });
 
-      // Default package dimensions
-      let totalWeight = 0;
-      let totalLength = 10,
+      // Default package dimensions — Shopify doesn't expose package
+      // dimensions on products/orders, so these stay fixed placeholders.
+      const totalWeight = getOrderWeightKg(order);
+      const totalLength = 10,
         totalWidth = 10,
         totalHeight = 10;
-
-      for (const item of (order.line_items || [])) {
-        try {
-          const productInfo = await getProductDetails(
-            item.product_id,
-            storeURL,
-            accessToken
-          );
-
-          totalWeight += productInfo.weight || 0;
-          totalLength = Math.max(totalLength, productInfo.length || 0);
-          totalWidth = Math.max(totalWidth, productInfo.width || 0);
-          totalHeight = Math.max(totalHeight, productInfo.height || 0);
-        } catch (err) {
-          console.warn(
-            `Failed to fetch details for product ${item.product_id}`
-          );
-        }
-      }
 
       const internalOrderId = await generateUniqueOrderIds(1);
 
@@ -526,24 +503,12 @@ const webhookhandler = async (req, res) => {
       };
     });
 
-    // Fetch package weight & dimensions
-    let totalWeight = 0;
-    let totalLength = 10,
+    // Package weight & dimensions — Shopify doesn't expose package
+    // dimensions on products/orders, so these stay fixed placeholders.
+    const totalWeight = getOrderWeightKg(shopifyOrder);
+    const totalLength = 10,
       totalWidth = 10,
       totalHeight = 10;
-
-    for (const item of (shopifyOrder.line_items || [])) {
-      const productInfo = await getProductDetails(
-        item.product_id,
-        storeURL,
-        webhookAccessToken
-      );
-
-      totalWeight += productInfo.weight || 0;
-      totalLength = Math.max(totalLength, productInfo.length || 0);
-      totalWidth = Math.max(totalWidth, productInfo.width || 0);
-      totalHeight = Math.max(totalHeight, productInfo.height || 0);
-    }
 
     const internalOrderId = await generateUniqueOrderIds(1);
 
@@ -897,8 +862,7 @@ const fulfillOrder = async (req, res) => {
     }
 
     // Check if the order is a COD order
-    const isCOD =
-      orderDetails.payment_gateway_names.includes("cash_on_delivery");
+    const isCOD = isShopifyCodOrder(orderDetails.payment_gateway_names);
 
     // If the order is not COD and payment is still pending, do not fulfill
     if (!isCOD && orderDetails.financial_status === "pending") {
@@ -1170,6 +1134,32 @@ const shiproxxToShopifyFulfillmentEvent = (shiproxxStatus) => {
   return map[shiproxxStatus] || null;
 };
 
+// Bulk-booking a batch of orders fires one of these push-backs per order
+// nearly simultaneously (fire-and-forget, no queueing), which easily blows
+// through Shopify's Admin API rate limit (429) — and until now, a single
+// throttled request meant that order's fulfillment was silently dropped
+// forever, with no retry. Retries a handful of times on 429/5xx/network
+// errors, honoring Shopify's own Retry-After header when present.
+const SHOPIFY_RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const shopifySleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const shopifyRequestWithRetry = async (requestFn, attempts = 4) => {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await requestFn();
+    } catch (err) {
+      const status = err.response?.status;
+      const isLastAttempt = attempt === attempts - 1;
+      if (!SHOPIFY_RETRYABLE_STATUS.has(status) && status !== undefined) throw err; // non-retryable (4xx validation etc.)
+      if (isLastAttempt) throw err;
+      const retryAfterSec = Number(err.response?.headers?.["retry-after"]);
+      const delayMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+        ? retryAfterSec * 1000
+        : 500 * 2 ** attempt; // 500ms, 1s, 2s fallback backoff
+      await shopifySleep(delayMs);
+    }
+  }
+};
+
 // Auto-triggered Shopify status/tracking push-back — wired into
 // newOrder.model.js's post-save/post-findOneAndUpdate hooks so it fires on
 // every status change regardless of which courier booked/updated the
@@ -1217,7 +1207,9 @@ const fulfillShopifyOrderHelper = async (order, notifyCustomer = true) => {
 
     let shopifyOrderData;
     try {
-      const orderRes = await axios.get(`${baseUrl}/orders/${shopifyOrderId}.json`, { ...authHeaders, timeout: 10000 });
+      const orderRes = await shopifyRequestWithRetry(() =>
+        axios.get(`${baseUrl}/orders/${shopifyOrderId}.json`, { ...authHeaders, timeout: 10000 })
+      );
       shopifyOrderData = orderRes.data?.order;
     } catch (err) {
       console.error(`❌ Error fetching Shopify order ${shopifyOrderId}:`, err.response?.data || err.message);
@@ -1225,7 +1217,18 @@ const fulfillShopifyOrderHelper = async (order, notifyCustomer = true) => {
     }
     if (!shopifyOrderData) return;
 
-    const existingFulfillment = shopifyOrderData.fulfillments?.[0];
+    // Shopify never removes a cancelled fulfillment from this array — it
+    // just sits there with status "cancelled" once the original courier
+    // attempt is cancelled (e.g. re-booking with a different courier after
+    // a failed pickup). Treating that stale entry as "a fulfillment already
+    // exists" meant a re-booked shipment's new AWB never got pushed at all:
+    // every later status change just tried (and failed) to post an event to
+    // the dead cancelled fulfillment, leaving the order permanently
+    // unfulfilled on Shopify. Only a live (non-cancelled) fulfillment counts
+    // as "existing" here.
+    const existingFulfillment = (shopifyOrderData.fulfillments || []).find(
+      (f) => f.status !== "cancelled"
+    );
 
     // --- First shipment scan: create the fulfillment ---
     if (!existingFulfillment) {
@@ -1242,7 +1245,9 @@ const fulfillShopifyOrderHelper = async (order, notifyCustomer = true) => {
 
       let fulfillmentOrderId;
       try {
-        const foRes = await axios.get(`${baseUrl}/orders/${shopifyOrderId}/fulfillment_orders.json`, { ...authHeaders, timeout: 10000 });
+        const foRes = await shopifyRequestWithRetry(() =>
+          axios.get(`${baseUrl}/orders/${shopifyOrderId}/fulfillment_orders.json`, { ...authHeaders, timeout: 10000 })
+        );
         const fulfillmentOrders = foRes.data?.fulfillment_orders || [];
         const openFulfillmentOrder = fulfillmentOrders.find((fo) => fo.status === "open") || fulfillmentOrders[0];
         fulfillmentOrderId = openFulfillmentOrder?.id;
@@ -1257,22 +1262,24 @@ const fulfillShopifyOrderHelper = async (order, notifyCustomer = true) => {
 
       let newFulfillmentId;
       try {
-        const fulfillRes = await axios.post(
-          `${baseUrl}/fulfillments.json`,
-          {
-            fulfillment: {
-              notify_customer: notifyCustomer,
-              tracking_info: {
-                number: order.awb_number,
-                company: order.provider || order.courierName || "Custom Carrier",
-                url: `https://api.delightcargo.in/track/${order.awb_number}`,
+        const fulfillRes = await shopifyRequestWithRetry(() =>
+          axios.post(
+            `${baseUrl}/fulfillments.json`,
+            {
+              fulfillment: {
+                notify_customer: notifyCustomer,
+                tracking_info: {
+                  number: order.awb_number,
+                  company: order.provider || order.courierName || "Custom Carrier",
+                  url: `https://api.delightcargo.in/track/${order.awb_number}`,
+                },
+                line_items_by_fulfillment_order: [
+                  { fulfillment_order_id: fulfillmentOrderId },
+                ],
               },
-              line_items_by_fulfillment_order: [
-                { fulfillment_order_id: fulfillmentOrderId },
-              ],
             },
-          },
-          authHeaders
+            authHeaders
+          )
         );
         newFulfillmentId = fulfillRes.data?.fulfillment?.id;
         console.log(`✅ Shopify order ${shopifyOrderId} fulfilled (${order.status}).`);
@@ -1288,10 +1295,12 @@ const fulfillShopifyOrderHelper = async (order, notifyCustomer = true) => {
       const initialEventStatus = shiproxxToShopifyFulfillmentEvent(order.status);
       if (newFulfillmentId && initialEventStatus) {
         try {
-          await axios.post(
-            `${baseUrl}/fulfillments/${newFulfillmentId}/events.json`,
-            { event: { status: initialEventStatus } },
-            authHeaders
+          await shopifyRequestWithRetry(() =>
+            axios.post(
+              `${baseUrl}/fulfillments/${newFulfillmentId}/events.json`,
+              { event: { status: initialEventStatus } },
+              authHeaders
+            )
           );
           console.log(`✅ Shopify fulfillment ${newFulfillmentId} event posted: ${order.status} → ${initialEventStatus}`);
         } catch (err) {
@@ -1304,7 +1313,9 @@ const fulfillShopifyOrderHelper = async (order, notifyCustomer = true) => {
     // --- Fulfillment already exists: cancel or post a status event ---
     if (order.status === "Cancelled") {
       try {
-        await axios.post(`${baseUrl}/fulfillments/${existingFulfillment.id}/cancel.json`, {}, authHeaders);
+        await shopifyRequestWithRetry(() =>
+          axios.post(`${baseUrl}/fulfillments/${existingFulfillment.id}/cancel.json`, {}, authHeaders)
+        );
         console.log(`✅ Shopify fulfillment ${existingFulfillment.id} cancelled.`);
       } catch (err) {
         console.error(`❌ Error cancelling Shopify fulfillment ${existingFulfillment.id}:`, err.response?.data || err.message);
@@ -1319,10 +1330,12 @@ const fulfillShopifyOrderHelper = async (order, notifyCustomer = true) => {
     }
 
     try {
-      await axios.post(
-        `${baseUrl}/fulfillments/${existingFulfillment.id}/events.json`,
-        { event: { status: eventStatus } },
-        authHeaders
+      await shopifyRequestWithRetry(() =>
+        axios.post(
+          `${baseUrl}/fulfillments/${existingFulfillment.id}/events.json`,
+          { event: { status: eventStatus } },
+          authHeaders
+        )
       );
       console.log(`✅ Shopify fulfillment ${existingFulfillment.id} event posted: ${order.status} → ${eventStatus}`);
     } catch (err) {
