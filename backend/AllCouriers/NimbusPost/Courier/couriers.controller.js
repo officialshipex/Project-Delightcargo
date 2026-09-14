@@ -17,7 +17,12 @@ const Services = require("../../../models/courierServiceSecond.model");
 const AllCourier = require("../../../models/AllCourierSchema");
 const CourierService = require("../../../models/CourierService.Schema");
 
-const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api.nimbuspost.com/v1';
+// api.nimbuspost.com now 307-redirects most endpoints to this host, and
+// that cross-host redirect drops the Authorization header (confirmed via
+// direct curl test) — causing "Missing required request parameters:
+// [Authorization]" even with a valid token. Call the real current host
+// directly instead of following the redirect.
+const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api-v2.nimbuspost.com/legacy/edge/api-v1/v1';
 const { getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken, nimbusAxios: axios } = require('../nimbusAuth');
 
 // ─── Courier Setup (Admin) ────────────────────────────────────────────────────
@@ -133,28 +138,51 @@ const fetchNimbusServiceability = async (payload) => {
 
     const cached = _serviceabilityCache.get(cacheKey);
     if (cached && Date.now() < cached.expiresAt) {
-        return cached.couriers;
+        // Awaiting here covers both a settled result AND a still-in-flight
+        // request (see below) — concurrent callers for the same route share
+        // one promise instead of each independently missing the cache.
+        return cached.promise;
     }
 
-    const headers = await getNimbusJsonHeaders();
-    const response = await axios.post(`${BASE_URL}/courier/serviceability`, {
-        origin: String(payload.origin),
-        destination: String(payload.destination),
-        payment_type: payload.payment_type,
-        order_amount: payload.order_amount,
-        weight: payload.weight,
-        length: payload.length,
-        breadth: payload.breadth,
-        height: payload.height,
-    }, { headers });
-// console.log("serviceabilty",response.data)
-    if (!response.data?.status || !Array.isArray(response.data.data)) {
-        throw new Error(response.data?.message || "NimbusPost serviceability check failed");
-    }
+    // Cache the in-flight PROMISE itself, not just the eventual result — one
+    // "Ship Now" click fires this for every enabled courier variant (24+)
+    // for the identical origin/destination/weight/payment. Caching only the
+    // resolved value still let every one of those concurrent calls race in
+    // before the first request finished, each missing the cache and firing
+    // its own duplicate POST — NimbusPost's serviceability endpoint can't
+    // handle that many simultaneous identical requests and starts rejecting
+    // them with a misleading "Missing required request parameters:
+    // [Authorization]" error even though the token/headers were fine.
+    const promise = (async () => {
+        const headers = await getNimbusJsonHeaders();
+        const response = await axios.post(`${BASE_URL}/courier/serviceability`, {
+            origin: String(payload.origin),
+            destination: String(payload.destination),
+            payment_type: payload.payment_type,
+            order_amount: payload.order_amount,
+            weight: payload.weight,
+            length: payload.length,
+            breadth: payload.breadth,
+            height: payload.height,
+        }, { headers });
+console.log("nimbus service",response.data)
+        if (!response.data?.status || !Array.isArray(response.data.data)) {
+            throw new Error(response.data?.message || "NimbusPost serviceability check failed");
+        }
 
-    const couriers = response.data.data;
-    _serviceabilityCache.set(cacheKey, { couriers, expiresAt: Date.now() + SERVICEABILITY_CACHE_TTL_MS });
-    return couriers;
+        return response.data.data;
+    })();
+
+    _serviceabilityCache.set(cacheKey, { promise, expiresAt: Date.now() + SERVICEABILITY_CACHE_TTL_MS });
+
+    try {
+        return await promise;
+    } catch (err) {
+        // Don't let a failed request poison the cache for the TTL window —
+        // the next caller should get a fresh attempt, not a cached rejection.
+        _serviceabilityCache.delete(cacheKey);
+        throw err;
+    }
 };
 
 // Real serviceability check — calls NimbusPost's /courier/serviceability

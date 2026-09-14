@@ -7,7 +7,8 @@
 
 const axios = require('axios');
 
-const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api.nimbuspost.com/v1';
+// api.nimbuspost.com now 307-redirects to this host — see couriers.controller.js.
+const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api-v2.nimbuspost.com/legacy/edge/api-v1/v1';
 
 let _cachedToken = null;
 let _tokenExpiry = null;

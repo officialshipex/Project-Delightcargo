@@ -8,7 +8,9 @@ const { getZone } = require("../../Rate/zoneManagementController");
 const estimatedDeliveryDate = require("../../models/EDDMap.model");
 const { assignPickupManifest } = require("../../Orders/scheduledPickup.controller");
 
-const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api.nimbuspost.com/v1';
+// api.nimbuspost.com now 307-redirects to this host — see
+// AllCouriers/NimbusPost/Courier/couriers.controller.js for details.
+const BASE_URL = process.env.NIMBUSPOST_URL || 'https://api-v2.nimbuspost.com/legacy/edge/api-v1/v1';
 const { getNimbusJsonHeaders, getNimbusGetHeaders, clearNimbusToken, nimbusAxios: axios } = require('../../AllCouriers/NimbusPost/nimbusAuth');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
