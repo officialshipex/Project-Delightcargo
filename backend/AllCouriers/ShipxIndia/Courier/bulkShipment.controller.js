@@ -41,6 +41,22 @@ const createShipmentFunctionShipexIndia = async (
     const user = await User.findById(currentOrder.userId);
     if (!user) return { status: 404, message: "User not found" };
 
+    // ShipexIndia recomputes applicable weight itself (higher of dead weight
+    // and volumetric weight, volumetric = L*W*H/5000) and rejects the whole
+    // order with a 400 if our declared value doesn't match theirs to the
+    // thousandth — recompute the exact same way here so what we send always
+    // matches what they'll calculate, instead of trusting whatever
+    // applicableWeight/calculatedWeight happen to be stored on the order
+    // (which can drift from this formula from stale data or rounding).
+    const shipexDeadWeight = Number(currentOrder.packageDetails?.deadWeight) || 0.5;
+    const shipexVolLength = Number(currentOrder.packageDetails?.volumetricWeight?.length) || 10;
+    const shipexVolWidth = Number(currentOrder.packageDetails?.volumetricWeight?.width) || 10;
+    const shipexVolHeight = Number(currentOrder.packageDetails?.volumetricWeight?.height) || 10;
+    const shipexCalculatedVolumetricWeight = Number(
+      ((shipexVolLength * shipexVolWidth * shipexVolHeight) / 5000).toFixed(3)
+    );
+    const shipexApplicableWeight = Math.max(shipexDeadWeight, shipexCalculatedVolumetricWeight);
+
     // Prepare Payload
     const shipexPayload = {
       shipmentId: Number(currentOrder.orderId),
@@ -70,13 +86,13 @@ const createShipmentFunctionShipexIndia = async (
         unitPrice: String(item.unitPrice || 0),
       })),
       packageDetails: {
-        deadWeight: Number(currentOrder.packageDetails?.deadWeight) || 0.5,
-        applicableWeight: Number(currentOrder.packageDetails?.applicableWeight) || 0.5,
+        deadWeight: shipexDeadWeight,
+        applicableWeight: shipexApplicableWeight,
         volumetricWeight: {
-          length: Number(currentOrder.packageDetails?.volumetricWeight?.length) || 10,
-          width: Number(currentOrder.packageDetails?.volumetricWeight?.width) || 10,
-          height: Number(currentOrder.packageDetails?.volumetricWeight?.height) || 10,
-          calculatedWeight: Number(currentOrder.packageDetails?.volumetricWeight?.calculatedWeight) || 0.5,
+          length: shipexVolLength,
+          width: shipexVolWidth,
+          height: shipexVolHeight,
+          calculatedWeight: shipexCalculatedVolumetricWeight,
         },
       },
       paymentDetails: {
