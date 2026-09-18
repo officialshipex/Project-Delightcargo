@@ -5,7 +5,8 @@ const { isAuthorized } = require("../middleware/auth.middleware");
 const {
   adminB2BOrders,
   userB2BOrders,
-  generatePickupController
+  generatePickupController,
+  cancelB2BOrder
 } = require("./controller/Orders/orders.controller");
 const zoneMatrix = require("./controller/ZoneMatrix/zoneController");
 const ratecard = require("./controller/RateCard/ratecard.controller");
@@ -50,6 +51,7 @@ router.get("/pickupManifests", isAuthorized, getPickupManifests);
 router.get("/pickupManifest/:manifestId", isAuthorized, getManifestOrders);
 router.get("/getb2buserorder", isAuthorized, userB2BOrders);
 router.post("/generatePickup", isAuthorized, generatePickupController)
+router.post("/cancelOrder/:id", isAuthorized, cancelB2BOrder)
 router.get("/zonematrix/getAll", isAuthorized, zoneMatrix.getAll);
 router.post("/zonematrix/addLocation", isAuthorized, zoneMatrix.addLocation);
 router.put(
