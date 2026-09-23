@@ -69,6 +69,11 @@ router.get(
   isAuthorized,
   zoneMatrix.lookupPincode
 );
+router.get(
+  "/zonematrix/search",
+  isAuthorized,
+  zoneMatrix.searchLocations
+);
 
 router.get("/ratecard/getMeta", isAuthorized, ratecard.getMeta);
 router.get("/ratecard/getRateCard", isAuthorized, ratecard.getRateCard);

@@ -1,5 +1,5 @@
 const ZoneMapping = require("../../models/zoneMatrix.model");
-const { findByPincode } = require("../../pincodeLoader");
+const { findByPincode, searchLocations } = require("../../pincodeLoader");
 const User =require("../../../models/User.model")
 
 /**
@@ -129,6 +129,25 @@ exports.removeZone = async (req, res) => {
   } catch (err) {
     console.error("removeZone error:", err);
     res.status(500).json({ message: "Failed to delete zone" });
+  }
+};
+
+/**
+ * SEARCH locations by city, state, or pincode — powers the Zone Matrix
+ * add-location suggestion dropdown (one box instead of separate
+ * pincode-only lookup).
+ */
+exports.searchLocations = async (req, res) => {
+  try {
+    const admin = await checkAdminAccess(req, res);
+    if (!admin) return;
+    const { q } = req.query;
+
+    const results = await searchLocations(q);
+    res.json({ results });
+  } catch (err) {
+    console.error("searchLocations error:", err);
+    res.status(500).json({ results: [] });
   }
 };
 
