@@ -58,7 +58,7 @@ const getNimbusToken = async () => {
 
     _loginPromise = (async () => {
         const { email, password } = await getNimbusCredentials();
-
+// console.log("email",email,"password",password)
         // Temporary diagnostic — this cache is in-memory only (unlike BigShip's
         // DB-backed one), so it's wiped on every server/nodemon restart. Timing
         // this separately from the actual shipment call shows whether a slow

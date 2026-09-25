@@ -24,11 +24,21 @@ const {
 const KNOWN_SHIPROCKET_CARGO_STATUS_MAP = {
   "pickup scheduled": "Ready To Ship",
   "created": "Ready To Ship",
+  "manifested": "Ready To Ship",
+  "not picked": "Not Picked",
+  "not picked up": "Not Picked",
+  "shipment not received from client": "Not Picked",
+  "shipper unavailable": "Not Picked",
   "picked up": "In-transit",
   "in transit": "In-transit",
   "reached at destination": "In-transit",
   "out for delivery": "Out For Delivery",
   "delivered": "Delivered",
+  "cancelled": "Cancelled",
+  "canceled": "Cancelled",
+  "rto": "RTO",
+  "rto delivered": "RTO Delivered",
+  "rto in-transit": "RTO In-transit",
 };
 
 const mapShiprocketCargoStatus = (rawStatus) => {
@@ -52,6 +62,15 @@ const mapShiprocketCargoStatus = (rawStatus) => {
   if (normalized.includes("damage")) return "Damaged";
   if (normalized.includes("deliver")) return "Delivered";
   if (normalized.includes("transit")) return "In-transit";
+  if (
+    normalized.includes("not picked") ||
+    normalized.includes("not_picked") ||
+    normalized.includes("unavailable") ||
+    normalized.includes("not received")
+  ) {
+    return "Not Picked";
+  }
+  if (normalized.includes("archived")) return "Not Picked";
 
   return null;
 };
@@ -64,7 +83,30 @@ const refreshShiprocketCargoTracking = async (order) => {
   const data = await trackShiprocketCargoShipmentInternal(order.awb_number);
   if (!data) return;
 
-  const mappedStatus = mapShiprocketCargoStatus(data.status || data.status_dp);
+  const historyList = Array.isArray(data.status_history) ? data.status_history : [];
+  const latestHistory = historyList.length > 0 ? historyList[historyList.length - 1] : null;
+
+  // Gather status candidates in order of specificity:
+  // 1. latestHistory.status_code (e.g. 'Not Picked')
+  // 2. latestHistory.status (e.g. 'Pickup Scheduled')
+  // 3. latestHistory.reason / remarks (e.g. 'Shipment not received from client')
+  // 4. data.status (e.g. 'Archived', 'Delivered', 'In Transit')
+  // 5. data.status_dp
+  const candidates = [
+    latestHistory?.status_code,
+    latestHistory?.status,
+    latestHistory?.reason,
+    latestHistory?.remarks,
+    data.status,
+    data.status_dp,
+  ];
+
+  let mappedStatus = null;
+  for (const cand of candidates) {
+    if (!cand) continue;
+    mappedStatus = mapShiprocketCargoStatus(cand);
+    if (mappedStatus) break;
+  }
 
   if (!mappedStatus) {
     console.warn(
@@ -73,19 +115,37 @@ const refreshShiprocketCargoTracking = async (order) => {
     return;
   }
 
+  const instructions =
+    latestHistory?.remarks ||
+    latestHistory?.reason ||
+    data.status_dp ||
+    data.status ||
+    "Status updated";
+
+  const location =
+    latestHistory?.location ||
+    data.from_city ||
+    order.pickupAddress?.city ||
+    "N/A";
+
+  const statusDateTime = latestHistory?.timestamp
+    ? new Date(`${latestHistory.timestamp}Z`)
+    : new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+
   const update = {};
   if (mappedStatus !== order.status) {
     update.$set = { status: mappedStatus };
     update.$push = {
       tracking: {
         status: mappedStatus,
-        Instructions: data.status_dp || data.status || "Status updated",
-        StatusDateTime: new Date(Date.now() + 5.5 * 60 * 60 * 1000),
+        Instructions: instructions,
+        StatusLocation: location,
+        StatusDateTime: statusDateTime,
       },
     };
   }
 
-  if (data.edd_date) {
+  if (data.edd_date && data.edd_date !== "Estimated Delivery Date not found") {
     update.$set = { ...(update.$set || {}), estimatedDeliveryDate: data.edd_date };
   }
 
@@ -125,21 +185,32 @@ const KNOWN_DELHIVERY_B2B_STATUS_MAP = {
 
 const mapDelhiveryB2BStatus = (rawStatus) => {
   if (!rawStatus) return null;
-  return KNOWN_DELHIVERY_B2B_STATUS_MAP[String(rawStatus).trim().toUpperCase()] || null;
+  const upper = String(rawStatus).trim().toUpperCase();
+  const normalized = upper.replace(/\s+/g, "_");
+
+  if (KNOWN_DELHIVERY_B2B_STATUS_MAP[normalized]) {
+    return KNOWN_DELHIVERY_B2B_STATUS_MAP[normalized];
+  }
+  if (KNOWN_DELHIVERY_B2B_STATUS_MAP[upper]) {
+    return KNOWN_DELHIVERY_B2B_STATUS_MAP[upper];
+  }
+
+  if (normalized.includes("NOT_PICKED") || normalized.includes("UNPICKED")) return "Not Picked";
+  if (normalized.includes("CANCEL")) return "Cancelled";
+  if (normalized.includes("DELIVER")) return "Delivered";
+  if (normalized.includes("TRANSIT") || normalized.includes("ORIGIN") || normalized.includes("DESTINATION")) return "In-transit";
+
+  return null;
 };
 
 // Fetches the latest status for one direct-Delhivery B2B order (booked with
 // our own Delhivery LTL credentials, not through an aggregator) and updates
 // it if changed. Used by the hourly cron below.
-//
-// Confirmed live response shape: { success, request_id, data: { lrnum,
-// status, mcount, wbns: [{ status, location, wbn, scan_remark,
-// scan_timestamp, manifested_date, ... }] } }. wbns[0] is the master
-// waybill (all_wbns isn't passed, so only the master comes back).
 const refreshDelhiveryB2BTracking = async (order) => {
-  if (!order.lrn) return;
+  const lrnToTrack = order.lrn || order.awb_number;
+  if (!lrnToTrack) return;
 
-  const data = await trackDelhiveryB2BShipmentInternal(order.lrn, order.courierServiceName);
+  const data = await trackDelhiveryB2BShipmentInternal(lrnToTrack, order.courierServiceName);
   if (!data) return;
 
   const lrData = data?.data;
@@ -151,13 +222,6 @@ const refreshDelhiveryB2BTracking = async (order) => {
   const masterWbn = Array.isArray(lrData.wbns) ? lrData.wbns[0] : null;
   const rawStatus = lrData.status || masterWbn?.status || null;
 
-  // Delhivery's top-level `status` here doesn't have a CANCELLED value at
-  // all — confirmed live: a shipment cancelled via DELETE /lrn/cancel
-  // still reports status "MANIFESTED" here, with the cancellation visible
-  // only as free text in the master waybill's scan_remark ("Seller
-  // cancelled the order"). This is a heuristic (remark wording isn't a
-  // documented API contract), not a structured signal, so it's checked
-  // separately rather than folded into mapDelhiveryB2BStatus's table.
   const remark = masterWbn?.scan_remark || "";
   const isCancelledRemark = /cancel/i.test(remark);
 
@@ -165,7 +229,7 @@ const refreshDelhiveryB2BTracking = async (order) => {
 
   if (!mappedStatus) {
     console.warn(
-      `[Delhivery B2B Tracking] Order ${order.orderId} (LRN ${order.lrn}): unrecognized/unmapped status "${rawStatus}" — not updating status.`
+      `[Delhivery B2B Tracking] Order ${order.orderId} (LRN ${lrnToTrack}): unrecognized/unmapped status "${rawStatus}" — not updating status.`
     );
     return;
   }
@@ -173,24 +237,11 @@ const refreshDelhiveryB2BTracking = async (order) => {
   if (mappedStatus === order.status) return;
 
   if (mappedStatus === "Cancelled" && order.walletDeducted && !order.walletRefunded) {
-    // This cron only syncs display status, unlike cancelB2BOrder/the
-    // webhook/the async manifest fallback, which all refund off a
-    // *structured* status field. Auto-refunding off a free-text remark
-    // match felt like the wrong place to add that financial side effect —
-    // flagging for manual reconciliation instead of silently crediting the
-    // wallet here.
     console.warn(
-      `[Delhivery B2B Tracking] Order ${order.orderId} (LRN ${order.lrn}) appears cancelled on Delhivery's side (remark: "${remark}") but wallet was never refunded — needs manual reconciliation.`
+      `[Delhivery B2B Tracking] Order ${order.orderId} (LRN ${lrnToTrack}) appears cancelled on Delhivery's side (remark: "${remark}") but wallet was never refunded — needs manual reconciliation.`
     );
   }
 
-  // Delhivery's scan_timestamp/manifested_date come back as naive
-  // "YYYY-MM-DDTHH:mm:ss" with no timezone marker — confirmed IST (cross-
-  // checked manifested_date against when that manifest job actually
-  // completed earlier this session). Appending "Z" forces those exact
-  // digits to be read as the UTC components of the stored Date, which is
-  // exactly what this codebase's StatusDateTime convention wants (see
-  // below) — regardless of what timezone this server process itself runs in.
   const scanDate = masterWbn?.scan_timestamp ? new Date(`${masterWbn.scan_timestamp}Z`) : null;
 
   await Order.findByIdAndUpdate(order._id, {
@@ -198,10 +249,7 @@ const refreshDelhiveryB2BTracking = async (order) => {
     $push: {
       tracking: {
         status: mappedStatus,
-        Instructions: isCancelledRemark ? remark : (rawStatus ? `Delhivery status: ${rawStatus}` : "Status updated"),
-        // Real per-waybill location, confirmed live (e.g. "Contai_Fatepur_DPP
-        // (West Bengal)") — falls back to pickup city only if Delhivery
-        // didn't return one for this scan.
+        Instructions: isCancelledRemark ? remark : (remark ? remark : (rawStatus ? `Delhivery status: ${rawStatus}` : "Status updated")),
         StatusLocation: masterWbn?.location || order.pickupAddress?.city || "N/A",
         StatusDateTime:
           scanDate && !isNaN(scanDate) ? scanDate : new Date(Date.now() + 5.5 * 60 * 60 * 1000),
@@ -219,6 +267,8 @@ const refreshDelhiveryB2BTracking = async (order) => {
 // tracking integrations now; other providers don't have one yet.
 const refreshB2BOrderTracking = async (order) => {
   const partnerName = order.partner?.toLowerCase() || "";
+  const providerName = order.provider?.toLowerCase() || "";
+  const serviceName = order.courierServiceName?.toLowerCase() || "";
 
   if (partnerName === "shiprocket") {
     return refreshShiprocketCargoTracking(order);
@@ -231,7 +281,10 @@ const refreshB2BOrderTracking = async (order) => {
   // Direct Delhivery booking — no aggregator partner, or partner explicitly
   // "Delhivery" (mirrors the same partner-before-provider precedence used
   // for cancellation in orders.controller.js's cancelB2BOrder).
-  if ((!order.partner || partnerName === "delhivery") && order.provider === "Delhivery") {
+  if (
+    (!order.partner || partnerName === "delhivery") &&
+    (providerName === "delhivery" || serviceName.includes("delhivery"))
+  ) {
     return refreshDelhiveryB2BTracking(order);
   }
 
@@ -239,36 +292,30 @@ const refreshB2BOrderTracking = async (order) => {
 };
 
 // ─── Hourly cron: refreshes every in-flight B2B order's tracking status ──────
-// Shiprocket Cargo has no webhook/callback, so polling is the only way to
-// learn about status changes. Mirrors cron/ndrCron.js's pattern (node-cron,
-// NODE_ENV=production gated, Asia/Kolkata timezone).
-
-// "Not Picked" included so an order Delhivery couldn't pick up still gets
-// re-checked on the next run (it can move forward once picked up on retry)
-// instead of getting permanently orphaned by this same query.
 const IN_FLIGHT_STATUSES = ["Ready To Ship", "Not Picked", "In-transit", "Out For Delivery", "RTO", "RTO In-transit"];
-// 650ms stays under Delhivery's documented B2B rate limit (500 requests /
-// 5 minutes ≈ 1 every 600ms) as well as comfortably inside Shiprocket's.
 const DELAY_BETWEEN_CALLS_MS = 650;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const refreshAllB2BShiprocketTracking = async () => {
   try {
-    // Name kept for backward compatibility (already referenced elsewhere by
-    // this name) — covers every provider with a live B2B tracking
-    // integration (Shiprocket, BigShip, direct Delhivery), not just
-    // Shiprocket, since refreshB2BOrderTracking above dispatches by
-    // partner/provider regardless of which one queried this order in.
     const orders = await Order.find({
       orderType: "B2B",
       status: { $in: IN_FLIGHT_STATUSES },
       $or: [
         { partner: { $in: ["Shiprocket", "BigShip"] }, awb_number: { $exists: true, $ne: null } },
-        // Direct Delhivery: no partner (or partner explicitly "Delhivery")
-        // and provider "Delhivery" — mirrors cancelB2BOrder's precedence.
-        // Delhivery's B2B API is queried by LR number, not AWB.
-        { provider: "Delhivery", partner: { $in: [null, "Delhivery"] }, lrn: { $exists: true, $ne: null } },
+        // Direct Delhivery: provider or courierServiceName Delhivery
+        {
+          $or: [
+            { provider: { $regex: /^delhivery$/i } },
+            { courierServiceName: { $regex: /delhivery/i } }
+          ],
+          partner: { $in: [null, "", "Delhivery", "delhivery"] },
+          $or: [
+            { lrn: { $exists: true, $ne: null, $ne: "" } },
+            { awb_number: { $exists: true, $ne: null, $ne: "" } }
+          ]
+        },
       ],
     });
 
@@ -306,6 +353,8 @@ if (process.env.NODE_ENV === "production") {
 module.exports = {
   mapShiprocketCargoStatus,
   refreshShiprocketCargoTracking,
+  mapDelhiveryB2BStatus,
+  refreshDelhiveryB2BTracking,
   refreshB2BOrderTracking,
   refreshAllB2BShiprocketTracking,
 };

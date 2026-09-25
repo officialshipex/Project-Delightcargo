@@ -197,8 +197,9 @@ const getServiceablePincodesData = async (service, payload) => {
     const courierName = typeof service === "object" ? service.courierName : service;
 
     try {
+        // console.log("nimbus service payload",payload)
         const couriers = await fetchNimbusServiceability(payload);
-
+// console.log("couriers",couriers)
         const match = couriers.find((c) => {
             if (courierId && String(c.id) === String(courierId)) return true;
             if (courierName && c.name && c.name.toLowerCase() === String(courierName).toLowerCase()) return true;
