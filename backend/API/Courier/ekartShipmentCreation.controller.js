@@ -53,6 +53,18 @@ const createEkartShipment = async ({
       };
     }
 
+    // 2️⃣ Zone check
+    const zone = await getZone(
+      currentOrder.pickupAddress.pinCode,
+      currentOrder.receiverAddress.pinCode,
+    );
+
+    if (!zone) {
+      await session.abortTransaction();
+      session.endSession();
+      return { success: false, message: "Pincode not serviceable" };
+    }
+
     const eddData = await estimatedDeliveryDate.findOne({
       courier: "Ekart",
       serviceName: courierServiceName.trim(),
@@ -73,18 +85,6 @@ const createEkartShipment = async ({
         estimateDate = new Date();
         estimateDate.setDate(estimateDate.getDate() + deliveryDays);
       }
-    }
-
-    // 2️⃣ Zone check
-    const zone = await getZone(
-      currentOrder.pickupAddress.pinCode,
-      currentOrder.receiverAddress.pinCode,
-    );
-
-    if (!zone) {
-      await session.abortTransaction();
-      session.endSession();
-      return { success: false, message: "Pincode not serviceable" };
     }
 
     // 3️⃣ Wallet check

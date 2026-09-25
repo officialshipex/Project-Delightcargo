@@ -459,58 +459,56 @@ const trackSingleOrder = async (order) => {
           order.reattempt = false;
         }
 
-        // Detect Delivery Attempted
-        // const secondLastTracking =
-        //   Array.isArray(order.tracking) && order.tracking.length >= 2
-        //     ? order.tracking[order.tracking.length - 2]
-        //     : null;
+        if (
+          normalizedData.Instructions === "DeliveryAttempted" ||
+          normalizedData.Instructions === "DeliveryFailed" ||
+          normalizedData.Instructions === "Undelivered"
+        ) {
+          if (order.ndrStatus !== "Action_Requested") {
+            order.status = "Undelivered";
+            order.ndrStatus = "Undelivered";
 
-        // normalizedData.Instructions === "DeliveryAttempted"
-        // wasPreviousDeliveryAttempted
-        // )
-        // if (order.ndrStatus !== "Action_Requested") {
-        //   order.status = "Undelivered";
-        //   order.ndrStatus = "Undelivered";
+            order.ndrReason = {
+              date: normalizedData.StatusDateTime,
+              reason: normalizedData.StrRemarks || "Delivery Attempted",
+            };
 
-        //   order.ndrReason = {
-        //     date: normalizedData.StatusDateTime,
-        //     reason: normalizedData.StrRemarks,
-        //   };
+            const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
+            const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
 
-        //   const lastNdr = order.ndrHistory[order.ndrHistory.length - 1];
-        //   const lastAction = lastNdr?.actions?.[lastNdr.actions.length - 1];
+            const lastEntryDate = lastAction?.date
+              ? new Date(lastAction.date).getTime()
+              : null;
 
-        //   const lastEntryDate = lastAction?.date
-        //     ? new Date(lastAction.date).getTime()
-        //     : null;
+            const currentStatusDate = new Date(
+              normalizedData.StatusDateTime
+            ).getTime();
 
-        //   const currentStatusDate = new Date(
-        //     normalizedData.StatusDateTime
-        //   ).getTime();
+            if (
+              (order.ndrHistory.length === 0 ||
+                !lastEntryDate ||
+                currentStatusDate > lastEntryDate) &&
+              order.ndrHistory.length <= 2
+            ) {
+              order.reattempt = true;
+              const attemptCount = order.ndrHistory?.length + 1 || 1;
 
-        //   if (
-        //     (order.ndrHistory.length === 0 ||
-        //       lastEntryDate !== currentStatusDate) &&
-        //     order.ndrHistory.length <= 2
-        //   ) {
-        //     order.reattempt = true;
-        //     const attemptCount = order.ndrHistory?.length + 1 || 0;
+              const newHistoryEntry = {
+                actions: [
+                  {
+                    action: `NDR ${attemptCount} Raised`,
+                    actionBy: order.courierServiceName,
+                    remark: normalizedData.StrRemarks || "Delivery Attempted",
+                    source: order.provider,
+                    date: normalizedData.StatusDateTime,
+                  },
+                ],
+              };
 
-        //     const newHistoryEntry = {
-        //       actions: [
-        //         {
-        //           action: `NDR ${attemptCount} Raised`,
-        //           actionBy: order.courierServiceName,
-        //           remark: normalizedData.StrRemarks,
-        //           source: order.provider,
-        //           date: normalizedData.StatusDateTime,
-        //         },
-        //       ],
-        //     };
-
-        //     order.ndrHistory.push(newHistoryEntry);
-        //   }
-        // }
+              order.ndrHistory.push(newHistoryEntry);
+            }
+          }
+        }
       } else {
         // RTO flow
         if (
