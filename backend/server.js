@@ -1,4 +1,4 @@
-// server.js
+// server.js - B2B Rate Engine Updated
 require("dotenv").config();
 const express = require("express");
 const passport = require("passport");

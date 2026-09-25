@@ -52,30 +52,38 @@ const calculateOverhead = (overhead, base, weight) => {
   if (!overhead || !overhead.type) return 0;
 
   let value = 0;
+  const numBase = Number(base || 0);
+  const numWeight = Number(weight || 0);
+  const numValue = Number(overhead.value || 0);
 
   switch (overhead.type) {
     case "percentage":
-      value = (base * overhead.value) / 100;
+      value = (numBase * numValue) / 100;
       break;
 
     case "perKg":
-      value = weight * overhead.value;
+      value = numWeight * numValue;
       break;
 
     case "flat":
-      value = overhead.value;
+      value = numValue;
       break;
 
     case "formula":
-      value = eval(overhead.value); // controlled formulas only
+      try {
+        value = Number(eval(overhead.value)) || 0;
+      } catch (e) {
+        value = 0;
+      }
       break;
   }
 
-  if (overhead.min && value < overhead.min) {
-    value = overhead.min;
+  const numMin = Number(overhead.min || 0);
+  if (numMin > 0 && value < numMin) {
+    value = numMin;
   }
 
-  return Number(value.toFixed(2));
+  return Number((Number(value) || 0).toFixed(2));
 };
 
 const resolveDivisor = (divisorConfig) => {
@@ -101,14 +109,17 @@ const resolveDivisor = (divisorConfig) => {
 const calculateCodCharge = ({ codConfig, orderValue }) => {
   if (!codConfig) return 0;
 
-  const percentValue = (orderValue * Number(codConfig.value || 0)) / 100;
+  const numVal = Number(codConfig.value || 0);
+  const numOrderVal = Number(orderValue || 0);
+  const percentValue = (numOrderVal * numVal) / 100;
   let codCharge = percentValue;
 
-  if (codConfig.min && codCharge < codConfig.min) {
-    codCharge = codConfig.min;
+  const numMin = Number(codConfig.min || 0);
+  if (numMin > 0 && codCharge < numMin) {
+    codCharge = numMin;
   }
 
-  return Number(codCharge.toFixed(2));
+  return Number((Number(codCharge) || 0).toFixed(2));
 };
 
 const calculateB2BCargoRate = ({
@@ -127,7 +138,7 @@ const calculateB2BCargoRate = ({
   // value once it has live serviceability data for the actual route.
   isODA = true,
 }) => {
-  const divisor = Number(rateCard.overheadCharges?.divisor.value);
+  const divisor = Number(rateCard.overheadCharges?.divisor?.value) || 5000;
   const actualChargeableWeight = calculateChargeableWeight(packages, divisor);
   const billableWeight = Math.max(actualChargeableWeight, minWeight);
 
@@ -138,7 +149,7 @@ const calculateB2BCargoRate = ({
   );
   if (!rateCell) return null;
 
-  const ratePerKg = rateCell.price;
+  const ratePerKg = Number(rateCell.price || 0);
   const freight = billableWeight * ratePerKg;
 
   const overheads = rateCard.overheadCharges || {};
@@ -198,11 +209,11 @@ const calculateB2BCargoRate = ({
     codCharge;
 
   // 🔒 Minimum Freight
-  if (overheads.minimumFreight && subtotal < overheads.minimumFreight.value) {
-    subtotal = overheads.minimumFreight.value;
+  if (overheads.minimumFreight && overheads.minimumFreight.value && subtotal < Number(overheads.minimumFreight.value)) {
+    subtotal = Number(overheads.minimumFreight.value);
   }
 
-  const gstRate = overheads.gst?.value || 18;
+  const gstRate = Number(overheads.gst?.value) || 18;
   const gst = (subtotal * gstRate) / 100;
 
   return {
